@@ -1,0 +1,102 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <defs>
+    <radialGradient id="bgGrad" cx="50%" cy="40%" r="65%" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#1e1030"/>
+      <stop offset="100%" stop-color="#0a0612"/>
+    </radialGradient>
+    <radialGradient id="glowPurple" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#c678ff" stop-opacity="0.9"/>
+      <stop offset="100%" stop-color="#8833cc" stop-opacity="0.0"/>
+    </radialGradient>
+    <radialGradient id="glowCyan" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#56d6ff" stop-opacity="0.8"/>
+      <stop offset="100%" stop-color="#0088bb" stop-opacity="0.0"/>
+    </radialGradient>
+    <linearGradient id="yGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#e0a0ff"/>
+      <stop offset="50%" stop-color="#c678ff"/>
+      <stop offset="100%" stop-color="#8833cc"/>
+    </linearGradient>
+    <linearGradient id="promptGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#56d6ff"/>
+      <stop offset="100%" stop-color="#00aadd"/>
+    </linearGradient>
+    <clipPath id="iconClip">
+      <rect width="1024" height="1024" rx="220" ry="220"/>
+    </clipPath>
+    <filter id="yGlow" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="18" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    <filter id="outerGlow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="40" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    <filter id="promptGlow" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="10" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    <pattern id="scanlines" width="4" height="8" patternUnits="userSpaceOnUse">
+      <rect width="4" height="1" y="0" fill="rgba(255,255,255,0.015)"/>
+    </pattern>
+  </defs>
+  <g clip-path="url(#iconClip)">
+    <rect width="1024" height="1024" fill="url(#bgGrad)"/>
+    <rect width="1024" height="1024" fill="url(#scanlines)"/>
+    <ellipse cx="512" cy="470" rx="320" ry="280" fill="url(#glowPurple)" opacity="0.45" filter="url(#outerGlow)"/>
+    <ellipse cx="512" cy="820" rx="240" ry="120" fill="url(#glowCyan)" opacity="0.3" filter="url(#outerGlow)"/>
+    <g stroke="#c678ff" stroke-width="0.8" opacity="0.08">
+      <line x1="0" y1="200" x2="1024" y2="200"/>
+      <line x1="0" y1="400" x2="1024" y2="400"/>
+      <line x1="0" y1="600" x2="1024" y2="600"/>
+      <line x1="0" y1="800" x2="1024" y2="800"/>
+      <line x1="200" y1="0" x2="200" y2="1024"/>
+      <line x1="400" y1="0" x2="400" y2="1024"/>
+      <line x1="600" y1="0" x2="600" y2="1024"/>
+      <line x1="800" y1="0" x2="800" y2="1024"/>
+    </g>
+    <circle cx="200" cy="200" r="4" fill="#c678ff" opacity="0.3"/>
+    <circle cx="824" cy="200" r="4" fill="#c678ff" opacity="0.3"/>
+    <circle cx="200" cy="824" r="4" fill="#56d6ff" opacity="0.25"/>
+    <circle cx="824" cy="824" r="4" fill="#56d6ff" opacity="0.25"/>
+    <g filter="url(#yGlow)">
+      <path d="M 340 175 L 512 435 L 684 175 L 740 175 L 540 470 L 540 745 L 484 745 L 484 470 L 284 175 Z"
+            fill="#c678ff" opacity="0.25" transform="translate(8,10)"/>
+      <path d="M 340 175 L 512 435 L 684 175 L 740 175 L 540 470 L 540 745 L 484 745 L 484 470 L 284 175 Z"
+            fill="url(#yGrad)" opacity="0.97"/>
+      <path d="M 340 175 L 395 175 L 512 360 L 629 175 L 684 175 L 540 420 L 540 435 L 512 435 L 484 435 L 484 420 Z"
+            fill="white" opacity="0.12"/>
+    </g>
+    <g filter="url(#promptGlow)" opacity="0.92">
+      <polyline points="355,820 415,862 355,904"
+                stroke="url(#promptGrad)" stroke-width="22"
+                stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+      <line x1="440" y1="903" x2="570" y2="903"
+            stroke="#56d6ff" stroke-width="18" stroke-linecap="round" opacity="0.95"/>
+      <rect x="580" y="862" width="18" height="42" rx="3" fill="#56d6ff" opacity="0.85"/>
+    </g>
+    <circle cx="160" cy="480" r="3" fill="#c678ff" opacity="0.4"/>
+    <circle cx="145" cy="510" r="2" fill="#c678ff" opacity="0.25"/>
+    <circle cx="864" cy="480" r="3" fill="#56d6ff" opacity="0.4"/>
+    <circle cx="880" cy="510" r="2" fill="#56d6ff" opacity="0.25"/>
+    <circle cx="300" cy="720" r="2.5" fill="#c678ff" opacity="0.3"/>
+    <circle cx="720" cy="700" r="2.5" fill="#56d6ff" opacity="0.3"/>
+    <circle cx="420" cy="160" r="2" fill="#e0a0ff" opacity="0.35"/>
+    <circle cx="600" cy="155" r="2" fill="#e0a0ff" opacity="0.35"/>
+    <rect x="0" y="960" width="1024" height="64" fill="url(#glowCyan)" opacity="0.1"/>
+    <rect x="3" y="3" width="1018" height="1018" rx="218" ry="218"
+          fill="none" stroke="#c678ff" stroke-width="3" opacity="0.25"/>
+    <rect x="14" y="14" width="996" height="996" rx="210" ry="210"
+          fill="none" stroke="#c678ff" stroke-width="1" opacity="0.12"/>
+  </g>
+</svg>
