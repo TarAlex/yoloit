@@ -374,7 +374,7 @@ class _TerminalWidgetState extends State<_TerminalWidget> {
   void initState() {
     super.initState();
     _bindTerminal();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _focusNode.requestFocus());
+    _requestFocusAfterFrame();
   }
 
   @override
@@ -383,8 +383,16 @@ class _TerminalWidgetState extends State<_TerminalWidget> {
     if (old.session.id != widget.session.id) {
       old.session.terminal.onOutput = null;
       _bindTerminal();
-      WidgetsBinding.instance.addPostFrameCallback((_) => _focusNode.requestFocus());
+      _requestFocusAfterFrame();
     }
+  }
+
+  void _requestFocusAfterFrame() {
+    // endOfFrame is more reliable than addPostFrameCallback on macOS desktop
+    // because it waits for the full render pipeline to settle.
+    WidgetsBinding.instance.endOfFrame.then((_) {
+      if (mounted) _focusNode.requestFocus();
+    });
   }
 
   void _bindTerminal() {
@@ -403,8 +411,13 @@ class _TerminalWidgetState extends State<_TerminalWidget> {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: _focusNode.requestFocus,
+    // Listener fires on pointer-down (before gesture recognisers), giving
+    // the most reliable focus request on macOS desktop.
+    return Listener(
+      behavior: HitTestBehavior.opaque,
+      onPointerDown: (_) {
+        if (!_focusNode.hasFocus) _focusNode.requestFocus();
+      },
       child: TerminalView(
         widget.session.terminal,
         controller: _controller,
