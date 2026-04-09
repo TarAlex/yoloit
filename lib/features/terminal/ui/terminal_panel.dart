@@ -112,7 +112,7 @@ class _TerminalView extends StatelessWidget {
           if (activeSession != null) _SessionInfoBar(session: activeSession),
           Expanded(
             child: activeSession != null
-                ? _TerminalWidget(session: activeSession)
+                ? _TerminalWidget(key: ValueKey(activeSession.id), session: activeSession)
                 : const SizedBox(),
           ),
           _TokenUsageBar(session: activeSession),
@@ -359,7 +359,7 @@ class _SessionInfoBar extends StatelessWidget {
 }
 
 class _TerminalWidget extends StatefulWidget {
-  const _TerminalWidget({required this.session});
+  const _TerminalWidget({super.key, required this.session});
   final AgentSession session;
 
   @override
@@ -373,12 +373,24 @@ class _TerminalWidgetState extends State<_TerminalWidget> {
   @override
   void initState() {
     super.initState();
-    // Route terminal keyboard output → PTY stdin
+    _bindTerminal();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _focusNode.requestFocus());
+  }
+
+  @override
+  void didUpdateWidget(_TerminalWidget old) {
+    super.didUpdateWidget(old);
+    if (old.session.id != widget.session.id) {
+      old.session.terminal.onOutput = null;
+      _bindTerminal();
+      WidgetsBinding.instance.addPostFrameCallback((_) => _focusNode.requestFocus());
+    }
+  }
+
+  void _bindTerminal() {
     widget.session.terminal.onOutput = (data) {
       PtyService.instance.write(widget.session.id, data);
     };
-    // Request focus so keyboard input works immediately
-    WidgetsBinding.instance.addPostFrameCallback((_) => _focusNode.requestFocus());
   }
 
   @override
