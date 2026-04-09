@@ -52,6 +52,11 @@ void main() {
       expect(AgentType.claude.command, 'claude');
     });
 
+    test('AgentType launchCommand includes --allow-all for copilot', () {
+      expect(AgentType.copilot.launchCommand, 'gh copilot --allow-all');
+      expect(AgentType.claude.launchCommand, 'claude');
+    });
+
     test('AgentType has icon labels', () {
       for (final type in AgentType.values) {
         expect(type.iconLabel, isNotEmpty);
