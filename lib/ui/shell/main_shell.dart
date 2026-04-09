@@ -2,8 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:window_manager/window_manager.dart';
 import 'package:yoloit/core/hotkeys/hotkeys.dart';
+import 'package:yoloit/core/theme/app_color_scheme.dart';
 import 'package:yoloit/core/theme/app_colors.dart';
 import 'package:yoloit/features/review/ui/review_panel.dart';
+import 'package:yoloit/features/search/ui/file_search_overlay.dart';
 import 'package:yoloit/features/settings/ui/settings_page.dart';
 import 'package:yoloit/features/terminal/bloc/terminal_cubit.dart';
 import 'package:yoloit/features/terminal/bloc/terminal_state.dart';
@@ -42,8 +44,17 @@ class _MainShellState extends State<MainShell> with WindowListener {
   void _initCubits() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       context.read<WorkspaceCubit>().load();
-      context.read<TerminalCubit>().initialize();
+      context.read<TerminalCubit>().initialize(); // async — fire and forget is fine
     });
+  }
+
+  void _openFileSearch() {
+    showFileSearch(
+      context,
+      onFileOpened: () {
+        setState(() => _reviewVisible = true);
+      },
+    );
   }
 
   void _previousTab() {
@@ -75,6 +86,7 @@ class _MainShellState extends State<MainShell> with WindowListener {
 
   @override
   Widget build(BuildContext context) {
+    final colors = context.appColors;
     return Shortcuts(
       shortcuts: yoloitShortcuts,
       child: Actions(
@@ -95,6 +107,7 @@ class _MainShellState extends State<MainShell> with WindowListener {
           ToggleReviewPanelIntent: CallbackAction<ToggleReviewPanelIntent>(
             onInvoke: (_) {
               setState(() => _reviewVisible = !_reviewVisible);
+              return null;
             },
           ),
           FocusTerminalIntent: CallbackAction<FocusTerminalIntent>(
@@ -103,11 +116,14 @@ class _MainShellState extends State<MainShell> with WindowListener {
           OpenSettingsIntent: CallbackAction<OpenSettingsIntent>(
             onInvoke: (_) => SettingsPage.show(context),
           ),
+          OpenFileSearchIntent: CallbackAction<OpenFileSearchIntent>(
+            onInvoke: (_) => _openFileSearch(),
+          ),
         },
         child: Focus(
           autofocus: true,
           child: Scaffold(
-            backgroundColor: AppColors.background,
+            backgroundColor: colors.background,
             body: Column(
               children: [
                 _TitleBar(
@@ -115,6 +131,7 @@ class _MainShellState extends State<MainShell> with WindowListener {
                   onSettings: () => SettingsPage.show(context),
                   reviewVisible: _reviewVisible,
                   onToggleReview: () => setState(() => _reviewVisible = !_reviewVisible),
+                  onSearch: _openFileSearch,
                 ),
                 Expanded(
                   child: Stack(
@@ -166,11 +183,13 @@ class _TitleBar extends StatefulWidget {
     required this.onSettings,
     required this.reviewVisible,
     required this.onToggleReview,
+    required this.onSearch,
   });
   final HSplitViewController splitController;
   final VoidCallback onSettings;
   final bool reviewVisible;
   final VoidCallback onToggleReview;
+  final VoidCallback onSearch;
 
   @override
   State<_TitleBar> createState() => _TitleBarState();
@@ -193,11 +212,12 @@ class _TitleBarState extends State<_TitleBar> {
 
   @override
   Widget build(BuildContext context) {
+    final colors = context.appColors;
     return GestureDetector(
       onPanStart: (_) => windowManager.startDragging(),
       child: Container(
         height: 36,
-        color: AppColors.surface,
+        color: colors.surface,
         child: Row(
           children: [
             const SizedBox(width: 72), // space for macOS traffic lights
@@ -210,13 +230,34 @@ class _TitleBarState extends State<_TitleBar> {
               onTap: widget.splitController.toggleLeft,
             ),
             const Spacer(),
-            const Text(
-              'yoloit — AI Orchestrator',
-              style: TextStyle(
-                color: AppColors.textMuted,
-                fontSize: 12,
-                fontWeight: FontWeight.w500,
-                letterSpacing: 0.3,
+            // Search button in center
+            GestureDetector(
+              onTap: widget.onSearch,
+              child: Container(
+                height: 22,
+                constraints: BoxConstraints(minWidth: 160, maxWidth: 260),
+                decoration: BoxDecoration(
+                  color: colors.background,
+                  borderRadius: BorderRadius.circular(5),
+                  border: Border.all(color: colors.border),
+                ),
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.search, size: 12, color: AppColors.textMuted),
+                    const SizedBox(width: 6),
+                    Text(
+                      'Quick open…',
+                      style: TextStyle(color: AppColors.textMuted, fontSize: 11),
+                    ),
+                    const Spacer(),
+                    Text(
+                      '⌘P / ⌘F',
+                      style: TextStyle(color: AppColors.textMuted.withAlpha(120), fontSize: 10),
+                    ),
+                  ],
+                ),
               ),
             ),
             const Spacer(),
@@ -260,6 +301,7 @@ class _PanelToggleButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = context.appColors;
     return Tooltip(
       message: tooltip,
       child: Semantics(
@@ -273,14 +315,14 @@ class _PanelToggleButton extends StatelessWidget {
             height: 24,
             decoration: BoxDecoration(
               color: active
-                  ? AppColors.primary.withAlpha(40)
+                  ? colors.primary.withAlpha(40)
                   : Colors.transparent,
               borderRadius: BorderRadius.circular(4),
             ),
             child: Icon(
               icon,
               size: 14,
-              color: active ? AppColors.primary : AppColors.textMuted,
+              color: active ? colors.primary : AppColors.textMuted,
               semanticLabel: tooltip,
             ),
           ),

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:yoloit/core/theme/app_color_scheme.dart';
 import 'package:yoloit/core/theme/app_colors.dart';
 
 class NeonBadge extends StatelessWidget {
@@ -66,11 +67,12 @@ class PanelHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = context.appColors;
     return Container(
       height: 40,
-      padding: const EdgeInsets.symmetric(horizontal: 12),
-      decoration: const BoxDecoration(
-        border: Border(bottom: BorderSide(color: AppColors.border)),
+      padding: EdgeInsets.symmetric(horizontal: 12),
+      decoration: BoxDecoration(
+        border: Border(bottom: BorderSide(color: colors.border)),
       ),
       child: Row(
         children: [
@@ -108,7 +110,7 @@ class IconTextButton extends StatefulWidget {
     this.icon,
     this.onTap,
     this.color = AppColors.textSecondary,
-    this.activeColor = const Color(0xFF9D4EDD),
+    this.activeColor,
     this.isActive = false,
     this.dense = false,
   });
@@ -117,7 +119,7 @@ class IconTextButton extends StatefulWidget {
   final IconData? icon;
   final VoidCallback? onTap;
   final Color color;
-  final Color activeColor;
+  final Color? activeColor;
   final bool isActive;
   final bool dense;
 
@@ -130,8 +132,10 @@ class _IconTextButtonState extends State<IconTextButton> {
 
   @override
   Widget build(BuildContext context) {
+    final colors = context.appColors;
+    final effective = widget.activeColor ?? colors.primary;
     final color = widget.isActive
-        ? widget.activeColor
+        ? effective
         : _hovering
             ? widget.color.withAlpha(200)
             : widget.color;
@@ -150,9 +154,9 @@ class _IconTextButtonState extends State<IconTextButton> {
           ),
           decoration: BoxDecoration(
             color: widget.isActive
-                ? widget.activeColor.withAlpha(30)
+                ? effective.withAlpha(30)
                 : _hovering
-                    ? AppColors.surfaceHighlight
+                    ? colors.surfaceHighlight
                     : Colors.transparent,
             borderRadius: BorderRadius.circular(6),
           ),
