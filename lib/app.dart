@@ -3,6 +3,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:yoloit/core/theme/theme_manager.dart';
 import 'package:yoloit/features/editor/bloc/file_editor_cubit.dart';
 import 'package:yoloit/features/review/bloc/review_cubit.dart';
+import 'package:yoloit/features/runs/bloc/run_cubit.dart';
 import 'package:yoloit/features/terminal/bloc/terminal_cubit.dart';
 import 'package:yoloit/features/workspaces/bloc/workspace_cubit.dart';
 import 'package:yoloit/ui/shell/main_shell.dart';
@@ -18,6 +19,7 @@ class App extends StatelessWidget {
         BlocProvider(create: (_) => TerminalCubit()),
         BlocProvider(create: (_) => ReviewCubit()),
         BlocProvider(create: (_) => FileEditorCubit()),
+        BlocProvider(create: (_) => RunCubit()),
       ],
       child: ListenableBuilder(
         listenable: ThemeManager.instance,

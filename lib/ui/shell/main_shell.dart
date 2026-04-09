@@ -9,12 +9,15 @@ import 'package:yoloit/features/editor/bloc/file_editor_cubit.dart';
 import 'package:yoloit/features/editor/bloc/file_editor_state.dart';
 import 'package:yoloit/features/editor/ui/file_editor_panel.dart';
 import 'package:yoloit/features/review/ui/review_panel.dart';
+import 'package:yoloit/features/runs/bloc/run_cubit.dart';
+import 'package:yoloit/features/runs/ui/run_panel.dart';
 import 'package:yoloit/features/search/ui/file_search_overlay.dart';
 import 'package:yoloit/features/settings/ui/settings_page.dart';
 import 'package:yoloit/features/terminal/bloc/terminal_cubit.dart';
 import 'package:yoloit/features/terminal/bloc/terminal_state.dart';
 import 'package:yoloit/features/terminal/ui/terminal_panel.dart';
 import 'package:yoloit/features/workspaces/bloc/workspace_cubit.dart';
+import 'package:yoloit/features/workspaces/bloc/workspace_state.dart';
 import 'package:yoloit/features/workspaces/ui/workspace_panel.dart';
 import 'package:yoloit/ui/widgets/split_view.dart';
 
@@ -239,7 +242,7 @@ class _FourPaneLayoutState extends State<_FourPaneLayout> {
                   Expanded(
                     child: Focus(
                       focusNode: widget.terminalFocusNode,
-                      child: const TerminalPanel(),
+                      child: const _BottomPanel(),
                     ),
                   ),
 
@@ -276,6 +279,140 @@ class _FourPaneLayoutState extends State<_FourPaneLayout> {
           },
         );
       },
+    );
+  }
+}
+
+enum _BottomTab { agents, runs }
+
+/// Bottom panel that hosts the Agents terminal and Run panel with a tab bar.
+class _BottomPanel extends StatefulWidget {
+  const _BottomPanel();
+
+  @override
+  State<_BottomPanel> createState() => _BottomPanelState();
+}
+
+class _BottomPanelState extends State<_BottomPanel> {
+  _BottomTab _tab = _BottomTab.agents;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _syncWorkspace());
+  }
+
+  void _syncWorkspace() {
+    final wsState = context.read<WorkspaceCubit>().state;
+    if (wsState is WorkspaceLoaded && wsState.activeWorkspace != null) {
+      context
+          .read<RunCubit>()
+          .loadForWorkspace(wsState.activeWorkspace!.path);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.appColors;
+
+    return BlocListener<WorkspaceCubit, WorkspaceState>(
+      listener: (context, wsState) {
+        if (wsState is WorkspaceLoaded && wsState.activeWorkspace != null) {
+          context
+              .read<RunCubit>()
+              .loadForWorkspace(wsState.activeWorkspace!.path);
+        }
+      },
+      child: Column(
+        children: [
+          // Tab bar
+          Container(
+            height: 28,
+            color: colors.surface,
+            child: Row(
+              children: [
+                _BottomTabButton(
+                  label: 'Agents',
+                  icon: Icons.terminal,
+                  isActive: _tab == _BottomTab.agents,
+                  onTap: () => setState(() => _tab = _BottomTab.agents),
+                ),
+                _BottomTabButton(
+                  label: 'Run',
+                  icon: Icons.play_circle_outline,
+                  isActive: _tab == _BottomTab.runs,
+                  onTap: () => setState(() => _tab = _BottomTab.runs),
+                ),
+              ],
+            ),
+          ),
+          Container(height: 1, color: colors.divider),
+          Expanded(
+            child: IndexedStack(
+              index: _tab == _BottomTab.agents ? 0 : 1,
+              children: const [
+                TerminalPanel(),
+                RunPanel(),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _BottomTabButton extends StatelessWidget {
+  const _BottomTabButton({
+    required this.label,
+    required this.icon,
+    required this.isActive,
+    required this.onTap,
+  });
+
+  final String label;
+  final IconData icon;
+  final bool isActive;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.appColors;
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 120),
+        padding: const EdgeInsets.symmetric(horizontal: 10),
+        decoration: BoxDecoration(
+          border: Border(
+            bottom: BorderSide(
+              color: isActive ? colors.tabBorder : Colors.transparent,
+              width: 2,
+            ),
+          ),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              icon,
+              size: 12,
+              color: isActive ? colors.primary : AppColors.textMuted,
+            ),
+            const SizedBox(width: 5),
+            Text(
+              label,
+              style: TextStyle(
+                color:
+                    isActive ? AppColors.textPrimary : AppColors.textMuted,
+                fontSize: 11,
+                fontWeight:
+                    isActive ? FontWeight.w600 : FontWeight.normal,
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
@@ -382,7 +519,7 @@ class _TitleBarState extends State<_TitleBar> {
               onTap: widget.onSearch,
               child: Container(
                 height: 22,
-                constraints: BoxConstraints(minWidth: 160, maxWidth: 260),
+                constraints: const BoxConstraints(minWidth: 160, maxWidth: 260),
                 decoration: BoxDecoration(
                   color: colors.background,
                   borderRadius: BorderRadius.circular(5),
@@ -392,9 +529,9 @@ class _TitleBarState extends State<_TitleBar> {
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Icon(Icons.search, size: 12, color: AppColors.textMuted),
+                    const Icon(Icons.search, size: 12, color: AppColors.textMuted),
                     const SizedBox(width: 6),
-                    Text(
+                    const Text(
                       'Quick open…',
                       style: TextStyle(color: AppColors.textMuted, fontSize: 11),
                     ),
