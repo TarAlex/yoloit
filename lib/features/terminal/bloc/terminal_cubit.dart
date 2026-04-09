@@ -74,14 +74,15 @@ class TerminalCubit extends Cubit<TerminalState> {
   }
 
   void _attachPtyToSession(Pty pty, AgentSession session) {
-    pty.output.cast<List<int>>().transform(const Utf8Decoder()).listen(
-      (data) {
-        session.terminal.write(data);
-      },
-      onDone: () {
-        _onSessionDone(session.id);
-      },
-    );
+    pty.output
+        .cast<List<int>>()
+        .transform(const Utf8Decoder(allowMalformed: true))
+        .listen(
+          session.terminal.write,
+          onDone: () => _onSessionDone(session.id),
+          // ignore: avoid_types_on_closure_parameters
+          onError: (Object e) => _onSessionDone(session.id),
+        );
   }
 
   void _onSessionDone(String sessionId) {
@@ -89,13 +90,8 @@ class TerminalCubit extends Cubit<TerminalState> {
     if (current == null) return;
     final sessions = current.sessions.map((s) {
       if (s.id == sessionId) {
-        return AgentSession(
-          id: s.id,
-          type: s.type,
-          workspacePath: s.workspacePath,
-          status: AgentStatus.idle,
-          sessionId: s.sessionId,
-        );
+        // Preserve the existing terminal — do NOT create a new one.
+        return s.copyWith(status: AgentStatus.idle);
       }
       return s;
     }).toList();

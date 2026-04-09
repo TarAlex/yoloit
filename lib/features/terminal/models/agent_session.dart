@@ -13,6 +13,16 @@ class AgentSession extends Equatable {
     this.sessionId,
   }) : terminal = Terminal(maxLines: 10000);
 
+  // Private constructor that preserves an existing terminal instance.
+  AgentSession._preserve({
+    required this.id,
+    required this.type,
+    required this.workspacePath,
+    required this.terminal,
+    this.status = AgentStatus.idle,
+    this.sessionId,
+  });
+
   final String id;
   final AgentType type;
   final String workspacePath;
@@ -24,10 +34,11 @@ class AgentSession extends Equatable {
     AgentStatus? status,
     String? sessionId,
   }) {
-    return AgentSession(
+    return AgentSession._preserve(
       id: id,
       type: type,
       workspacePath: workspacePath,
+      terminal: terminal,
       status: status ?? this.status,
       sessionId: sessionId ?? this.sessionId,
     );
