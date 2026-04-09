@@ -399,11 +399,16 @@ class _TerminalWidgetState extends State<_TerminalWidget> {
     widget.session.terminal.onOutput = (data) {
       PtyService.instance.write(widget.session.id, data);
     };
+    // Keep PTY size in sync with the xterm viewport so TUI apps render correctly.
+    widget.session.terminal.onResize = (cols, rows, pixelWidth, pixelHeight) {
+      PtyService.instance.resize(widget.session.id, cols, rows);
+    };
   }
 
   @override
   void dispose() {
     widget.session.terminal.onOutput = null;
+    widget.session.terminal.onResize = null;
     _controller.dispose();
     _focusNode.dispose();
     super.dispose();

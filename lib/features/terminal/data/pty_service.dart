@@ -50,7 +50,8 @@ class PtyService {
   }
 
   void resize(String sessionId, int columns, int rows) {
-    _ptys[sessionId]?.resize(columns, rows);
+    // flutter_pty Pty.resize(rows, cols) — note the order!
+    _ptys[sessionId]?.resize(rows, columns);
   }
 
   void kill(String sessionId) {
