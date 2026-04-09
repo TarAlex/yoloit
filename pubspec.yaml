@@ -45,6 +45,7 @@ dependencies:
   highlight: ^0.7.0
   re_highlight: ^0.0.1
   shared_preferences: ^2.5.3
+  super_clipboard: ^0.9.1
 
 dev_dependencies:
   flutter_test:

@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:xterm/xterm.dart' hide TerminalState;
 import 'package:yoloit/core/theme/app_colors.dart';
 import 'package:yoloit/features/terminal/bloc/terminal_cubit.dart';
 import 'package:yoloit/features/terminal/bloc/terminal_state.dart';
+import 'package:yoloit/features/terminal/data/clipboard_file_service.dart';
 import 'package:yoloit/features/terminal/data/pty_service.dart';
 import 'package:yoloit/features/terminal/models/agent_session.dart';
 import 'package:yoloit/features/terminal/models/agent_type.dart';
@@ -375,6 +377,7 @@ class _TerminalWidgetState extends State<_TerminalWidget> {
     super.initState();
     _bindTerminal();
     _requestFocusAfterFrame();
+    HardwareKeyboard.instance.addHandler(_handleHardwareKey);
   }
 
   @override
@@ -382,6 +385,7 @@ class _TerminalWidgetState extends State<_TerminalWidget> {
     super.didUpdateWidget(old);
     if (old.session.id != widget.session.id) {
       old.session.terminal.onOutput = null;
+      old.session.terminal.onResize = null;
       _bindTerminal();
       _requestFocusAfterFrame();
     }
@@ -405,8 +409,32 @@ class _TerminalWidgetState extends State<_TerminalWidget> {
     };
   }
 
+  /// Intercepts Cmd+V: saves clipboard content to a temp file and writes
+  /// the file path into the terminal instead of pasting raw content.
+  bool _handleHardwareKey(KeyEvent event) {
+    if (!_focusNode.hasFocus) return false;
+    if (event is! KeyDownEvent) return false;
+
+    final isCmd = HardwareKeyboard.instance.isMetaPressed;
+    final isV = event.logicalKey == LogicalKeyboardKey.keyV;
+
+    if (isCmd && isV) {
+      _pasteAsFileRef();
+      return true; // consumed — prevent TerminalView from doing a raw paste
+    }
+    return false;
+  }
+
+  Future<void> _pasteAsFileRef() async {
+    final path = await ClipboardFileService.instance.saveClipboardToFile();
+    if (path == null || !mounted) return;
+    // Write the path directly into the PTY (no newline — user confirms with Enter).
+    PtyService.instance.write(widget.session.id, path);
+  }
+
   @override
   void dispose() {
+    HardwareKeyboard.instance.removeHandler(_handleHardwareKey);
     widget.session.terminal.onOutput = null;
     widget.session.terminal.onResize = null;
     _controller.dispose();
