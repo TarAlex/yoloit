@@ -1,4 +1,8 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_code_editor/flutter_code_editor.dart';
 import 'package:highlight/highlight_core.dart' show Mode;
@@ -144,7 +148,7 @@ class _FileEditorPanelState extends State<FileEditorPanel> {
                         ? _ErrorView(message: activeTab.error!)
                         : activeTab.isDiff
                             ? _DiffBody(tab: activeTab)
-                            : _EditorBody(tab: activeTab, codeController: controller!, fontSize: _fontSize),
+                            : _EditorBody(key: ValueKey(activeTab.filePath), tab: activeTab, codeController: controller!, fontSize: _fontSize),
               ),
             ],
           ),
@@ -327,46 +331,423 @@ class _ErrorView extends StatelessWidget {
   }
 }
 
-// ── Editor body ─────────────────────────────────────────────────────────────
+// ── Editor body (StatefulWidget) ────────────────────────────────────────────
 
-class _EditorBody extends StatelessWidget {
-  const _EditorBody({required this.tab, required this.codeController, this.fontSize = 13.0});
-
+class _EditorBody extends StatefulWidget {
+  const _EditorBody({super.key, required this.tab, required this.codeController, this.fontSize = 13.0});
   final EditorTab tab;
   final CodeController codeController;
   final double fontSize;
+  @override
+  State<_EditorBody> createState() => _EditorBodyState();
+}
 
+class _EditorBodyState extends State<_EditorBody> {
+  // ── Find / Replace ──────────────────────────────────────────────────────
+  bool _showFind = false;
+  bool _showReplace = false;
+  bool _caseSensitive = false;
+  String _findQuery = '';
+  List<int> _matchOffsets = [];
+  int _currentMatch = 0;
+  final _findCtrl = TextEditingController();
+  final _replaceCtrl = TextEditingController();
+  final _findFocus = FocusNode();
+
+  // ── Editor options ───────────────────────────────────────────────────────
+  bool _wordWrap = false;
+  bool _showOutline = false;
+
+  @override
+  void dispose() {
+    _findCtrl.dispose();
+    _replaceCtrl.dispose();
+    _findFocus.dispose();
+    super.dispose();
+  }
+
+  // ── Language helpers ────────────────────────────────────────────────────
+  static String _languageName(String filePath) {
+    final ext = filePath.split('.').last.toLowerCase();
+    return switch (ext) {
+      'dart' => 'Dart',
+      'js' => 'JavaScript',
+      'ts' => 'TypeScript',
+      'jsx' || 'tsx' => 'React',
+      'py' => 'Python',
+      'java' => 'Java',
+      'kt' => 'Kotlin',
+      'go' => 'Go',
+      'rs' => 'Rust',
+      'sh' || 'bash' => 'Shell',
+      'cpp' || 'cc' || 'cxx' => 'C++',
+      'c' => 'C',
+      'css' => 'CSS',
+      'json' => 'JSON',
+      'yaml' || 'yml' => 'YAML',
+      'xml' => 'XML',
+      'sql' => 'SQL',
+      'md' => 'Markdown',
+      'swift' => 'Swift',
+      'html' => 'HTML',
+      _ => ext.isEmpty ? 'Plain Text' : ext.toUpperCase(),
+    };
+  }
+
+  static String _commentPrefix(String filePath) {
+    final ext = filePath.split('.').last.toLowerCase();
+    return switch (ext) {
+      'py' || 'rb' || 'sh' || 'bash' || 'yaml' || 'yml' || 'toml' => '# ',
+      'css' => '/* ',
+      _ => '// ',
+    };
+  }
+
+  // ── Line helpers ────────────────────────────────────────────────────────
+  ({int start, int end}) _lineRange(String text, int pos) {
+    final s = pos == 0 ? 0 : text.lastIndexOf('\n', pos - 1) + 1;
+    final rawEnd = text.indexOf('\n', pos);
+    return (start: s, end: rawEnd == -1 ? text.length : rawEnd);
+  }
+
+  // ── Find & replace ──────────────────────────────────────────────────────
+  void _openFind() => setState(() { _showFind = true; _showReplace = false; SchedulerBinding.instance.addPostFrameCallback((_) => _findFocus.requestFocus()); });
+  void _openReplace() => setState(() { _showFind = true; _showReplace = true; SchedulerBinding.instance.addPostFrameCallback((_) => _findFocus.requestFocus()); });
+  void _closeFind() => setState(() { _showFind = false; _showReplace = false; });
+
+  void _updateMatches() {
+    if (_findQuery.isEmpty) { _matchOffsets = []; _currentMatch = 0; return; }
+    final text = widget.codeController.text;
+    final q = _caseSensitive ? _findQuery : _findQuery.toLowerCase();
+    final src = _caseSensitive ? text : text.toLowerCase();
+    final offsets = <int>[];
+    int start = 0;
+    while (true) {
+      final idx = src.indexOf(q, start);
+      if (idx == -1) break;
+      offsets.add(idx);
+      start = idx + 1;
+    }
+    _matchOffsets = offsets;
+    if (_currentMatch >= offsets.length) _currentMatch = 0;
+  }
+
+  void _selectCurrentMatch() {
+    if (_matchOffsets.isEmpty) return;
+    final off = _matchOffsets[_currentMatch];
+    widget.codeController.selection = TextSelection(baseOffset: off, extentOffset: off + _findQuery.length);
+  }
+
+  void _findNext() {
+    if (_matchOffsets.isEmpty) return;
+    setState(() => _currentMatch = (_currentMatch + 1) % _matchOffsets.length);
+    _selectCurrentMatch();
+  }
+
+  void _findPrev() {
+    if (_matchOffsets.isEmpty) return;
+    setState(() => _currentMatch = (_currentMatch - 1 + _matchOffsets.length) % _matchOffsets.length);
+    _selectCurrentMatch();
+  }
+
+  void _replaceOne() {
+    if (_matchOffsets.isEmpty) return;
+    final ctrl = widget.codeController;
+    final off = _matchOffsets[_currentMatch];
+    final text = ctrl.text;
+    final newText = text.substring(0, off) + _replaceCtrl.text + text.substring(off + _findQuery.length);
+    ctrl.value = TextEditingValue(text: newText, selection: TextSelection.collapsed(offset: off + _replaceCtrl.text.length));
+    _updateMatches();
+    setState(() {});
+  }
+
+  void _replaceAll() {
+    if (_findQuery.isEmpty) return;
+    final ctrl = widget.codeController;
+    final newText = ctrl.text.replaceAll(
+      _caseSensitive ? _findQuery : RegExp(RegExp.escape(_findQuery), caseSensitive: false),
+      _replaceCtrl.text,
+    );
+    ctrl.value = TextEditingValue(text: newText, selection: const TextSelection.collapsed(offset: 0));
+    _updateMatches();
+    setState(() {});
+  }
+
+  // ── Text editing helpers ────────────────────────────────────────────────
+  void _toggleComment() {
+    final ctrl = widget.codeController;
+    final text = ctrl.text;
+    final sel = ctrl.selection;
+    final r = _lineRange(text, sel.start);
+    final lineContent = text.substring(r.start, r.end);
+    final prefix = _commentPrefix(widget.tab.filePath);
+    final trimmed = lineContent.trimLeft();
+    final indent = lineContent.length - trimmed.length;
+    String newLine;
+    int delta;
+    if (trimmed.startsWith(prefix)) {
+      newLine = lineContent.substring(0, indent) + trimmed.substring(prefix.length);
+      delta = -prefix.length;
+    } else {
+      newLine = lineContent.substring(0, indent) + prefix + trimmed;
+      delta = prefix.length;
+    }
+    final newText = text.substring(0, r.start) + newLine + text.substring(r.end);
+    ctrl.value = TextEditingValue(text: newText, selection: TextSelection.collapsed(offset: (sel.start + delta).clamp(r.start, r.start + newLine.length)));
+  }
+
+  void _duplicateLine() {
+    final ctrl = widget.codeController;
+    final text = ctrl.text;
+    final r = _lineRange(text, ctrl.selection.start);
+    final lineContent = text.substring(r.start, r.end);
+    final newText = '${text.substring(0, r.end)}\n$lineContent${text.substring(r.end)}';
+    ctrl.value = TextEditingValue(text: newText, selection: TextSelection.collapsed(offset: r.end + 1 + (ctrl.selection.start - r.start)));
+  }
+
+  void _deleteLine() {
+    final ctrl = widget.codeController;
+    final text = ctrl.text;
+    final r = _lineRange(text, ctrl.selection.start);
+    String newText;
+    int newCursor;
+    if (r.end < text.length) {
+      newText = text.substring(0, r.start) + text.substring(r.end + 1);
+      newCursor = r.start;
+    } else if (r.start > 0) {
+      newText = text.substring(0, r.start - 1);
+      newCursor = r.start - 1;
+    } else {
+      return;
+    }
+    ctrl.value = TextEditingValue(text: newText, selection: TextSelection.collapsed(offset: newCursor.clamp(0, newText.length)));
+  }
+
+  void _moveLineUp() {
+    final ctrl = widget.codeController;
+    final text = ctrl.text;
+    final r = _lineRange(text, ctrl.selection.start);
+    if (r.start == 0) return;
+    final prev = _lineRange(text, r.start - 1);
+    final cur = text.substring(r.start, r.end);
+    final above = text.substring(prev.start, prev.end);
+    final before = text.substring(0, prev.start);
+    final after = r.end < text.length ? text.substring(r.end) : '';
+    final newText = '$before$cur\n$above$after';
+    final off = ctrl.selection.start - r.start;
+    ctrl.value = TextEditingValue(text: newText, selection: TextSelection.collapsed(offset: prev.start + off.clamp(0, cur.length)));
+  }
+
+  void _moveLineDown() {
+    final ctrl = widget.codeController;
+    final text = ctrl.text;
+    final r = _lineRange(text, ctrl.selection.start);
+    if (r.end >= text.length) return;
+    final next = _lineRange(text, r.end + 1);
+    final cur = text.substring(r.start, r.end);
+    final below = text.substring(next.start, next.end);
+    final before = text.substring(0, r.start);
+    final after = next.end < text.length ? text.substring(next.end) : '';
+    final newText = '$before$below\n$cur$after';
+    final off = ctrl.selection.start - r.start;
+    final newLineStart = r.start + below.length + 1;
+    ctrl.value = TextEditingValue(text: newText, selection: TextSelection.collapsed(offset: newLineStart + off.clamp(0, cur.length)));
+  }
+
+  void _indentLine() {
+    final ctrl = widget.codeController;
+    final text = ctrl.text;
+    final r = _lineRange(text, ctrl.selection.start);
+    const sp = '  ';
+    ctrl.value = TextEditingValue(
+      text: text.substring(0, r.start) + sp + text.substring(r.start),
+      selection: TextSelection.collapsed(offset: ctrl.selection.start + sp.length),
+    );
+  }
+
+  void _outdentLine() {
+    final ctrl = widget.codeController;
+    final text = ctrl.text;
+    final r = _lineRange(text, ctrl.selection.start);
+    final line = text.substring(r.start, r.end);
+    final strip = line.startsWith('  ') ? 2 : line.startsWith(' ') ? 1 : 0;
+    if (strip == 0) return;
+    ctrl.value = TextEditingValue(
+      text: text.substring(0, r.start) + line.substring(strip) + text.substring(r.end),
+      selection: TextSelection.collapsed(offset: (ctrl.selection.start - strip).clamp(r.start, text.length - strip)),
+    );
+  }
+
+  // ── Format document ─────────────────────────────────────────────────────
+  Future<void> _formatDocument() async {
+    final path = widget.tab.filePath;
+    if (!path.endsWith('.dart')) return;
+    try {
+      final result = await Process.run('dart', ['format', '--fix', path]);
+      if (result.exitCode == 0 && mounted) {
+        final newContent = await File(path).readAsString();
+        widget.codeController.value = TextEditingValue(text: newContent, selection: const TextSelection.collapsed(offset: 0));
+        if (mounted) context.read<FileEditorCubit>().updateContent(newContent);
+      }
+    } catch (_) {}
+  }
+
+  // ── Go to line ──────────────────────────────────────────────────────────
+  Future<void> _showGoToLine(BuildContext ctx) async {
+    final ctrl = widget.codeController;
+    final lineCount = '\n'.allMatches(ctrl.text).length + 1;
+    final inputCtrl = TextEditingController();
+    await showDialog<void>(
+      context: ctx,
+      barrierColor: Colors.black54,
+      builder: (dctx) => Dialog(
+        backgroundColor: const Color(0xFF1A1A2E),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('Go to Line', style: TextStyle(color: AppColors.textPrimary, fontSize: 14, fontWeight: FontWeight.w600)),
+              const SizedBox(height: 12),
+              TextField(
+                controller: inputCtrl,
+                autofocus: true,
+                keyboardType: TextInputType.number,
+                style: const TextStyle(color: AppColors.textPrimary, fontSize: 13),
+                decoration: InputDecoration(
+                  hintText: '1 – $lineCount',
+                  hintStyle: const TextStyle(color: AppColors.textMuted),
+                  border: const OutlineInputBorder(borderSide: BorderSide(color: Color(0xFF2A2A4E))),
+                  enabledBorder: const OutlineInputBorder(borderSide: BorderSide(color: Color(0xFF2A2A4E))),
+                  focusedBorder: const OutlineInputBorder(borderSide: BorderSide(color: Color(0xFF7C3AED))),
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  isDense: true,
+                ),
+                onSubmitted: (v) {
+                  final n = int.tryParse(v);
+                  if (n != null && n >= 1 && n <= lineCount) _jumpToLine(ctrl, n);
+                  Navigator.of(dctx).pop();
+                },
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    inputCtrl.dispose();
+  }
+
+  void _jumpToLine(CodeController ctrl, int lineNumber) {
+    final lines = ctrl.text.split('\n');
+    int offset = 0;
+    for (int i = 0; i < lineNumber - 1 && i < lines.length; i++) {
+      offset += lines[i].length + 1;
+    }
+    ctrl.selection = TextSelection.collapsed(offset: offset.clamp(0, ctrl.text.length));
+  }
+
+  // ── Outline toggle ──────────────────────────────────────────────────────
+  void _toggleOutline() => setState(() => _showOutline = !_showOutline);
+
+  // ── Build ────────────────────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
     final colors = context.appColors;
+    final language = _languageName(widget.tab.filePath);
 
-    return CodeTheme(
-      data: CodeThemeData(styles: _darkTheme),
-      child: CodeField(
-        controller: codeController,
-        expands: true,
-        wrap: false,
-        textStyle: TextStyle(
-          fontFamily: 'monospace',
-          fontSize: fontSize,
-          height: 1.5,
-        ),
-        background: colors.background,
-        gutterStyle: GutterStyle(
-          width: 48,
-          margin: 8,
-          textStyle: const TextStyle(
-            color: AppColors.textMuted,
-            fontSize: 11,
-            fontFamily: 'monospace',
-          ),
-          background: colors.surfaceElevated,
+    return CallbackShortcuts(
+      bindings: <ShortcutActivator, VoidCallback>{
+        const SingleActivator(LogicalKeyboardKey.keyF, meta: true): _openFind,
+        const SingleActivator(LogicalKeyboardKey.keyH, meta: true): _openReplace,
+        const SingleActivator(LogicalKeyboardKey.slash, meta: true): _toggleComment,
+        const SingleActivator(LogicalKeyboardKey.keyD, meta: true): _duplicateLine,
+        const SingleActivator(LogicalKeyboardKey.keyK, meta: true, shift: true): _deleteLine,
+        const SingleActivator(LogicalKeyboardKey.arrowUp, alt: true): _moveLineUp,
+        const SingleActivator(LogicalKeyboardKey.arrowDown, alt: true): _moveLineDown,
+        const SingleActivator(LogicalKeyboardKey.bracketRight, meta: true): _indentLine,
+        const SingleActivator(LogicalKeyboardKey.bracketLeft, meta: true): _outdentLine,
+        const SingleActivator(LogicalKeyboardKey.keyG, meta: true): () => _showGoToLine(context),
+        const SingleActivator(LogicalKeyboardKey.keyF, meta: true, shift: true): _formatDocument,
+        const SingleActivator(LogicalKeyboardKey.keyO, meta: true, shift: true): _toggleOutline,
+        const SingleActivator(LogicalKeyboardKey.escape): _closeFind,
+      },
+      child: Focus(
+        autofocus: true,
+        child: Column(
+          children: [
+            _EditorToolbar(
+              language: language,
+              wordWrap: _wordWrap,
+              showOutline: _showOutline,
+              onToggleWordWrap: () => setState(() => _wordWrap = !_wordWrap),
+              onFormat: _formatDocument,
+              onToggleOutline: _toggleOutline,
+              onGoToLine: () => _showGoToLine(context),
+              onOpenFind: _openFind,
+            ),
+            if (_showFind)
+              _FindBar(
+                findCtrl: _findCtrl,
+                replaceCtrl: _replaceCtrl,
+                findFocus: _findFocus,
+                showReplace: _showReplace,
+                caseSensitive: _caseSensitive,
+                matchCount: _matchOffsets.length,
+                currentMatch: _currentMatch,
+                onClose: _closeFind,
+                onNext: _findNext,
+                onPrev: _findPrev,
+                onReplace: _replaceOne,
+                onReplaceAll: _replaceAll,
+                onToggleCase: () { setState(() => _caseSensitive = !_caseSensitive); _updateMatches(); setState(() {}); },
+                onToggleReplace: () => setState(() => _showReplace = !_showReplace),
+                onQueryChanged: (q) { setState(() { _findQuery = q; _updateMatches(); }); },
+              ),
+            Expanded(
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Column(
+                      children: [
+                        Expanded(
+                          child: CodeTheme(
+                            data: CodeThemeData(styles: _darkTheme),
+                            child: CodeField(
+                              controller: widget.codeController,
+                              expands: true,
+                              wrap: _wordWrap,
+                              textStyle: TextStyle(fontFamily: 'monospace', fontSize: widget.fontSize, height: 1.5),
+                              background: colors.background,
+                              gutterStyle: GutterStyle(
+                                width: 48,
+                                margin: 8,
+                                textStyle: const TextStyle(color: AppColors.textMuted, fontSize: 11, fontFamily: 'monospace'),
+                                background: colors.surfaceElevated,
+                              ),
+                            ),
+                          ),
+                        ),
+                        _EditorStatusBar(controller: widget.codeController, language: language),
+                      ],
+                    ),
+                  ),
+                  if (_showOutline)
+                    _SymbolOutline(
+                      content: widget.codeController.text,
+                      filePath: widget.tab.filePath,
+                      onJumpToLine: (line) => _jumpToLine(widget.codeController, line),
+                    ),
+                ],
+              ),
+            ),
+          ],
         ),
       ),
     );
   }
 
-  /// Dark syntax highlighting theme matching the app's dark palette.
   static const Map<String, TextStyle> _darkTheme = {
     'root': TextStyle(color: Color(0xFFABB2BF), backgroundColor: Colors.transparent),
     'comment': TextStyle(color: Color(0xFF5C6370), fontStyle: FontStyle.italic),
@@ -405,7 +786,410 @@ class _EditorBody extends StatelessWidget {
   };
 }
 
-// ── Diff body ────────────────────────────────────────────────────────────────
+// ── Editor toolbar ───────────────────────────────────────────────────────────
+
+class _EditorToolbar extends StatelessWidget {
+  const _EditorToolbar({
+    required this.language,
+    required this.wordWrap,
+    required this.showOutline,
+    required this.onToggleWordWrap,
+    required this.onFormat,
+    required this.onToggleOutline,
+    required this.onGoToLine,
+    required this.onOpenFind,
+  });
+  final String language;
+  final bool wordWrap;
+  final bool showOutline;
+  final VoidCallback onToggleWordWrap;
+  final VoidCallback onFormat;
+  final VoidCallback onToggleOutline;
+  final VoidCallback onGoToLine;
+  final VoidCallback onOpenFind;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.appColors;
+    return Container(
+      height: 28,
+      decoration: BoxDecoration(color: colors.surface, border: Border(bottom: BorderSide(color: colors.border))),
+      child: Row(
+        children: [
+          _ToolbarBtn(icon: Icons.search, tooltip: 'Find  ⌘F', onTap: onOpenFind),
+          _ToolbarBtn(icon: Icons.wrap_text, tooltip: 'Word Wrap', active: wordWrap, onTap: onToggleWordWrap),
+          _ToolbarBtn(icon: Icons.auto_fix_high, tooltip: 'Format  ⌘⇧F', onTap: onFormat),
+          _ToolbarBtn(icon: Icons.last_page, tooltip: 'Go to Line  ⌘G', onTap: onGoToLine),
+          _ToolbarBtn(icon: Icons.account_tree_outlined, tooltip: 'Outline  ⌘⇧O', active: showOutline, onTap: onToggleOutline),
+          const Spacer(),
+          Padding(
+            padding: const EdgeInsets.only(right: 10),
+            child: Text(language, style: const TextStyle(color: AppColors.textMuted, fontSize: 10)),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ToolbarBtn extends StatelessWidget {
+  const _ToolbarBtn({required this.icon, required this.tooltip, required this.onTap, this.active = false});
+  final IconData icon;
+  final String tooltip;
+  final VoidCallback onTap;
+  final bool active;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.appColors;
+    return Tooltip(
+      message: tooltip,
+      child: InkWell(
+        onTap: onTap,
+        child: Container(
+          width: 28,
+          height: 28,
+          color: active ? colors.primary.withAlpha(40) : Colors.transparent,
+          child: Icon(icon, size: 14, color: active ? colors.primaryLight : AppColors.textMuted),
+        ),
+      ),
+    );
+  }
+}
+
+// ── Find / Replace bar ───────────────────────────────────────────────────────
+
+class _FindBar extends StatelessWidget {
+  const _FindBar({
+    required this.findCtrl,
+    required this.replaceCtrl,
+    required this.findFocus,
+    required this.showReplace,
+    required this.caseSensitive,
+    required this.matchCount,
+    required this.currentMatch,
+    required this.onClose,
+    required this.onNext,
+    required this.onPrev,
+    required this.onReplace,
+    required this.onReplaceAll,
+    required this.onToggleCase,
+    required this.onToggleReplace,
+    required this.onQueryChanged,
+  });
+  final TextEditingController findCtrl;
+  final TextEditingController replaceCtrl;
+  final FocusNode findFocus;
+  final bool showReplace;
+  final bool caseSensitive;
+  final int matchCount;
+  final int currentMatch;
+  final VoidCallback onClose;
+  final VoidCallback onNext;
+  final VoidCallback onPrev;
+  final VoidCallback onReplace;
+  final VoidCallback onReplaceAll;
+  final VoidCallback onToggleCase;
+  final VoidCallback onToggleReplace;
+  final ValueChanged<String> onQueryChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.appColors;
+    final hasQuery = findCtrl.text.isNotEmpty;
+    return Container(
+      decoration: BoxDecoration(color: colors.surfaceElevated, border: Border(bottom: BorderSide(color: colors.border))),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.search, size: 14, color: AppColors.textMuted),
+              const SizedBox(width: 6),
+              SizedBox(
+                width: 220,
+                height: 24,
+                child: TextField(
+                  controller: findCtrl,
+                  focusNode: findFocus,
+                  onChanged: onQueryChanged,
+                  style: const TextStyle(color: AppColors.textPrimary, fontSize: 12),
+                  decoration: const InputDecoration(
+                    hintText: 'Find',
+                    hintStyle: TextStyle(color: AppColors.textMuted, fontSize: 12),
+                    border: InputBorder.none,
+                    contentPadding: EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                    isDense: true,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 6),
+              if (hasQuery && matchCount > 0)
+                Text('${currentMatch + 1} / $matchCount', style: const TextStyle(color: AppColors.textMuted, fontSize: 10)),
+              if (hasQuery && matchCount == 0)
+                const Text('No results', style: TextStyle(color: Colors.redAccent, fontSize: 10)),
+              const SizedBox(width: 4),
+              _FBBtn(icon: Icons.text_fields, tooltip: 'Case sensitive', active: caseSensitive, onTap: onToggleCase),
+              _FBBtn(icon: Icons.keyboard_arrow_up, tooltip: 'Previous  ⇧Enter', onTap: onPrev),
+              _FBBtn(icon: Icons.keyboard_arrow_down, tooltip: 'Next  Enter', onTap: onNext),
+              _FBBtn(icon: Icons.find_replace, tooltip: 'Toggle Replace  ⌘H', active: showReplace, onTap: onToggleReplace),
+              const Spacer(),
+              _FBBtn(icon: Icons.close, tooltip: 'Close  Esc', onTap: onClose),
+            ],
+          ),
+          if (showReplace) ...[
+            const SizedBox(height: 4),
+            Row(
+              children: [
+                const Icon(Icons.edit, size: 14, color: AppColors.textMuted),
+                const SizedBox(width: 6),
+                SizedBox(
+                  width: 220,
+                  height: 24,
+                  child: TextField(
+                    controller: replaceCtrl,
+                    style: const TextStyle(color: AppColors.textPrimary, fontSize: 12),
+                    decoration: const InputDecoration(
+                      hintText: 'Replace',
+                      hintStyle: TextStyle(color: AppColors.textMuted, fontSize: 12),
+                      border: InputBorder.none,
+                      contentPadding: EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                      isDense: true,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                _TextBtn(label: 'Replace', onTap: onReplace),
+                const SizedBox(width: 4),
+                _TextBtn(label: 'All', onTap: onReplaceAll),
+              ],
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _FBBtn extends StatelessWidget {
+  const _FBBtn({required this.icon, required this.tooltip, required this.onTap, this.active = false});
+  final IconData icon;
+  final String tooltip;
+  final VoidCallback onTap;
+  final bool active;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.appColors;
+    return Tooltip(
+      message: tooltip,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(4),
+        child: Container(
+          width: 22,
+          height: 22,
+          decoration: BoxDecoration(color: active ? colors.primary.withAlpha(60) : Colors.transparent, borderRadius: BorderRadius.circular(4)),
+          child: Icon(icon, size: 13, color: active ? colors.primaryLight : AppColors.textMuted),
+        ),
+      ),
+    );
+  }
+}
+
+class _TextBtn extends StatelessWidget {
+  const _TextBtn({required this.label, required this.onTap});
+  final String label;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.appColors;
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(4),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+        decoration: BoxDecoration(border: Border.all(color: colors.border), borderRadius: BorderRadius.circular(4)),
+        child: Text(label, style: const TextStyle(color: AppColors.textMuted, fontSize: 11)),
+      ),
+    );
+  }
+}
+
+// ── Editor status bar ────────────────────────────────────────────────────────
+
+class _EditorStatusBar extends StatefulWidget {
+  const _EditorStatusBar({required this.controller, required this.language});
+  final CodeController controller;
+  final String language;
+
+  @override
+  State<_EditorStatusBar> createState() => _EditorStatusBarState();
+}
+
+class _EditorStatusBarState extends State<_EditorStatusBar> {
+  int _line = 1;
+  int _col = 1;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.controller.addListener(_update);
+  }
+
+  @override
+  void dispose() {
+    widget.controller.removeListener(_update);
+    super.dispose();
+  }
+
+  void _update() {
+    final text = widget.controller.text;
+    final offset = widget.controller.selection.baseOffset;
+    if (offset < 0 || offset > text.length) return;
+    final before = text.substring(0, offset);
+    final lines = before.split('\n');
+    final l = lines.length;
+    final c = lines.last.length + 1;
+    if (l != _line || c != _col) setState(() { _line = l; _col = c; });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.appColors;
+    return Container(
+      height: 22,
+      decoration: BoxDecoration(color: colors.surfaceElevated, border: Border(top: BorderSide(color: colors.border))),
+      child: Row(
+        children: [
+          const SizedBox(width: 10),
+          Text('Ln $_line, Col $_col', style: const TextStyle(color: AppColors.textMuted, fontSize: 10)),
+          _SBar(),
+          const Text('UTF-8', style: TextStyle(color: AppColors.textMuted, fontSize: 10)),
+          _SBar(),
+          const Text('LF', style: TextStyle(color: AppColors.textMuted, fontSize: 10)),
+          _SBar(),
+          Text(widget.language, style: const TextStyle(color: AppColors.textMuted, fontSize: 10)),
+          const SizedBox(width: 8),
+        ],
+      ),
+    );
+  }
+}
+
+class _SBar extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return Container(width: 1, height: 12, margin: const EdgeInsets.symmetric(horizontal: 8), color: const Color(0xFF2A2A4E));
+  }
+}
+
+// ── Symbol outline ───────────────────────────────────────────────────────────
+
+class _OutlineSymbol {
+  const _OutlineSymbol({required this.name, required this.line, required this.isClass});
+  final String name;
+  final int line;
+  final bool isClass;
+}
+
+List<_OutlineSymbol> _parseSymbols(String content, String filePath) {
+  final ext = filePath.split('.').last.toLowerCase();
+  final lines = content.split('\n');
+  final symbols = <_OutlineSymbol>[];
+  for (int i = 0; i < lines.length; i++) {
+    final line = lines[i];
+    final t = line.trim();
+    switch (ext) {
+      case 'dart':
+        if (RegExp(r'^(abstract\s+)?(?:class|enum|mixin|extension)\s+\w+').hasMatch(t)) {
+          final m = RegExp(r'(?:class|enum|mixin|extension)\s+(\w+)').firstMatch(t);
+          if (m != null) symbols.add(_OutlineSymbol(name: m.group(1)!, line: i + 1, isClass: true));
+        } else {
+          final m = RegExp(r'(?:Future(?:<[^>]*>)?|Widget|void|String|int|bool|double|List|Map|dynamic)\s+(\w+)\s*[\(<]').firstMatch(line);
+          if (m != null && !['if', 'for', 'while', 'switch', 'return'].contains(m.group(1))) {
+            symbols.add(_OutlineSymbol(name: '${m.group(1)!}()', line: i + 1, isClass: false));
+          }
+        }
+      case 'js' || 'ts' || 'jsx' || 'tsx':
+        if (t.startsWith('class ')) {
+          final m = RegExp(r'class\s+(\w+)').firstMatch(t);
+          if (m != null) symbols.add(_OutlineSymbol(name: m.group(1)!, line: i + 1, isClass: true));
+        } else if (RegExp(r'^(?:export\s+)?(?:async\s+)?function\s+\w+').hasMatch(t)) {
+          final m = RegExp(r'function\s+(\w+)').firstMatch(t);
+          if (m != null) symbols.add(_OutlineSymbol(name: '${m.group(1)!}()', line: i + 1, isClass: false));
+        } else if (RegExp(r'^(?:const|let|var)\s+\w+\s*=\s*(?:async\s+)?\(').hasMatch(t)) {
+          final m = RegExp(r'(?:const|let|var)\s+(\w+)').firstMatch(t);
+          if (m != null) symbols.add(_OutlineSymbol(name: '${m.group(1)!}()', line: i + 1, isClass: false));
+        }
+      case 'py':
+        if (t.startsWith('class ')) {
+          final m = RegExp(r'class\s+(\w+)').firstMatch(t);
+          if (m != null) symbols.add(_OutlineSymbol(name: m.group(1)!, line: i + 1, isClass: true));
+        } else if (t.startsWith('def ') || t.startsWith('async def ')) {
+          final m = RegExp(r'def\s+(\w+)').firstMatch(t);
+          if (m != null) symbols.add(_OutlineSymbol(name: '${m.group(1)!}()', line: i + 1, isClass: false));
+        }
+    }
+  }
+  return symbols;
+}
+
+class _SymbolOutline extends StatelessWidget {
+  const _SymbolOutline({required this.content, required this.filePath, required this.onJumpToLine});
+  final String content;
+  final String filePath;
+  final void Function(int line) onJumpToLine;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.appColors;
+    final symbols = _parseSymbols(content, filePath);
+    return Container(
+      width: 185,
+      decoration: BoxDecoration(color: colors.surfaceElevated, border: Border(left: BorderSide(color: colors.border))),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            height: 28,
+            padding: const EdgeInsets.symmetric(horizontal: 10),
+            decoration: BoxDecoration(border: Border(bottom: BorderSide(color: colors.border))),
+            child: const Align(alignment: Alignment.centerLeft, child: Text('Outline', style: TextStyle(color: AppColors.textMuted, fontSize: 11, fontWeight: FontWeight.w600))),
+          ),
+          Expanded(
+            child: symbols.isEmpty
+                ? const Center(child: Text('No symbols', style: TextStyle(color: AppColors.textMuted, fontSize: 11)))
+                : ListView.builder(
+                    itemCount: symbols.length,
+                    itemBuilder: (_, i) {
+                      final sym = symbols[i];
+                      return InkWell(
+                        onTap: () => onJumpToLine(sym.line),
+                        child: Padding(
+                          padding: EdgeInsets.only(left: sym.isClass ? 8 : 20, right: 8, top: 3, bottom: 3),
+                          child: Row(
+                            children: [
+                              Icon(sym.isClass ? Icons.category_outlined : Icons.functions, size: 11, color: sym.isClass ? const Color(0xFFE5C07B) : const Color(0xFF61AFEF)),
+                              const SizedBox(width: 5),
+                              Expanded(child: Text(sym.name, style: const TextStyle(color: AppColors.textPrimary, fontSize: 11, fontFamily: 'monospace'), overflow: TextOverflow.ellipsis)),
+                              Text('${sym.line}', style: const TextStyle(color: AppColors.textMuted, fontSize: 9)),
+                            ],
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+
 
 class _DiffBody extends StatelessWidget {
   const _DiffBody({required this.tab});
