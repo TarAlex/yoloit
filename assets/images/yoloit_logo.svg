@@ -1,0 +1,67 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 520 200" width="520" height="200">
+  <defs>
+    <!-- Pink → Purple gradient used on the icon mark -->
+    <linearGradient id="markGrad" x1="100" y1="10" x2="100" y2="185" gradientUnits="userSpaceOnUse">
+      <stop offset="0%"   stop-color="#F472B6"/>
+      <stop offset="100%" stop-color="#6D28D9"/>
+    </linearGradient>
+    <!-- Same gradient for the wordmark -->
+    <linearGradient id="textGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%"   stop-color="#C026D3"/>
+      <stop offset="100%" stop-color="#5B21B6"/>
+    </linearGradient>
+  </defs>
+
+  <!-- ═══════════════════════════════════════════════
+       ICON MARK  (200×200 canvas, centred at 100,100)
+       Y = two arms (each with a closed loop at the top)
+             + stem going down to a leaf
+  ══════════════════════════════════════════════════ -->
+  <g stroke="url(#markGrad)" stroke-linecap="round" stroke-linejoin="round"
+     fill="none" stroke-width="14">
+
+    <!-- Left arm: from junction up-left, loops around a small oval, ends near body -->
+    <path d="
+      M 100 112
+      C  84  96,  65  76,  52  58
+      C  40  40,  40  20,  53  14
+      C  66   8,  80  18,  80  34
+      C  80  48,  70  58,  66  64
+    "/>
+
+    <!-- Right arm: mirror of left arm -->
+    <path d="
+      M 100 112
+      C 116  96, 135  76, 148  58
+      C 160  40, 160  20, 147  14
+      C 134   8, 120  18, 120  34
+      C 120  48, 130  58, 134  64
+    "/>
+
+    <!-- Stem (center down) -->
+    <line x1="100" y1="112" x2="100" y2="168"/>
+  </g>
+
+  <!-- Leaf at the bottom of the stem (filled, same gradient) -->
+  <path d="M 100 165
+           C  88 173,  84 186, 100 194
+           C 116 186, 112 173, 100 165 Z"
+        fill="url(#markGrad)"/>
+
+
+  <!-- ═══════════════════════════════════════════════
+       WORDMARK  (starts at x=218, vertically centred)
+  ══════════════════════════════════════════════════ -->
+
+  <!-- "yoloit" — rounded sans-serif, gradient fill -->
+  <text x="218" y="118"
+        font-family="'SF Pro Rounded', 'Nunito', 'Poppins', 'Helvetica Neue', Arial, sans-serif"
+        font-size="72" font-weight="700" letter-spacing="-2"
+        fill="url(#textGrad)">yoloit</text>
+
+  <!-- "AI ORCHESTRATOR" subtitle -->
+  <text x="220" y="148"
+        font-family="'SF Pro Text', 'Nunito', 'Poppins', 'Helvetica Neue', Arial, sans-serif"
+        font-size="18" font-weight="600" letter-spacing="4"
+        fill="#4C1D95">AI ORCHESTRATOR</text>
+</svg>
