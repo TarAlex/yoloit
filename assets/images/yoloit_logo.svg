@@ -1,6 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 540 210" width="540" height="210">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 540 200" width="540" height="200">
   <defs>
-    <linearGradient id="g" x1="100" y1="15" x2="100" y2="198" gradientUnits="userSpaceOnUse">
+    <linearGradient id="g" x1="100" y1="0" x2="100" y2="200" gradientUnits="userSpaceOnUse">
       <stop offset="0%"   stop-color="#E879F9"/>
       <stop offset="100%" stop-color="#5B21B6"/>
     </linearGradient>
@@ -8,35 +8,24 @@
       <stop offset="0%"   stop-color="#C026D3"/>
       <stop offset="100%" stop-color="#4C1D95"/>
     </linearGradient>
-    <filter id="shadow">
-      <feDropShadow dx="0" dy="4" stdDeviation="8" flood-color="#00000022"/>
-    </filter>
   </defs>
 
-  <!-- ── ICON MARK (200×210) ── -->
-  <rect width="200" height="210" rx="44" fill="white" filter="url(#shadow)"/>
+  <!-- Icon mark (200×200) -->
+  <rect width="200" height="200" rx="44" fill="white"/>
 
-  <!-- Right arm (behind) -->
-  <path d="M 100 118 C 110 104,126 88,138 74 C 150 60,160 46,158 34
-           C 156 22,142 18,132 26 C 122 34,124 50,136 64"
-        fill="none" stroke="url(#g)" stroke-width="13"
-        stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- Finger 1: index (behind) bottom-left → top-right -->
+  <line x1="85"  y1="182" x2="140" y2="18"
+        stroke="url(#g)" stroke-width="28" stroke-linecap="round"/>
 
-  <!-- White knockout at crossing -->
-  <path d="M 100 118 C 97 110,94 102,92 96"
-        fill="none" stroke="white" stroke-width="20" stroke-linecap="round"/>
+  <!-- White knockout at crossing point -->
+  <line x1="105" y1="150" x2="95"  y2="122"
+        stroke="white" stroke-width="40" stroke-linecap="round"/>
 
-  <!-- Left arm + stem (in front) -->
-  <path d="M 78 72 C 90 56,92 40,82 30 C 72 20,58 24,56 36
-           C 54 48,64 60,76 72 C 88 86,96 104,100 118 L 100 180"
-        fill="none" stroke="url(#g)" stroke-width="13"
-        stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- Finger 2: middle (in front) bottom-right → top-left -->
+  <line x1="115" y1="182" x2="60"  y2="18"
+        stroke="url(#g)" stroke-width="28" stroke-linecap="round"/>
 
-  <!-- Leaf -->
-  <path d="M 100 177 C 89 185,85 198,100 206 C 115 198,111 185,100 177 Z"
-        fill="url(#g)"/>
-
-  <!-- ── WORDMARK ── -->
+  <!-- Wordmark -->
   <text x="224" y="118"
         font-family="'SF Pro Rounded','Nunito','Poppins','Helvetica Neue',Arial,sans-serif"
         font-size="72" font-weight="700" letter-spacing="-2"
