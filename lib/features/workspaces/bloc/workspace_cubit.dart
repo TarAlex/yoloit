@@ -13,6 +13,20 @@ class WorkspaceCubit extends Cubit<WorkspaceState> {
 
   static const _storageKey = 'workspaces';
 
+  /// Default palette for auto-assigning workspace accent colours.
+  static const _kWorkspacePalette = [
+    Color(0xFF7C3AED), // violet
+    Color(0xFF2563EB), // blue
+    Color(0xFF059669), // emerald
+    Color(0xFFD97706), // amber
+    Color(0xFFDC2626), // red
+    Color(0xFF0891B2), // cyan
+    Color(0xFFDB2777), // pink
+    Color(0xFF65A30D), // lime
+    Color(0xFF9333EA), // purple
+    Color(0xFFEA580C), // orange
+  ];
+
   Future<void> load() async {
     emit(const WorkspaceLoading());
     try {
@@ -34,9 +48,11 @@ class WorkspaceCubit extends Cubit<WorkspaceState> {
   Future<void> addWorkspace(String folderPath) async {
     final name = p.basename(folderPath);
     final id = '${name}_${DateTime.now().millisecondsSinceEpoch}';
-    final workspace = Workspace(id: id, name: name, path: folderPath);
     final current = _currentLoaded;
     if (current == null) return;
+    // Assign a default accent colour cycling through the palette.
+    final defaultColor = _kWorkspacePalette[current.workspaces.length % _kWorkspacePalette.length];
+    final workspace = Workspace(id: id, name: name, path: folderPath, color: defaultColor);
     final updated = [...current.workspaces, workspace];
     emit(current.copyWith(workspaces: updated));
     await _save(updated);

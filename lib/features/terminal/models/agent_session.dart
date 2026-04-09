@@ -9,6 +9,7 @@ class AgentSession extends Equatable {
     required this.id,
     required this.type,
     required this.workspacePath,
+    this.workspaceId,
     this.status = AgentStatus.idle,
     this.sessionId,
   }) : terminal = Terminal(maxLines: 10000);
@@ -19,6 +20,7 @@ class AgentSession extends Equatable {
     required this.type,
     required this.workspacePath,
     required this.terminal,
+    this.workspaceId,
     this.status = AgentStatus.idle,
     this.sessionId,
   });
@@ -26,6 +28,8 @@ class AgentSession extends Equatable {
   final String id;
   final AgentType type;
   final String workspacePath;
+  /// ID of the parent workspace — used to re-inject secrets on restore.
+  final String? workspaceId;
   final AgentStatus status;
   final String? sessionId;
   final Terminal terminal;
@@ -38,6 +42,7 @@ class AgentSession extends Equatable {
       id: id,
       type: type,
       workspacePath: workspacePath,
+      workspaceId: workspaceId,
       terminal: terminal,
       status: status ?? this.status,
       sessionId: sessionId ?? this.sessionId,

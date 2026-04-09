@@ -3,7 +3,10 @@ import 'dart:convert';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_pty/flutter_pty.dart';
 import 'package:yoloit/features/terminal/bloc/terminal_state.dart';
+import 'package:yoloit/features/terminal/data/logging_service.dart';
 import 'package:yoloit/features/terminal/data/pty_service.dart';
+import 'package:yoloit/features/terminal/data/session_persistence_service.dart';
+import 'package:yoloit/features/terminal/data/tmux_service.dart';
 import 'package:yoloit/features/terminal/models/agent_session.dart';
 import 'package:yoloit/features/terminal/models/agent_type.dart';
 import 'package:yoloit/features/workspaces/data/workspace_secrets_service.dart';
@@ -12,24 +15,51 @@ class TerminalCubit extends Cubit<TerminalState> {
   TerminalCubit() : super(const TerminalInitial());
 
   final _ptyService = PtyService.instance;
+  final _persistence = SessionPersistenceService.instance;
+  final _logging = LoggingService.instance;
+  final _tmux = TmuxService.instance;
 
-  void initialize() {
+  /// Initialises services and restores previously active sessions.
+  Future<void> initialize() async {
+    await Future.wait([
+      _logging.init(),
+      _tmux.init(),
+    ]);
     emit(const TerminalLoaded(sessions: [], activeIndex: 0));
+    await _restoreSessions();
+  }
+
+  Future<void> _restoreSessions() async {
+    final saved = await _persistence.load();
+    for (final s in saved) {
+      if (saved.indexOf(s) > 0) {
+        await Future<void>.delayed(const Duration(milliseconds: 200));
+      }
+      await spawnSession(
+        type: s.type,
+        workspacePath: s.workspacePath,
+        workspaceId: s.workspaceId,
+        savedSessionId: s.id,
+      );
+    }
   }
 
   Future<void> spawnSession({
     required AgentType type,
     required String workspacePath,
     String? workspaceId,
+    String? savedSessionId,
   }) async {
     final current = _loaded;
     if (current == null) return;
 
-    final sessionId = '${type.name}_${DateTime.now().millisecondsSinceEpoch}';
+    final sessionId =
+        savedSessionId ?? '${type.name}_${DateTime.now().millisecondsSinceEpoch}';
     final session = AgentSession(
       id: sessionId,
       type: type,
       workspacePath: workspacePath,
+      workspaceId: workspaceId,
       status: AgentStatus.live,
       sessionId: _generateSessionId(),
     );
@@ -37,20 +67,34 @@ class TerminalCubit extends Cubit<TerminalState> {
     final secrets = workspaceId != null
         ? await WorkspaceSecretsService.instance.load(workspaceId)
         : <String, String>{};
+    final extraEnv = secrets.isEmpty ? null : secrets;
 
-    final pty = _ptyService.launch(
-      sessionId: sessionId,
-      workspacePath: workspacePath,
-      extraEnv: secrets.isEmpty ? null : secrets,
-    );
+    final Pty pty;
+    if (_tmux.isActive) {
+      pty = _ptyService.launchTmux(
+        sessionId: sessionId,
+        workspacePath: workspacePath,
+        tmuxLauncher: _tmux.launch,
+        extraEnv: extraEnv,
+      );
+    } else {
+      pty = _ptyService.launch(
+        sessionId: sessionId,
+        workspacePath: workspacePath,
+        extraEnv: extraEnv,
+      );
+    }
 
+    unawaited(_logging.startSession(sessionId, '${type.displayName} @ $workspacePath'));
     _attachPtyToSession(pty, session);
 
     final sessions = [...current.sessions, session];
     emit(current.copyWith(sessions: sessions, activeIndex: sessions.length - 1));
+    unawaited(_persistence.save(sessions));
 
-    // Auto-run the agent command once the shell is ready (skip for plain terminal).
-    if (type.launchCommand.isNotEmpty) {
+    // Auto-run agent command (skip for plain terminal and when restoring tmux session).
+    final isRestore = savedSessionId != null;
+    if (type.launchCommand.isNotEmpty && !(isRestore && _tmux.isActive)) {
       await Future<void>.delayed(const Duration(milliseconds: 400));
       _ptyService.write(sessionId, '${type.launchCommand}\n');
     }
@@ -66,10 +110,16 @@ class TerminalCubit extends Cubit<TerminalState> {
   void closeSession(String sessionId) {
     final current = _loaded;
     if (current == null) return;
-    _ptyService.kill(sessionId);
+    _ptyService.kill(
+      sessionId,
+      onKillTmux: _tmux.isActive ? _tmux.killSession : null,
+    );
+    unawaited(_logging.endSession(sessionId));
     final sessions = current.sessions.where((s) => s.id != sessionId).toList();
-    final newIndex = current.activeIndex.clamp(0, sessions.isEmpty ? 0 : sessions.length - 1);
+    final newIndex =
+        current.activeIndex.clamp(0, sessions.isEmpty ? 0 : sessions.length - 1);
     emit(current.copyWith(sessions: sessions, activeIndex: newIndex));
+    unawaited(_persistence.save(sessions));
   }
 
   void resizeActiveTerminal(int columns, int rows) {
@@ -85,7 +135,10 @@ class TerminalCubit extends Cubit<TerminalState> {
         .cast<List<int>>()
         .transform(const Utf8Decoder(allowMalformed: true))
         .listen(
-          session.terminal.write,
+          (data) {
+            session.terminal.write(data);
+            _logging.write(session.id, data);
+          },
           onDone: () => _onSessionDone(session.id),
           // ignore: avoid_types_on_closure_parameters
           onError: (Object e) => _onSessionDone(session.id),
@@ -96,10 +149,7 @@ class TerminalCubit extends Cubit<TerminalState> {
     final current = _loaded;
     if (current == null) return;
     final sessions = current.sessions.map((s) {
-      if (s.id == sessionId) {
-        // Preserve the existing terminal — do NOT create a new one.
-        return s.copyWith(status: AgentStatus.idle);
-      }
+      if (s.id == sessionId) return s.copyWith(status: AgentStatus.idle);
       return s;
     }).toList();
     if (!isClosed) emit(current.copyWith(sessions: sessions));
@@ -124,7 +174,11 @@ class TerminalCubit extends Cubit<TerminalState> {
 
   @override
   Future<void> close() {
+    // killAll() detaches PTYs but does NOT kill tmux sessions, so agents survive.
     _ptyService.killAll();
     return super.close();
   }
 }
+
+// ignore_for_file: discarded_futures
+void unawaited(Future<void> future) {}

@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:yoloit/core/theme/app_colors.dart';
+import 'package:yoloit/core/theme/app_color_scheme.dart';
 
 // ---------------------------------------------------------------------------
 // Controller
@@ -162,6 +162,7 @@ class _DividerState extends State<_Divider> {
 
   @override
   Widget build(BuildContext context) {
+    final colors = context.appColors;
     return MouseRegion(
       cursor: SystemMouseCursors.resizeColumn,
       onEnter: (_) => setState(() => _hovering = true),
@@ -172,7 +173,7 @@ class _DividerState extends State<_Divider> {
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 150),
           width: 4,
-          color: _hovering ? AppColors.primary.withAlpha(180) : AppColors.divider,
+          color: _hovering ? colors.primary.withAlpha(180) : colors.divider,
         ),
       ),
     );

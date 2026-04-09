@@ -19,10 +19,7 @@ void main() {
     // Workspace panel interactive text elements
     expect(find.byTooltip('Add workspace'), findsOneWidget);
 
-    // Setup section items visible (used by screen readers via text)
-    expect(find.text('Environment Scripts'), findsOneWidget);
-    expect(find.text('API Keys & Secrets'), findsOneWidget);
-    expect(find.text('Docker Configs'), findsOneWidget);
+    // Color Themes and Settings always visible
     expect(find.text('Color Themes'), findsOneWidget);
     expect(find.text('Settings'), findsWidgets);
   });

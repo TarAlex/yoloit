@@ -15,10 +15,7 @@ void main() {
     // Add workspace button always present
     expect(find.byTooltip('Add workspace'), findsOneWidget);
 
-    // Setup section items always visible
-    expect(find.text('Environment Scripts'), findsOneWidget);
-    expect(find.text('API Keys & Secrets'), findsOneWidget);
-    expect(find.text('Docker Configs'), findsOneWidget);
+    // Color Themes always visible
     expect(find.text('Color Themes'), findsOneWidget);
   });
 }

@@ -12,6 +12,8 @@ import 'package:yoloit/features/workspaces/bloc/workspace_cubit.dart';
 import 'package:yoloit/features/workspaces/bloc/workspace_state.dart';
 import 'package:yoloit/features/workspaces/data/workspace_secrets_service.dart';
 import 'package:yoloit/features/workspaces/models/workspace.dart';
+import 'package:yoloit/features/workspaces/ui/worktree_section.dart';
+import 'package:yoloit/core/theme/app_color_scheme.dart';
 
 class WorkspacePanel extends StatefulWidget {
   const WorkspacePanel({super.key});
@@ -25,17 +27,19 @@ class _WorkspacePanelState extends State<WorkspacePanel> {
 
   @override
   Widget build(BuildContext context) {
+    final colors = context.appColors;
     return Container(
-      color: AppColors.surface,
+      color: colors.surface,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _buildLogo(),
+          _buildLogo(context),
           Expanded(
             child: SingleChildScrollView(
               child: Column(
                 children: [
                   _buildWorkspacesList(),
+                  _buildWorktreeSection(),
                   _buildSetupSection(),
                 ],
               ),
@@ -47,11 +51,12 @@ class _WorkspacePanelState extends State<WorkspacePanel> {
     );
   }
 
-  Widget _buildLogo() {
+  Widget _buildLogo(BuildContext context) {
+    final colors = context.appColors;
     return Container(
-      padding: const EdgeInsets.fromLTRB(12, 16, 12, 12),
-      decoration: const BoxDecoration(
-        border: Border(bottom: BorderSide(color: AppColors.border)),
+      padding: EdgeInsets.fromLTRB(12, 16, 12, 12),
+      decoration: BoxDecoration(
+        border: Border(bottom: BorderSide(color: colors.border)),
       ),
       child: Row(
         children: [
@@ -59,9 +64,9 @@ class _WorkspacePanelState extends State<WorkspacePanel> {
             width: 34,
             height: 34,
             decoration: BoxDecoration(
-              color: AppColors.primary.withAlpha(30),
+              color: colors.primary.withAlpha(30),
               borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: AppColors.primary.withAlpha(60)),
+              border: Border.all(color: colors.primary.withAlpha(60)),
             ),
             padding: const EdgeInsets.all(4),
             child: SvgPicture.asset('assets/images/yoloit_mark.svg'),
@@ -98,9 +103,28 @@ class _WorkspacePanelState extends State<WorkspacePanel> {
     );
   }
 
+  Widget _buildWorktreeSection() {
+    return BlocBuilder<WorkspaceCubit, WorkspaceState>(
+      builder: (context, state) {
+        if (state is! WorkspaceLoaded || state.activeWorkspaceId == null) {
+          return const SizedBox.shrink();
+        }
+        final active = state.workspaces.firstWhere(
+          (w) => w.id == state.activeWorkspaceId,
+          orElse: () => state.workspaces.first,
+        );
+        return WorktreeSection(
+          workspacePath: active.path,
+          workspaceName: active.name,
+        );
+      },
+    );
+  }
+
   Widget _buildWorkspacesList() {
     return BlocBuilder<WorkspaceCubit, WorkspaceState>(
       builder: (context, state) {
+        final colors = context.appColors;
         final workspaces = state is WorkspaceLoaded ? state.workspaces : <Workspace>[];
         final activeId = state is WorkspaceLoaded ? state.activeWorkspaceId : null;
 
@@ -141,9 +165,9 @@ class _WorkspacePanelState extends State<WorkspacePanel> {
                   child: GestureDetector(
                     onTap: () => _addWorkspace(context),
                     child: Container(
-                      padding: const EdgeInsets.all(12),
+                      padding: EdgeInsets.all(12),
                       decoration: BoxDecoration(
-                        border: Border.all(color: AppColors.border, style: BorderStyle.solid),
+                        border: Border.all(color: colors.border, style: BorderStyle.solid),
                         borderRadius: BorderRadius.circular(6),
                       ),
                       child: const Row(
@@ -183,28 +207,7 @@ class _WorkspacePanelState extends State<WorkspacePanel> {
     );
   }
 
-  Widget _buildSetupSection() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Padding(
-          padding: EdgeInsets.fromLTRB(12, 16, 12, 4),
-          child: Text(
-            'Setup',
-            style: TextStyle(
-              color: AppColors.textMuted,
-              fontSize: 10,
-              fontWeight: FontWeight.w600,
-              letterSpacing: 0.8,
-            ),
-          ),
-        ),
-        _SetupItem(icon: Icons.terminal_outlined, label: 'Environment Scripts', onTap: () {}),
-        _SetupItem(icon: Icons.key_outlined, label: 'API Keys & Secrets', onTap: () {}),
-        _SetupItem(icon: Icons.dns_outlined, label: 'Docker Configs', onTap: () {}),
-      ],
-    );
-  }
+  Widget _buildSetupSection() => const SizedBox.shrink();
 
   Widget _buildBottomSection() {
     return Column(
@@ -334,8 +337,9 @@ class _WorkspaceTileState extends State<_WorkspaceTile> {
 
   @override
   Widget build(BuildContext context) {
+    final colors = context.appColors;
     final ws = widget.workspace;
-    final accentColor = ws.color ?? AppColors.primary;
+    final accentColor = ws.color ?? colors.primary;
     return MouseRegion(
       onEnter: (_) => setState(() => _hovering = true),
       onExit: (_) => setState(() {
@@ -351,12 +355,12 @@ class _WorkspaceTileState extends State<_WorkspaceTile> {
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 120),
             margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-            padding: const EdgeInsets.all(10),
+            padding: EdgeInsets.all(10),
             decoration: BoxDecoration(
               color: widget.isActive
                   ? accentColor.withAlpha(30)
                   : _hovering
-                      ? AppColors.surfaceHighlight
+                      ? colors.surfaceHighlight
                       : Colors.transparent,
               borderRadius: BorderRadius.circular(6),
               border: widget.isActive
@@ -439,10 +443,10 @@ class _WorkspaceTileState extends State<_WorkspaceTile> {
                 ),
                 // Color picker row
                 if (_showColorPicker) ...[
-                  const SizedBox(height: 8),
+                  SizedBox(height: 8),
                   Row(
                     children: _palette.map((c) {
-                      final selected = (ws.color ?? AppColors.primary) == c;
+                      final selected = (ws.color ?? colors.primary) == c;
                       return GestureDetector(
                         onTap: () {
                           widget.onColorChange(c);
@@ -519,17 +523,17 @@ class _WorkspaceTileState extends State<_WorkspaceTile> {
                       return GestureDetector(
                         onTap: () => widget.onSpawnAgent(type),
                         child: Container(
-                          margin: const EdgeInsets.only(right: 4),
-                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                          margin: EdgeInsets.only(right: 4),
+                          padding: EdgeInsets.symmetric(horizontal: 6, vertical: 3),
                           decoration: BoxDecoration(
-                            color: AppColors.primary.withAlpha(40),
+                            color: colors.primary.withAlpha(40),
                             borderRadius: BorderRadius.circular(4),
-                            border: Border.all(color: AppColors.primary.withAlpha(80)),
+                            border: Border.all(color: colors.primary.withAlpha(80)),
                           ),
                           child: Text(
                             type.displayName,
                             style: TextStyle(
-                              color: AppColors.primaryLight,
+                              color: colors.primaryLight,
                               fontSize: 10,
                               fontWeight: FontWeight.w600,
                             ),
@@ -570,6 +574,7 @@ class _SetupItemState extends State<_SetupItem> {
 
   @override
   Widget build(BuildContext context) {
+    final colors = context.appColors;
     return MouseRegion(
       onEnter: (_) => setState(() => _hovering = true),
       onExit: (_) => setState(() => _hovering = false),
@@ -580,9 +585,9 @@ class _SetupItemState extends State<_SetupItem> {
         child: GestureDetector(
           onTap: widget.onTap,
           child: AnimatedContainer(
-            duration: const Duration(milliseconds: 100),
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            color: _hovering ? AppColors.surfaceHighlight : Colors.transparent,
+            duration: Duration(milliseconds: 100),
+            padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            color: _hovering ? colors.surfaceHighlight : Colors.transparent,
             child: Row(
               children: [
                 Icon(widget.icon, size: 14, color: AppColors.textSecondary),
@@ -671,12 +676,13 @@ class _SecretsDialogState extends State<_SecretsDialog> {
 
   @override
   Widget build(BuildContext context) {
+    final colors = context.appColors;
     final entries = _secrets.entries.toList();
     return Dialog(
-      backgroundColor: AppColors.surface,
+      backgroundColor: colors.surface,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(10),
-        side: const BorderSide(color: AppColors.border),
+        side: BorderSide(color: colors.border),
       ),
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 480, minWidth: 360),
@@ -781,12 +787,12 @@ class _SecretsDialogState extends State<_SecretsDialog> {
                       );
                     },
                   ),
-                const SizedBox(height: 8),
+                SizedBox(height: 8),
                 TextButton.icon(
                   onPressed: _addEntry,
-                  icon: const Icon(Icons.add, size: 14),
-                  label: const Text('Add secret', style: TextStyle(fontSize: 12)),
-                  style: TextButton.styleFrom(foregroundColor: AppColors.primary),
+                  icon: Icon(Icons.add, size: 14),
+                  label: Text('Add secret', style: TextStyle(fontSize: 12)),
+                  style: TextButton.styleFrom(foregroundColor: colors.primary),
                 ),
               ],
               const SizedBox(height: 16),
@@ -797,11 +803,11 @@ class _SecretsDialogState extends State<_SecretsDialog> {
                     onPressed: () => Navigator.of(context).pop(),
                     child: const Text('Cancel', style: TextStyle(color: AppColors.textSecondary)),
                   ),
-                  const SizedBox(width: 8),
+                  SizedBox(width: 8),
                   ElevatedButton(
                     onPressed: _loading ? null : _save,
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: AppColors.primary,
+                      backgroundColor: colors.primary,
                       foregroundColor: Colors.white,
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
                     ),
@@ -832,28 +838,29 @@ class _SecretTextField extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = context.appColors;
     return TextFormField(
       initialValue: initialValue,
       obscureText: obscure,
       style: const TextStyle(color: AppColors.textPrimary, fontSize: 12),
       decoration: InputDecoration(
         hintText: hint,
-        hintStyle: const TextStyle(color: AppColors.textMuted, fontSize: 12),
-        contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+        hintStyle: TextStyle(color: AppColors.textMuted, fontSize: 12),
+        contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 6),
         isDense: true,
         filled: true,
-        fillColor: AppColors.surfaceElevated,
+        fillColor: colors.surfaceElevated,
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(4),
-          borderSide: const BorderSide(color: AppColors.border),
+          borderSide: BorderSide(color: colors.border),
         ),
         enabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(4),
-          borderSide: const BorderSide(color: AppColors.border),
+          borderSide: BorderSide(color: colors.border),
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(4),
-          borderSide: BorderSide(color: AppColors.primary),
+          borderSide: BorderSide(color: colors.primary),
         ),
       ),
       onChanged: onChanged,

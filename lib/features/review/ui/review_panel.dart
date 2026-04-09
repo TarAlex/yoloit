@@ -1,16 +1,22 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:highlight/highlight.dart' show highlight, Node;
+import 'package:yoloit/core/theme/app_color_scheme.dart';
 import 'package:yoloit/core/theme/app_colors.dart';
+import 'package:yoloit/features/editor/bloc/file_editor_cubit.dart';
+import 'package:yoloit/features/editor/utils/file_type_utils.dart';
 import 'package:yoloit/features/review/bloc/review_cubit.dart';
 import 'package:yoloit/features/review/bloc/review_state.dart';
 import 'package:yoloit/features/review/models/review_models.dart';
+import 'package:yoloit/features/workspaces/bloc/workspace_cubit.dart';
+import 'package:yoloit/features/workspaces/bloc/workspace_state.dart';
 
 class ReviewPanel extends StatelessWidget {
   const ReviewPanel({super.key});
 
   @override
   Widget build(BuildContext context) {
+
     return BlocBuilder<ReviewCubit, ReviewState>(
       builder: (context, state) {
         if (state is ReviewLoaded) {
@@ -25,8 +31,9 @@ class ReviewPanel extends StatelessWidget {
 class _EmptyReview extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
+    final colors = context.appColors;
     return Container(
-      color: AppColors.surface,
+      color: colors.surface,
       child: const Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -55,8 +62,9 @@ class _ReviewContent extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = context.appColors;
     return Container(
-      color: AppColors.surface,
+      color: colors.surface,
       child: Column(
         children: [
           _ReviewHeader(state: state),
@@ -88,11 +96,12 @@ class _ReviewHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = context.appColors;
     return Container(
       height: 40,
-      padding: const EdgeInsets.symmetric(horizontal: 12),
-      decoration: const BoxDecoration(
-        border: Border(bottom: BorderSide(color: AppColors.border)),
+      padding: EdgeInsets.symmetric(horizontal: 12),
+      decoration: BoxDecoration(
+        border: Border(bottom: BorderSide(color: colors.border)),
       ),
       child: Row(
         children: [
@@ -189,6 +198,7 @@ class _FileTreeNodeWidgetState extends State<_FileTreeNodeWidget> {
 
   @override
   Widget build(BuildContext context) {
+    final colors = context.appColors;
     final node = widget.node;
     final isSelected = node.path == widget.selectedPath;
 
@@ -205,6 +215,12 @@ class _FileTreeNodeWidgetState extends State<_FileTreeNodeWidget> {
                 context.read<ReviewCubit>().toggleNode(node.path);
               } else {
                 context.read<ReviewCubit>().selectFile(node.path);
+                // Open file in editor panel
+                try {
+                  context.read<FileEditorCubit>().openFile(node.path);
+                } catch (_) {
+                  // FileEditorCubit not in scope — ignore
+                }
               }
             },
             child: AnimatedContainer(
@@ -216,9 +232,9 @@ class _FileTreeNodeWidgetState extends State<_FileTreeNodeWidget> {
                 bottom: 3,
               ),
               color: isSelected
-                  ? AppColors.primary.withAlpha(30)
+                  ? colors.primary.withAlpha(30)
                   : _hovering
-                      ? AppColors.surfaceHighlight
+                      ? colors.surfaceHighlight
                       : Colors.transparent,
               child: Row(
                 children: [
@@ -231,17 +247,21 @@ class _FileTreeNodeWidgetState extends State<_FileTreeNodeWidget> {
                   else
                     const SizedBox(width: 12),
                   const SizedBox(width: 4),
-                  Icon(
-                    node.isDirectory
-                        ? (node.isExpanded ? Icons.folder_open : Icons.folder)
-                        : _fileIcon(node.name),
-                    size: 12,
-                    color: node.isDirectory
-                        ? AppColors.neonBlue.withAlpha(180)
-                        : node.isModified
-                            ? AppColors.neonOrange
-                            : AppColors.textSecondary,
-                  ),
+                  Builder(builder: (_) {
+                    if (node.isDirectory) {
+                      return Icon(
+                        node.isExpanded ? Icons.folder_open : Icons.folder,
+                        size: 12,
+                        color: AppColors.neonBlue.withAlpha(180),
+                      );
+                    }
+                    final ft = FileTypeUtils.forPath(node.path.isNotEmpty ? node.path : node.name);
+                    return Icon(
+                      ft.icon,
+                      size: 12,
+                      color: node.isModified ? AppColors.neonOrange : ft.color,
+                    );
+                  }),
                   const SizedBox(width: 5),
                   Expanded(
                     child: Text(
@@ -281,17 +301,6 @@ class _FileTreeNodeWidgetState extends State<_FileTreeNodeWidget> {
       ],
     );
   }
-
-  IconData _fileIcon(String name) {
-    final ext = name.split('.').last.toLowerCase();
-    return switch (ext) {
-      'dart' => Icons.code,
-      'yaml' || 'yml' || 'json' => Icons.data_object,
-      'md' || 'markdown' => Icons.description_outlined,
-      'png' || 'jpg' || 'svg' || 'gif' => Icons.image_outlined,
-      _ => Icons.insert_drive_file_outlined,
-    };
-  }
 }
 
 class _ContentSection extends StatelessWidget {
@@ -300,13 +309,14 @@ class _ContentSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = context.appColors;
     return Column(
       children: [
         // View mode toggle
         Container(
-          padding: const EdgeInsets.fromLTRB(12, 6, 12, 6),
-          decoration: const BoxDecoration(
-            border: Border(bottom: BorderSide(color: AppColors.border)),
+          padding: EdgeInsets.fromLTRB(12, 6, 12, 6),
+          decoration: BoxDecoration(
+            border: Border(bottom: BorderSide(color: colors.border)),
           ),
           child: Row(
             children: [
@@ -334,16 +344,16 @@ class _ContentSection extends StatelessWidget {
                   }
                 },
                 child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  padding: EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                   decoration: BoxDecoration(
-                    color: AppColors.primary.withAlpha(40),
+                    color: colors.primary.withAlpha(40),
                     borderRadius: BorderRadius.circular(4),
-                    border: Border.all(color: AppColors.primary.withAlpha(80)),
+                    border: Border.all(color: colors.primary.withAlpha(80)),
                   ),
                   child: Text(
                     'Stage Changes',
                     style: TextStyle(
-                      color: AppColors.primaryLight,
+                      color: colors.primaryLight,
                       fontSize: 10,
                       fontWeight: FontWeight.w600,
                     ),
@@ -370,11 +380,12 @@ class _ViewModeToggle extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = context.appColors;
     return Container(
       decoration: BoxDecoration(
-        color: AppColors.surfaceElevated,
+        color: colors.surfaceElevated,
         borderRadius: BorderRadius.circular(4),
-        border: Border.all(color: AppColors.border),
+        border: Border.all(color: colors.border),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -384,7 +395,7 @@ class _ViewModeToggle extends StatelessWidget {
             isActive: currentMode == ReviewViewMode.diff,
             onTap: () => onChanged(ReviewViewMode.diff),
           ),
-          Container(width: 1, height: 16, color: AppColors.border),
+          Container(width: 1, height: 16, color: colors.border),
           _ToggleButton(
             label: 'File',
             isActive: currentMode == ReviewViewMode.file,
@@ -408,19 +419,20 @@ class _ToggleButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = context.appColors;
     return GestureDetector(
       onTap: onTap,
       child: AnimatedContainer(
-        duration: const Duration(milliseconds: 100),
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+        duration: Duration(milliseconds: 100),
+        padding: EdgeInsets.symmetric(horizontal: 8, vertical: 3),
         decoration: BoxDecoration(
-          color: isActive ? AppColors.primary.withAlpha(40) : Colors.transparent,
+          color: isActive ? colors.primary.withAlpha(40) : Colors.transparent,
           borderRadius: BorderRadius.circular(3),
         ),
         child: Text(
           label,
           style: TextStyle(
-            color: isActive ? AppColors.primaryLight : AppColors.textMuted,
+            color: isActive ? colors.primaryLight : AppColors.textMuted,
             fontSize: 10,
             fontWeight: isActive ? FontWeight.w600 : FontWeight.w400,
           ),
@@ -464,19 +476,20 @@ class _DiffHunkWidget extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = context.appColors;
     return Container(
-      margin: const EdgeInsets.only(bottom: 8),
+      margin: EdgeInsets.only(bottom: 8),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(4),
-        border: Border.all(color: AppColors.border),
+        border: Border.all(color: colors.border),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-            decoration: const BoxDecoration(
-              color: AppColors.surfaceElevated,
+            padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            decoration: BoxDecoration(
+              color: colors.surfaceElevated,
               borderRadius: BorderRadius.only(
                 topLeft: Radius.circular(3),
                 topRight: Radius.circular(3),
@@ -721,6 +734,7 @@ class _ChangedFilesSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = context.appColors;
     if (state.changedFiles.isEmpty) {
       return const Center(
         child: Text(
@@ -745,17 +759,17 @@ class _ChangedFilesSection extends StatelessWidget {
                   letterSpacing: 0.8,
                 ),
               ),
-              const SizedBox(width: 6),
+              SizedBox(width: 6),
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                padding: EdgeInsets.symmetric(horizontal: 5, vertical: 1),
                 decoration: BoxDecoration(
-                  color: AppColors.primary.withAlpha(40),
+                  color: colors.primary.withAlpha(40),
                   borderRadius: BorderRadius.circular(3),
                 ),
                 child: Text(
                   '${state.changedFiles.length}',
                   style: TextStyle(
-                    color: AppColors.primaryLight,
+                    color: colors.primaryLight,
                     fontSize: 9,
                     fontWeight: FontWeight.w700,
                   ),
@@ -792,6 +806,7 @@ class _ChangedFileTileState extends State<_ChangedFileTile> {
 
   @override
   Widget build(BuildContext context) {
+    final colors = context.appColors;
     final file = widget.file;
     final statusColor = switch (file.status) {
       FileChangeStatus.added => AppColors.neonGreen,
@@ -812,12 +827,23 @@ class _ChangedFileTileState extends State<_ChangedFileTile> {
       onExit: (_) => setState(() => _hovering = false),
       child: GestureDetector(
         onTap: () {
-          // Will need full path - for now use relative
+          final wsState = context.read<WorkspaceCubit>().state;
+          if (wsState is WorkspaceLoaded) {
+            final workspace = wsState.activeWorkspace;
+            if (workspace != null) {
+              try {
+                context.read<FileEditorCubit>().openDiff(
+                  widget.file.path,
+                  workspace.path,
+                );
+              } catch (_) {}
+            }
+          }
         },
         child: AnimatedContainer(
-          duration: const Duration(milliseconds: 100),
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
-          color: _hovering ? AppColors.surfaceHighlight : Colors.transparent,
+          duration: Duration(milliseconds: 100),
+          padding: EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+          color: _hovering ? colors.surfaceHighlight : Colors.transparent,
           child: Row(
             children: [
               Container(
@@ -866,9 +892,10 @@ class _PrStatusSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = context.appColors;
     return Container(
-      decoration: const BoxDecoration(
-        border: Border(top: BorderSide(color: AppColors.border)),
+      decoration: BoxDecoration(
+        border: Border(top: BorderSide(color: colors.border)),
       ),
       padding: const EdgeInsets.all(10),
       child: Column(
@@ -916,12 +943,12 @@ class _PrStatusSection extends StatelessWidget {
               ),
             ],
           ),
-          const SizedBox(height: 6),
+          SizedBox(height: 6),
           Row(
             children: [
               _PrButton(
                 label: 'Create PR',
-                color: AppColors.primary,
+                color: colors.primary,
                 onTap: () {},
               ),
               const SizedBox(width: 4),

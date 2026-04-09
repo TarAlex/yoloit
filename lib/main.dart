@@ -1,12 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:window_manager/window_manager.dart';
 import 'package:yoloit/app.dart';
+import 'package:yoloit/core/hotkeys/hotkey_registry.dart';
 import 'package:yoloit/core/theme/theme_manager.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   await ThemeManager.instance.load();
+  await HotkeyRegistry.instance.load();
 
   await windowManager.ensureInitialized();
   const options = WindowOptions(

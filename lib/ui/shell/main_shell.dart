@@ -1,9 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:window_manager/window_manager.dart';
+import 'package:yoloit/core/hotkeys/hotkey_registry.dart';
 import 'package:yoloit/core/hotkeys/hotkeys.dart';
 import 'package:yoloit/core/theme/app_color_scheme.dart';
 import 'package:yoloit/core/theme/app_colors.dart';
+import 'package:yoloit/features/editor/bloc/file_editor_cubit.dart';
+import 'package:yoloit/features/editor/bloc/file_editor_state.dart';
+import 'package:yoloit/features/editor/ui/file_editor_panel.dart';
 import 'package:yoloit/features/review/ui/review_panel.dart';
 import 'package:yoloit/features/search/ui/file_search_overlay.dart';
 import 'package:yoloit/features/settings/ui/settings_page.dart';
@@ -24,7 +28,8 @@ class MainShell extends StatefulWidget {
 class _MainShellState extends State<MainShell> with WindowListener {
   final _splitController = HSplitViewController();
   final _terminalFocusNode = FocusNode();
-  bool _reviewVisible = false;
+  bool _reviewVisible = true;
+  bool _terminalVisible = true;
 
   @override
   void initState() {
@@ -44,7 +49,7 @@ class _MainShellState extends State<MainShell> with WindowListener {
   void _initCubits() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       context.read<WorkspaceCubit>().load();
-      context.read<TerminalCubit>().initialize(); // async — fire and forget is fine
+      context.read<TerminalCubit>().initialize();
     });
   }
 
@@ -52,7 +57,7 @@ class _MainShellState extends State<MainShell> with WindowListener {
     showFileSearch(
       context,
       onFileOpened: () {
-        setState(() => _reviewVisible = true);
+        if (!_reviewVisible) setState(() => _reviewVisible = true);
       },
     );
   }
@@ -87,8 +92,10 @@ class _MainShellState extends State<MainShell> with WindowListener {
   @override
   Widget build(BuildContext context) {
     final colors = context.appColors;
-    return Shortcuts(
-      shortcuts: yoloitShortcuts,
+    return ListenableBuilder(
+      listenable: HotkeyRegistry.instance,
+      builder: (context, _) => Shortcuts(
+      shortcuts: HotkeyRegistry.instance.shortcuts,
       child: Actions(
         actions: {
           PreviousAgentTabIntent: CallbackAction<PreviousAgentTabIntent>(
@@ -100,9 +107,14 @@ class _MainShellState extends State<MainShell> with WindowListener {
           CloseTerminalTabIntent: CallbackAction<CloseTerminalTabIntent>(
             onInvoke: (_) => _closeTab(),
           ),
-          ToggleWorkspacePanelIntent:
-              CallbackAction<ToggleWorkspacePanelIntent>(
+          ToggleWorkspacePanelIntent: CallbackAction<ToggleWorkspacePanelIntent>(
             onInvoke: (_) => _splitController.toggleLeft(),
+          ),
+          ToggleTerminalPanelIntent: CallbackAction<ToggleTerminalPanelIntent>(
+            onInvoke: (_) {
+              setState(() => _terminalVisible = !_terminalVisible);
+              return null;
+            },
           ),
           ToggleReviewPanelIntent: CallbackAction<ToggleReviewPanelIntent>(
             onInvoke: (_) {
@@ -130,47 +142,170 @@ class _MainShellState extends State<MainShell> with WindowListener {
                   splitController: _splitController,
                   onSettings: () => SettingsPage.show(context),
                   reviewVisible: _reviewVisible,
+                  terminalVisible: _terminalVisible,
                   onToggleReview: () => setState(() => _reviewVisible = !_reviewVisible),
+                  onToggleTerminal: () => setState(() => _terminalVisible = !_terminalVisible),
                   onSearch: _openFileSearch,
                 ),
                 Expanded(
-                  child: Stack(
-                    children: [
-                      // Main layout: workspace panel + terminal (no right split)
-                      HSplitView(
-                        left: const WorkspacePanel(),
-                        center: Focus(
-                          focusNode: _terminalFocusNode,
-                          child: const TerminalPanel(),
-                        ),
-                        right: const SizedBox.shrink(),
-                        initialLeftWidth: 260,
-                        initialRightWidth: 0,
-                        controller: _splitController,
-                      ),
-                      // Review panel slides in from the right as overlay
-                      AnimatedSlide(
-                        offset: _reviewVisible ? Offset.zero : const Offset(1, 0),
-                        duration: const Duration(milliseconds: 220),
-                        curve: Curves.easeInOut,
-                        child: Align(
-                          alignment: Alignment.centerRight,
-                          child: SizedBox(
-                            width: 420,
-                            child: Material(
-                              elevation: 16,
-                              shadowColor: Colors.black54,
-                              child: const ReviewPanel(),
-                            ),
-                          ),
-                        ),
-                      ),
-                    ],
+                  child: _FourPaneLayout(
+                    splitController: _splitController,
+                    terminalFocusNode: _terminalFocusNode,
+                    reviewVisible: _reviewVisible,
+                    terminalVisible: _terminalVisible,
+                    onToggleReview: () => setState(() => _reviewVisible = !_reviewVisible),
                   ),
                 ),
               ],
             ),
           ),
+        ),
+      ),
+    ), // Shortcuts
+    ); // ListenableBuilder
+  }
+}
+
+/// 4-pane layout: [Workspace] [Terminal] [FileEditor?] [ReviewPanel?]
+/// FileEditor appears when a file is open.
+class _FourPaneLayout extends StatefulWidget {
+  const _FourPaneLayout({
+    required this.splitController,
+    required this.terminalFocusNode,
+    required this.reviewVisible,
+    required this.terminalVisible,
+    required this.onToggleReview,
+  });
+
+  final HSplitViewController splitController;
+  final FocusNode terminalFocusNode;
+  final bool reviewVisible;
+  final bool terminalVisible;
+  final VoidCallback onToggleReview;
+
+  @override
+  State<_FourPaneLayout> createState() => _FourPaneLayoutState();
+}
+
+class _FourPaneLayoutState extends State<_FourPaneLayout> {
+  double _workspaceWidth = 260;
+  double _editorWidth = 480;
+  double _reviewWidth = 360;
+
+  static const _minWidth = 160.0;
+
+
+  @override
+  void initState() {
+    super.initState();
+    widget.splitController.addListener(_rebuild);
+  }
+
+  @override
+  void dispose() {
+    widget.splitController.removeListener(_rebuild);
+    super.dispose();
+  }
+
+  void _rebuild() => setState(() {});
+
+  @override
+  Widget build(BuildContext context) {
+    return BlocBuilder<FileEditorCubit, FileEditorState>(
+      builder: (context, editorState) {
+        final showWorkspace = widget.splitController.leftVisible;
+        final showTerminal = widget.terminalVisible;
+        final showEditor = editorState.isVisible;
+        final showReview = widget.reviewVisible;
+
+        return LayoutBuilder(
+          builder: (context, constraints) {
+            final totalWidth = constraints.maxWidth;
+
+            return Row(
+              children: [
+                // ── Workspace panel ──────────────────────────────────────────
+                if (showWorkspace) ...[
+                  SizedBox(width: _workspaceWidth, child: const WorkspacePanel()),
+                  _Divider(
+                    onDrag: (dx) => setState(() {
+                      _workspaceWidth = (_workspaceWidth + dx).clamp(_minWidth, totalWidth / 3);
+                    }),
+                  ),
+                ],
+
+                // ── Terminal/Agents (toggleable, fills remaining when visible) ─
+                if (showTerminal)
+                  Expanded(
+                    child: Focus(
+                      focusNode: widget.terminalFocusNode,
+                      child: const TerminalPanel(),
+                    ),
+                  ),
+
+                // ── File Editor (when a file is open) ─────────────────────────
+                if (showEditor) ...[
+                  if (showTerminal)
+                    _Divider(
+                      onDrag: (dx) => setState(() {
+                        _editorWidth = (_editorWidth - dx).clamp(_minWidth, totalWidth / 2);
+                      }),
+                    ),
+                  // When terminal is hidden, editor fills remaining space
+                  if (showTerminal)
+                    SizedBox(width: _editorWidth, child: const FileEditorPanel())
+                  else
+                    const Expanded(child: FileEditorPanel()),
+                ],
+
+                // ── Review / File Tree ─────────────────────────────────────────
+                if (showReview) ...[
+                  _Divider(
+                    onDrag: (dx) => setState(() {
+                      _reviewWidth = (_reviewWidth - dx).clamp(_minWidth, totalWidth / 2);
+                    }),
+                  ),
+                  SizedBox(width: _reviewWidth, child: const ReviewPanel()),
+                ],
+
+                // ── Fallback when only workspace (or nothing) is showing ───────
+                if (!showTerminal && !showEditor && !showReview)
+                  const Expanded(child: SizedBox.shrink()),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+}
+
+/// Thin draggable divider between panes.
+class _Divider extends StatefulWidget {
+  const _Divider({required this.onDrag});
+  final ValueChanged<double> onDrag;
+
+  @override
+  State<_Divider> createState() => _DividerState();
+}
+
+class _DividerState extends State<_Divider> {
+  bool _hovering = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.appColors;
+    return MouseRegion(
+      cursor: SystemMouseCursors.resizeColumn,
+      onEnter: (_) => setState(() => _hovering = true),
+      onExit: (_) => setState(() => _hovering = false),
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onHorizontalDragUpdate: (d) => widget.onDrag(d.delta.dx),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 120),
+          width: 4,
+          color: _hovering ? colors.primary.withAlpha(120) : colors.divider,
         ),
       ),
     );
@@ -182,13 +317,17 @@ class _TitleBar extends StatefulWidget {
     required this.splitController,
     required this.onSettings,
     required this.reviewVisible,
+    required this.terminalVisible,
     required this.onToggleReview,
+    required this.onToggleTerminal,
     required this.onSearch,
   });
   final HSplitViewController splitController;
   final VoidCallback onSettings;
   final bool reviewVisible;
+  final bool terminalVisible;
   final VoidCallback onToggleReview;
+  final VoidCallback onToggleTerminal;
   final VoidCallback onSearch;
 
   @override
@@ -220,7 +359,7 @@ class _TitleBarState extends State<_TitleBar> {
         color: colors.surface,
         child: Row(
           children: [
-            const SizedBox(width: 72), // space for macOS traffic lights
+            const SizedBox(width: 82), // space for macOS traffic lights + gap
             // Panel toggle buttons
             _PanelToggleButton(
               icon: Icons.view_sidebar,
@@ -228,6 +367,14 @@ class _TitleBarState extends State<_TitleBar> {
               semanticsLabel: 'Toggle left panel',
               active: widget.splitController.leftVisible,
               onTap: widget.splitController.toggleLeft,
+            ),
+            const SizedBox(width: 4),
+            _PanelToggleButton(
+              icon: Icons.terminal,
+              tooltip: 'Toggle Agents / Terminal (⌘T)',
+              semanticsLabel: 'Toggle agents panel',
+              active: widget.terminalVisible,
+              onTap: widget.onToggleTerminal,
             ),
             const Spacer(),
             // Search button in center
@@ -261,9 +408,20 @@ class _TitleBarState extends State<_TitleBar> {
               ),
             ),
             const Spacer(),
+            // File editor toggle
+            BlocBuilder<FileEditorCubit, FileEditorState>(
+              builder: (context, editorState) => _PanelToggleButton(
+                icon: Icons.edit_document,
+                tooltip: 'Toggle File Editor',
+                semanticsLabel: 'Toggle file editor panel',
+                active: editorState.isVisible,
+                onTap: () => context.read<FileEditorCubit>().togglePanel(),
+              ),
+            ),
+            const SizedBox(width: 4),
             _PanelToggleButton(
               icon: Icons.rate_review,
-              tooltip: 'Toggle Review Panel (⌘⇧\\)',
+              tooltip: 'Toggle File Tree (⌘⇧\\)',
               semanticsLabel: 'Toggle right panel',
               active: widget.reviewVisible,
               onTap: widget.onToggleReview,

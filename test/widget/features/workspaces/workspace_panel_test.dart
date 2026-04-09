@@ -54,14 +54,13 @@ void main() {
       expect(find.text('Open a folder...'), findsOneWidget);
     });
 
-    testWidgets('renders Setup section items', (tester) async {
+    testWidgets('Setup section is hidden (items removed)', (tester) async {
       await tester.pumpWidget(_buildTestWidget(const WorkspacePanel()));
       await tester.pump();
 
-      expect(find.text('Setup'), findsOneWidget);
-      expect(find.text('Environment Scripts'), findsOneWidget);
-      expect(find.text('API Keys & Secrets'), findsOneWidget);
-      expect(find.text('Docker Configs'), findsOneWidget);
+      expect(find.text('Environment Scripts'), findsNothing);
+      expect(find.text('API Keys & Secrets'), findsNothing);
+      expect(find.text('Docker Configs'), findsNothing);
     });
 
     testWidgets('renders Color Themes and Settings at bottom', (tester) async {

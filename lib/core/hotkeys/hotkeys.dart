@@ -21,6 +21,10 @@ class ToggleWorkspacePanelIntent extends Intent {
   const ToggleWorkspacePanelIntent();
 }
 
+class ToggleTerminalPanelIntent extends Intent {
+  const ToggleTerminalPanelIntent();
+}
+
 class ToggleReviewPanelIntent extends Intent {
   const ToggleReviewPanelIntent();
 }
@@ -31,6 +35,10 @@ class FocusTerminalIntent extends Intent {
 
 class OpenSettingsIntent extends Intent {
   const OpenSettingsIntent();
+}
+
+class OpenFileSearchIntent extends Intent {
+  const OpenFileSearchIntent();
 }
 
 // ---------------------------------------------------------------------------
@@ -54,6 +62,10 @@ const Map<ShortcutActivator, Intent> yoloitShortcuts = {
   SingleActivator(LogicalKeyboardKey.backslash, meta: true):
       ToggleWorkspacePanelIntent(),
 
+  // Cmd+T — toggle terminal/agents panel
+  SingleActivator(LogicalKeyboardKey.keyT, meta: true):
+      ToggleTerminalPanelIntent(),
+
   // Cmd+Shift+\ — toggle review (right) panel
   SingleActivator(LogicalKeyboardKey.backslash, meta: true, shift: true):
       ToggleReviewPanelIntent(),
@@ -64,4 +76,10 @@ const Map<ShortcutActivator, Intent> yoloitShortcuts = {
 
   // Cmd+, — open settings
   SingleActivator(LogicalKeyboardKey.comma, meta: true): OpenSettingsIntent(),
+
+  // Cmd+P — quick file search
+  SingleActivator(LogicalKeyboardKey.keyP, meta: true): OpenFileSearchIntent(),
+
+  // Cmd+F — quick file search (alias)
+  SingleActivator(LogicalKeyboardKey.keyF, meta: true): OpenFileSearchIntent(),
 };
