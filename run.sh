@@ -1,0 +1,28 @@
+#!/bin/bash
+# Start yoloit in debug mode on macOS
+# hot_reload.sh uses the FIFO pipe to send commands to flutter run
+
+set -e
+cd "$(dirname "$0")"
+
+FIFO="/tmp/yoloit_flutter_stdin"
+VM_FILE="/tmp/yoloit_vm_url.txt"
+
+# Clean up old FIFO
+rm -f "$FIFO"
+mkfifo "$FIFO"
+
+echo "🚀 Starting yoloit..."
+echo "💡 Use ./hot_reload.sh to hot reload"
+
+# Run flutter reading from FIFO and capture VM URL
+flutter run -d macos < "$FIFO" 2>&1 | tee /tmp/yoloit_flutter_log.txt | while IFS= read -r line; do
+  echo "$line"
+  if [[ "$line" == *"Dart VM Service on macOS is available at:"* ]]; then
+    url="${line##*at: }"
+    echo "$url" > "$VM_FILE"
+    echo "💾 VM URL saved → $VM_FILE"
+  fi
+done
+
+rm -f "$FIFO"

@@ -101,7 +101,7 @@ class _SectionHeader extends StatelessWidget {
   Widget build(BuildContext context) {
     return Text(
       title,
-      style: const TextStyle(
+      style: TextStyle(
         color: AppColors.primary,
         fontSize: 12,
         fontWeight: FontWeight.w700,
@@ -218,7 +218,7 @@ class _ShortcutsTable extends StatelessWidget {
                   ),
                   child: Text(
                     key,
-                    style: const TextStyle(
+                    style: TextStyle(
                       color: AppColors.primary,
                       fontSize: 12,
                       fontWeight: FontWeight.w600,

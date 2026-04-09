@@ -11,11 +11,23 @@ class AppColors {
   static const border = Color(0xFF1E1E4A);
   static const divider = Color(0xFF1A1A38);
 
-  // Primary / accent
-  static const primary = Color(0xFF9D4EDD);
-  static const primaryLight = Color(0xFFB87FFF);
-  static const primaryDark = Color(0xFF6B2FA0);
-  static const primaryGlow = Color(0x339D4EDD);
+  // Primary / accent — mutable so theme switcher can update them at runtime.
+  static Color _primary = const Color(0xFF9D4EDD);
+  static Color _primaryLight = const Color(0xFFB87FFF);
+  static Color _primaryDark = const Color(0xFF6B2FA0);
+  static Color _primaryGlow = const Color(0x339D4EDD);
+
+  static Color get primary => _primary;
+  static Color get primaryLight => _primaryLight;
+  static Color get primaryDark => _primaryDark;
+  static Color get primaryGlow => _primaryGlow;
+
+  static void setAccent(Color color) {
+    _primary = color;
+    _primaryLight = Color.lerp(color, Colors.white, 0.35)!;
+    _primaryDark = Color.lerp(color, Colors.black, 0.35)!;
+    _primaryGlow = color.withAlpha(51); // ~0.2 opacity
+  }
 
   // Neon accents
   static const neonGreen = Color(0xFF00FF9F);

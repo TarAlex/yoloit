@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:highlight/highlight.dart' show highlight, Node;
 import 'package:yoloit/core/theme/app_colors.dart';
 import 'package:yoloit/features/review/bloc/review_cubit.dart';
 import 'package:yoloit/features/review/bloc/review_state.dart';
@@ -339,7 +340,7 @@ class _ContentSection extends StatelessWidget {
                     borderRadius: BorderRadius.circular(4),
                     border: Border.all(color: AppColors.primary.withAlpha(80)),
                   ),
-                  child: const Text(
+                  child: Text(
                     'Stage Changes',
                     style: TextStyle(
                       color: AppColors.primaryLight,
@@ -586,6 +587,90 @@ class _FileViewer extends StatelessWidget {
   const _FileViewer({required this.state});
   final ReviewLoaded state;
 
+  // Dark theme color map for syntax tokens
+  static const _tokenColors = <String, Color>{
+    'keyword': Color(0xFFC678DD),
+    'built_in': Color(0xFFE5C07B),
+    'type': Color(0xFFE5C07B),
+    'literal': Color(0xFF56B6C2),
+    'number': Color(0xFFD19A66),
+    'regexp': Color(0xFF98C379),
+    'string': Color(0xFF98C379),
+    'subst': Color(0xFFABB2BF),
+    'symbol': Color(0xFF56B6C2),
+    'class': Color(0xFFE5C07B),
+    'function': Color(0xFF61AFEF),
+    'title': Color(0xFF61AFEF),
+    'params': Color(0xFFABB2BF),
+    'comment': Color(0xFF5C6370),
+    'doctag': Color(0xFF5C6370),
+    'meta': Color(0xFFABB2BF),
+    'meta-keyword': Color(0xFFC678DD),
+    'meta-string': Color(0xFF98C379),
+    'section': Color(0xFF61AFEF),
+    'tag': Color(0xFFE06C75),
+    'name': Color(0xFFE06C75),
+    'attr': Color(0xFFD19A66),
+    'attribute': Color(0xFF98C379),
+    'variable': Color(0xFFE06C75),
+    'bullet': Color(0xFF56B6C2),
+    'code': Color(0xFF98C379),
+    'emphasis': Color(0xFFE06C75),
+    'strong': Color(0xFFE5C07B),
+    'formula': Color(0xFF56B6C2),
+    'link': Color(0xFF61AFEF),
+    'quote': Color(0xFF5C6370),
+    'selector-tag': Color(0xFFE06C75),
+    'selector-id': Color(0xFFE06C75),
+    'selector-class': Color(0xFFD19A66),
+    'template-variable': Color(0xFFE06C75),
+    'template-tag': Color(0xFFC678DD),
+    'addition': Color(0xFF98C379),
+    'deletion': Color(0xFFE06C75),
+  };
+
+  static const _defaultColor = Color(0xFFABB2BF);
+  static const _baseStyle = TextStyle(
+    fontSize: 11,
+    fontFamily: 'monospace',
+    height: 1.5,
+  );
+
+  /// Detect language from file extension
+  static String? _detectLanguage(String? path) {
+    if (path == null) return null;
+    final ext = path.split('.').last.toLowerCase();
+    const map = {
+      'dart': 'dart', 'py': 'python', 'js': 'javascript',
+      'ts': 'typescript', 'tsx': 'typescript', 'jsx': 'javascript',
+      'swift': 'swift', 'kt': 'kotlin', 'java': 'java',
+      'go': 'go', 'rs': 'rust', 'cpp': 'cpp', 'c': 'c', 'h': 'cpp',
+      'cs': 'csharp', 'rb': 'ruby', 'php': 'php', 'sh': 'bash',
+      'yaml': 'yaml', 'yml': 'yaml', 'json': 'json',
+      'md': 'markdown', 'html': 'html', 'css': 'css', 'scss': 'scss',
+      'xml': 'xml', 'sql': 'sql', 'dockerfile': 'dockerfile',
+    };
+    return map[ext];
+  }
+
+  List<TextSpan> _buildSpans(List<Node> nodes, Color parentColor) {
+    return nodes.map((node) {
+      final color = node.className != null
+          ? (_tokenColors[node.className!] ?? parentColor)
+          : parentColor;
+      if (node.value != null) {
+        return TextSpan(
+          text: node.value,
+          style: _baseStyle.copyWith(color: color),
+        );
+      }
+      if (node.children != null) {
+        return TextSpan(children: _buildSpans(node.children!, color));
+      }
+      return const TextSpan();
+    }).toList();
+  }
+
   @override
   Widget build(BuildContext context) {
     if (state.isLoadingFile) {
@@ -600,16 +685,31 @@ class _FileViewer extends StatelessWidget {
         ),
       );
     }
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(8),
-      child: Text(
-        content,
-        style: const TextStyle(
-          color: AppColors.terminalText,
-          fontSize: 11,
-          fontFamily: 'monospace',
-          height: 1.5,
-        ),
+
+    final lang = _detectLanguage(state.selectedFilePath);
+    Widget body;
+    if (lang != null) {
+      try {
+        final parsed = highlight.parse(content, language: lang);
+        final spans = parsed.nodes != null
+            ? _buildSpans(parsed.nodes!, _defaultColor)
+            : [TextSpan(text: content, style: _baseStyle.copyWith(color: _defaultColor))];
+        body = RichText(
+          text: TextSpan(children: spans),
+          textScaler: TextScaler.noScaling,
+        );
+      } catch (_) {
+        body = Text(content, style: _baseStyle.copyWith(color: _defaultColor));
+      }
+    } else {
+      body = Text(content, style: _baseStyle.copyWith(color: _defaultColor));
+    }
+
+    return Container(
+      color: const Color(0xFF1E2127), // one-dark background
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.all(12),
+        child: body,
       ),
     );
   }
@@ -654,7 +754,7 @@ class _ChangedFilesSection extends StatelessWidget {
                 ),
                 child: Text(
                   '${state.changedFiles.length}',
-                  style: const TextStyle(
+                  style: TextStyle(
                     color: AppColors.primaryLight,
                     fontSize: 9,
                     fontWeight: FontWeight.w700,

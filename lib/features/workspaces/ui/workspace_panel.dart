@@ -1,6 +1,7 @@
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 import 'package:yoloit/core/theme/app_colors.dart';
 import 'package:yoloit/core/theme/app_theme.dart';
 import 'package:yoloit/core/theme/theme_manager.dart';
@@ -9,6 +10,7 @@ import 'package:yoloit/features/terminal/bloc/terminal_cubit.dart';
 import 'package:yoloit/features/terminal/models/agent_type.dart';
 import 'package:yoloit/features/workspaces/bloc/workspace_cubit.dart';
 import 'package:yoloit/features/workspaces/bloc/workspace_state.dart';
+import 'package:yoloit/features/workspaces/data/workspace_secrets_service.dart';
 import 'package:yoloit/features/workspaces/models/workspace.dart';
 
 class WorkspacePanel extends StatefulWidget {
@@ -47,45 +49,49 @@ class _WorkspacePanelState extends State<WorkspacePanel> {
 
   Widget _buildLogo() {
     return Container(
-      padding: const EdgeInsets.fromLTRB(16, 20, 16, 16),
+      padding: const EdgeInsets.fromLTRB(12, 16, 12, 12),
       decoration: const BoxDecoration(
         border: Border(bottom: BorderSide(color: AppColors.border)),
       ),
       child: Row(
         children: [
           Container(
-            width: 28,
-            height: 28,
+            width: 34,
+            height: 34,
             decoration: BoxDecoration(
-              color: AppColors.primary.withAlpha(40),
-              borderRadius: BorderRadius.circular(6),
-              border: Border.all(color: AppColors.primary.withAlpha(80)),
+              color: AppColors.primary.withAlpha(30),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: AppColors.primary.withAlpha(60)),
             ),
-            child: const Icon(Icons.hub_outlined, size: 16, color: AppColors.primary),
+            padding: const EdgeInsets.all(4),
+            child: SvgPicture.asset('assets/images/yoloit_mark.svg'),
           ),
           const SizedBox(width: 10),
-          const Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'yoloit',
-                style: TextStyle(
-                  color: AppColors.textPrimary,
-                  fontSize: 16,
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: 1.5,
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: const [
+                Text(
+                  'yoloit',
+                  style: TextStyle(
+                    color: AppColors.textPrimary,
+                    fontSize: 15,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 1.2,
+                  ),
                 ),
-              ),
-              Text(
-                'AI ORCHESTRATOR',
-                style: TextStyle(
-                  color: AppColors.textMuted,
-                  fontSize: 8,
-                  fontWeight: FontWeight.w600,
-                  letterSpacing: 2,
+                Text(
+                  'AI ORCHESTRATOR',
+                  style: TextStyle(
+                    color: AppColors.textMuted,
+                    fontSize: 8,
+                    fontWeight: FontWeight.w600,
+                    letterSpacing: 1.5,
+                  ),
+                  overflow: TextOverflow.ellipsis,
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ],
       ),
@@ -166,6 +172,9 @@ class _WorkspacePanelState extends State<WorkspacePanel> {
                   onTap: () => _selectWorkspace(context, ws),
                   onRemove: () => context.read<WorkspaceCubit>().removeWorkspace(ws.id),
                   onSpawnAgent: (type) => _spawnAgent(context, ws, type),
+                  onColorChange: (color) =>
+                      context.read<WorkspaceCubit>().setWorkspaceColor(ws.id, color),
+                  onSecretsOpen: () => _showSecretsDialog(context, ws),
                 ),
               ),
           ],
@@ -269,7 +278,18 @@ class _WorkspacePanelState extends State<WorkspacePanel> {
 
   void _spawnAgent(BuildContext context, Workspace ws, AgentType type) {
     context.read<WorkspaceCubit>().setActive(ws.id);
-    context.read<TerminalCubit>().spawnSession(type: type, workspacePath: ws.path);
+    context.read<TerminalCubit>().spawnSession(
+          type: type,
+          workspacePath: ws.path,
+          workspaceId: ws.id,
+        );
+  }
+
+  void _showSecretsDialog(BuildContext context, Workspace ws) {
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => _SecretsDialog(workspaceId: ws.id, workspaceName: ws.name),
+    );
   }
 }
 
@@ -280,6 +300,8 @@ class _WorkspaceTile extends StatefulWidget {
     required this.onTap,
     required this.onRemove,
     required this.onSpawnAgent,
+    required this.onColorChange,
+    required this.onSecretsOpen,
   });
 
   final Workspace workspace;
@@ -287,6 +309,8 @@ class _WorkspaceTile extends StatefulWidget {
   final VoidCallback onTap;
   final VoidCallback onRemove;
   final void Function(AgentType) onSpawnAgent;
+  final void Function(Color) onColorChange;
+  final VoidCallback onSecretsOpen;
 
   @override
   State<_WorkspaceTile> createState() => _WorkspaceTileState();
@@ -295,10 +319,23 @@ class _WorkspaceTile extends StatefulWidget {
 class _WorkspaceTileState extends State<_WorkspaceTile> {
   bool _hovering = false;
   bool _showAgentMenu = false;
+  bool _showColorPicker = false;
+
+  static const _palette = [
+    Color(0xFFC026D3), // purple (default)
+    Color(0xFF2563EB), // blue
+    Color(0xFF16A34A), // green
+    Color(0xFFD97706), // amber
+    Color(0xFFDC2626), // red
+    Color(0xFF0891B2), // cyan
+    Color(0xFFDB2777), // pink
+    Color(0xFF6D28D9), // violet
+  ];
 
   @override
   Widget build(BuildContext context) {
     final ws = widget.workspace;
+    final accentColor = ws.color ?? AppColors.primary;
     return MouseRegion(
       onEnter: (_) => setState(() => _hovering = true),
       onExit: (_) => setState(() {
@@ -317,13 +354,13 @@ class _WorkspaceTileState extends State<_WorkspaceTile> {
             padding: const EdgeInsets.all(10),
             decoration: BoxDecoration(
               color: widget.isActive
-                  ? AppColors.primary.withAlpha(30)
+                  ? accentColor.withAlpha(30)
                   : _hovering
                       ? AppColors.surfaceHighlight
                       : Colors.transparent,
               borderRadius: BorderRadius.circular(6),
               border: widget.isActive
-                  ? Border.all(color: AppColors.primary.withAlpha(60))
+                  ? Border.all(color: accentColor.withAlpha(80))
                   : null,
             ),
             child: Column(
@@ -331,7 +368,22 @@ class _WorkspaceTileState extends State<_WorkspaceTile> {
               children: [
                 Row(
                   children: [
-                    const Icon(Icons.folder_outlined, size: 14, color: AppColors.textSecondary),
+                    // Color dot — click to open color picker
+                    GestureDetector(
+                      onTap: () => setState(() => _showColorPicker = !_showColorPicker),
+                      child: Container(
+                        width: 10,
+                        height: 10,
+                        decoration: BoxDecoration(
+                          color: accentColor,
+                          shape: BoxShape.circle,
+                          border: Border.all(
+                            color: Colors.white.withAlpha(60),
+                            width: 1,
+                          ),
+                        ),
+                      ),
+                    ),
                     const SizedBox(width: 6),
                     Expanded(
                       child: Text(
@@ -367,13 +419,52 @@ class _WorkspaceTileState extends State<_WorkspaceTile> {
                         tooltip: 'Start agent',
                       ),
                       _SmallIconButton(
+                        icon: Icons.key_outlined,
+                        onTap: widget.onSecretsOpen,
+                        tooltip: 'Workspace secrets',
+                      ),
+                      _SmallIconButton(
                         icon: Icons.close,
                         onTap: widget.onRemove,
                         tooltip: 'Remove',
                       ),
                     ],
+                    if (_hovering && widget.isActive)
+                      _SmallIconButton(
+                        icon: Icons.key_outlined,
+                        onTap: widget.onSecretsOpen,
+                        tooltip: 'Workspace secrets',
+                      ),
                   ],
                 ),
+                // Color picker row
+                if (_showColorPicker) ...[
+                  const SizedBox(height: 8),
+                  Row(
+                    children: _palette.map((c) {
+                      final selected = (ws.color ?? AppColors.primary) == c;
+                      return GestureDetector(
+                        onTap: () {
+                          widget.onColorChange(c);
+                          setState(() => _showColorPicker = false);
+                        },
+                        child: Container(
+                          width: 16,
+                          height: 16,
+                          margin: const EdgeInsets.only(right: 6),
+                          decoration: BoxDecoration(
+                            color: c,
+                            shape: BoxShape.circle,
+                            border: Border.all(
+                              color: selected ? Colors.white : Colors.transparent,
+                              width: 2,
+                            ),
+                          ),
+                        ),
+                      );
+                    }).toList(),
+                  ),
+                ],
                 if (ws.gitBranch != null) ...[
                   const SizedBox(height: 4),
                   Row(
@@ -437,7 +528,7 @@ class _WorkspaceTileState extends State<_WorkspaceTile> {
                           ),
                           child: Text(
                             type.displayName,
-                            style: const TextStyle(
+                            style: TextStyle(
                               color: AppColors.primaryLight,
                               fontSize: 10,
                               fontWeight: FontWeight.w600,
@@ -538,6 +629,234 @@ class _SmallIconButton extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+class _SecretsDialog extends StatefulWidget {
+  const _SecretsDialog({required this.workspaceId, required this.workspaceName});
+
+  final String workspaceId;
+  final String workspaceName;
+
+  @override
+  State<_SecretsDialog> createState() => _SecretsDialogState();
+}
+
+class _SecretsDialogState extends State<_SecretsDialog> {
+  Map<String, String> _secrets = {};
+  bool _loading = true;
+  // Track revealed state per row index
+  final Set<int> _revealed = {};
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    final loaded = await WorkspaceSecretsService.instance.load(widget.workspaceId);
+    if (mounted) setState(() { _secrets = Map.from(loaded); _loading = false; });
+  }
+
+  void _addEntry() {
+    setState(() => _secrets[''] = '');
+  }
+
+  Future<void> _save() async {
+    await WorkspaceSecretsService.instance.save(widget.workspaceId, _secrets);
+    if (mounted) Navigator.of(context).pop();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final entries = _secrets.entries.toList();
+    return Dialog(
+      backgroundColor: AppColors.surface,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(10),
+        side: const BorderSide(color: AppColors.border),
+      ),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 480, minWidth: 360),
+        child: Padding(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  const Icon(Icons.lock_outline, size: 18, color: AppColors.textPrimary),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          '🔐 Workspace Secrets',
+                          style: TextStyle(
+                            color: AppColors.textPrimary,
+                            fontSize: 14,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          'Injected as env vars when launching agents in ${widget.workspaceName}',
+                          style: const TextStyle(color: AppColors.textMuted, fontSize: 11),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              if (_loading)
+                const Center(child: CircularProgressIndicator())
+              else ...[
+                if (entries.isEmpty)
+                  const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 8),
+                    child: Text(
+                      'No secrets yet. Add a KEY=VALUE pair.',
+                      style: TextStyle(color: AppColors.textMuted, fontSize: 12),
+                    ),
+                  )
+                else
+                  ListView.builder(
+                    shrinkWrap: true,
+                    itemCount: entries.length,
+                    itemBuilder: (context, i) {
+                      final key = entries[i].key;
+                      final value = entries[i].value;
+                      final revealed = _revealed.contains(i);
+                      return Padding(
+                        padding: const EdgeInsets.only(bottom: 8),
+                        child: Row(
+                          children: [
+                            Expanded(
+                              flex: 2,
+                              child: _SecretTextField(
+                                initialValue: key,
+                                hint: 'KEY',
+                                onChanged: (newKey) {
+                                  final val = _secrets.remove(key) ?? value;
+                                  setState(() => _secrets[newKey] = val);
+                                },
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              flex: 3,
+                              child: _SecretTextField(
+                                initialValue: value,
+                                hint: 'VALUE',
+                                obscure: !revealed,
+                                onChanged: (v) => setState(() => _secrets[key] = v),
+                              ),
+                            ),
+                            const SizedBox(width: 4),
+                            IconButton(
+                              icon: Icon(
+                                revealed ? Icons.visibility_off_outlined : Icons.visibility_outlined,
+                                size: 16,
+                                color: AppColors.textMuted,
+                              ),
+                              splashRadius: 14,
+                              tooltip: revealed ? 'Hide' : 'Reveal',
+                              onPressed: () => setState(() {
+                                if (revealed) { _revealed.remove(i); } else { _revealed.add(i); }
+                              }),
+                            ),
+                            IconButton(
+                              icon: const Icon(Icons.delete_outline, size: 16, color: AppColors.neonRed),
+                              splashRadius: 14,
+                              tooltip: 'Delete',
+                              onPressed: () => setState(() => _secrets.remove(key)),
+                            ),
+                          ],
+                        ),
+                      );
+                    },
+                  ),
+                const SizedBox(height: 8),
+                TextButton.icon(
+                  onPressed: _addEntry,
+                  icon: const Icon(Icons.add, size: 14),
+                  label: const Text('Add secret', style: TextStyle(fontSize: 12)),
+                  style: TextButton.styleFrom(foregroundColor: AppColors.primary),
+                ),
+              ],
+              const SizedBox(height: 16),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  TextButton(
+                    onPressed: () => Navigator.of(context).pop(),
+                    child: const Text('Cancel', style: TextStyle(color: AppColors.textSecondary)),
+                  ),
+                  const SizedBox(width: 8),
+                  ElevatedButton(
+                    onPressed: _loading ? null : _save,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppColors.primary,
+                      foregroundColor: Colors.white,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+                    ),
+                    child: const Text('Save', style: TextStyle(fontSize: 13)),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _SecretTextField extends StatelessWidget {
+  const _SecretTextField({
+    required this.initialValue,
+    required this.hint,
+    required this.onChanged,
+    this.obscure = false,
+  });
+
+  final String initialValue;
+  final String hint;
+  final ValueChanged<String> onChanged;
+  final bool obscure;
+
+  @override
+  Widget build(BuildContext context) {
+    return TextFormField(
+      initialValue: initialValue,
+      obscureText: obscure,
+      style: const TextStyle(color: AppColors.textPrimary, fontSize: 12),
+      decoration: InputDecoration(
+        hintText: hint,
+        hintStyle: const TextStyle(color: AppColors.textMuted, fontSize: 12),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+        isDense: true,
+        filled: true,
+        fillColor: AppColors.surfaceElevated,
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(4),
+          borderSide: const BorderSide(color: AppColors.border),
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(4),
+          borderSide: const BorderSide(color: AppColors.border),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(4),
+          borderSide: BorderSide(color: AppColors.primary),
+        ),
+      ),
+      onChanged: onChanged,
     );
   }
 }

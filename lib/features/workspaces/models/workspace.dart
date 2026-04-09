@@ -1,4 +1,5 @@
 import 'package:equatable/equatable.dart';
+import 'package:flutter/material.dart';
 
 class Workspace extends Equatable {
   const Workspace({
@@ -9,6 +10,7 @@ class Workspace extends Equatable {
     this.addedLines = 0,
     this.removedLines = 0,
     this.isActive = false,
+    this.color,
   });
 
   final String id;
@@ -18,6 +20,8 @@ class Workspace extends Equatable {
   final int addedLines;
   final int removedLines;
   final bool isActive;
+  /// User-chosen accent color for this workspace (null = use theme default)
+  final Color? color;
 
   Workspace copyWith({
     String? name,
@@ -26,6 +30,8 @@ class Workspace extends Equatable {
     int? addedLines,
     int? removedLines,
     bool? isActive,
+    Color? color,
+    bool clearColor = false,
   }) {
     return Workspace(
       id: id,
@@ -35,6 +41,7 @@ class Workspace extends Equatable {
       addedLines: addedLines ?? this.addedLines,
       removedLines: removedLines ?? this.removedLines,
       isActive: isActive ?? this.isActive,
+      color: clearColor ? null : (color ?? this.color),
     );
   }
 
@@ -45,6 +52,7 @@ class Workspace extends Equatable {
         'gitBranch': gitBranch,
         'addedLines': addedLines,
         'removedLines': removedLines,
+        'colorValue': color?.value,
       };
 
   factory Workspace.fromJson(Map<String, dynamic> json) => Workspace(
@@ -54,8 +62,12 @@ class Workspace extends Equatable {
         gitBranch: json['gitBranch'] as String?,
         addedLines: (json['addedLines'] as int?) ?? 0,
         removedLines: (json['removedLines'] as int?) ?? 0,
+        color: json['colorValue'] != null
+            ? Color(json['colorValue'] as int)
+            : null,
       );
 
   @override
-  List<Object?> get props => [id, name, path, gitBranch, addedLines, removedLines, isActive];
+  List<Object?> get props =>
+      [id, name, path, gitBranch, addedLines, removedLines, isActive, color];
 }

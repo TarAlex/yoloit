@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:yoloit/core/theme/app_colors.dart';
 import 'package:yoloit/core/theme/app_theme.dart';
 
 class ThemeManager extends ChangeNotifier {
@@ -19,11 +20,13 @@ class ThemeManager extends ChangeNotifier {
       (t) => t.name == name,
       orElse: () => AppThemePreset.neonPurple,
     );
+    AppColors.setAccent(_current.color);
     notifyListeners();
   }
 
   Future<void> setTheme(AppThemePreset preset) async {
     _current = preset;
+    AppColors.setAccent(preset.color);
     notifyListeners();
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('theme_preset', preset.name);

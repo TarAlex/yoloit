@@ -6,6 +6,7 @@ import 'package:yoloit/features/terminal/bloc/terminal_state.dart';
 import 'package:yoloit/features/terminal/data/pty_service.dart';
 import 'package:yoloit/features/terminal/models/agent_session.dart';
 import 'package:yoloit/features/terminal/models/agent_type.dart';
+import 'package:yoloit/features/workspaces/data/workspace_secrets_service.dart';
 
 class TerminalCubit extends Cubit<TerminalState> {
   TerminalCubit() : super(const TerminalInitial());
@@ -19,6 +20,7 @@ class TerminalCubit extends Cubit<TerminalState> {
   Future<void> spawnSession({
     required AgentType type,
     required String workspacePath,
+    String? workspaceId,
   }) async {
     final current = _loaded;
     if (current == null) return;
@@ -32,9 +34,14 @@ class TerminalCubit extends Cubit<TerminalState> {
       sessionId: _generateSessionId(),
     );
 
+    final secrets = workspaceId != null
+        ? await WorkspaceSecretsService.instance.load(workspaceId)
+        : <String, String>{};
+
     final pty = _ptyService.launch(
       sessionId: sessionId,
       workspacePath: workspacePath,
+      extraEnv: secrets.isEmpty ? null : secrets,
     );
 
     _attachPtyToSession(pty, session);

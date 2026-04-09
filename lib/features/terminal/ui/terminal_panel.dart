@@ -47,7 +47,7 @@ class _EmptyTerminal extends StatelessWidget {
                       color: AppColors.primary.withAlpha(20),
                       shape: BoxShape.circle,
                     ),
-                    child: const Icon(Icons.terminal_outlined, size: 32, color: AppColors.primary),
+                    child: Icon(Icons.terminal_outlined, size: 32, color: AppColors.primary),
                   ),
                   const SizedBox(height: 16),
                   const Text(
@@ -117,7 +117,7 @@ class _TerminalView extends StatelessWidget {
                 ? _TerminalWidget(key: ValueKey(activeSession.id), session: activeSession)
                 : const SizedBox(),
           ),
-          _TokenUsageBar(session: activeSession),
+          _WorkspaceStatusBar(session: activeSession),
         ],
       ),
     );
@@ -248,7 +248,7 @@ class _AgentTabState extends State<_AgentTab> {
             children: [
               Text(
                 session.type.iconLabel,
-                style: const TextStyle(fontSize: 12, color: AppColors.primaryLight),
+                style: TextStyle(fontSize: 12, color: AppColors.primaryLight),
               ),
               const SizedBox(width: 5),
               Text(
@@ -319,7 +319,7 @@ class _SessionInfoBar extends StatelessWidget {
       ),
       child: Row(
         children: [
-          const Text(
+          Text(
             'yoloit > ',
             style: TextStyle(
               color: AppColors.primaryLight,
@@ -346,7 +346,7 @@ class _SessionInfoBar extends StatelessWidget {
             ),
           ),
           const SizedBox(width: 12),
-          const Text(
+          Text(
             'Mods: Orchestrate',
             style: TextStyle(
               color: AppColors.primary,
@@ -524,7 +524,7 @@ class _AgentLaunchButton extends StatelessWidget {
               const SizedBox(width: 5),
               Text(
                 type.displayName,
-                style: const TextStyle(
+                style: TextStyle(
                   color: AppColors.primaryLight,
                   fontSize: 12,
                   fontWeight: FontWeight.w600,
@@ -538,45 +538,61 @@ class _AgentLaunchButton extends StatelessWidget {
   }
 }
 
-class _TokenUsageBar extends StatelessWidget {
-  const _TokenUsageBar({this.session});
+class _WorkspaceStatusBar extends StatelessWidget {
+  const _WorkspaceStatusBar({this.session});
   final AgentSession? session;
 
   @override
   Widget build(BuildContext context) {
     if (session == null) return const SizedBox();
-    return Container(
-      height: 28,
-      padding: const EdgeInsets.symmetric(horizontal: 12),
-      decoration: const BoxDecoration(
-        color: AppColors.surfaceElevated,
-        border: Border(top: BorderSide(color: AppColors.border)),
-      ),
-      child: Row(
-        children: [
-          const Text(
-            'token/request usage',
-            style: TextStyle(color: AppColors.textMuted, fontSize: 10),
-          ),
-          const SizedBox(width: 8),
-          Expanded(
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(2),
-              child: const LinearProgressIndicator(
-                value: 0.56,
-                backgroundColor: AppColors.border,
-                valueColor: AlwaysStoppedAnimation<Color>(AppColors.primary),
-                minHeight: 4,
-              ),
+    return BlocBuilder<WorkspaceCubit, WorkspaceState>(
+      builder: (context, wsState) {
+        final ws = wsState is WorkspaceLoaded ? wsState.activeWorkspace : null;
+        final accentColor = ws?.color ?? AppColors.primary;
+        final wsName = ws?.name ?? 'No workspace';
+
+        return Container(
+          height: 28,
+          decoration: BoxDecoration(
+            color: AppColors.surfaceElevated,
+            border: Border(
+              top: BorderSide(color: accentColor.withAlpha(180), width: 2),
             ),
           ),
-          const SizedBox(width: 8),
-          const Text(
-            'Session Usage: — / 8000 tokens',
-            style: TextStyle(color: AppColors.textMuted, fontSize: 10),
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          child: Row(
+            children: [
+              Container(
+                width: 8,
+                height: 8,
+                decoration: BoxDecoration(
+                  color: accentColor,
+                  shape: BoxShape.circle,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Text(
+                wsName,
+                style: TextStyle(
+                  color: accentColor.withAlpha(220),
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                  letterSpacing: 0.3,
+                ),
+              ),
+              if (ws?.gitBranch != null) ...[
+                const SizedBox(width: 8),
+                const Icon(Icons.alt_route, size: 10, color: AppColors.textMuted),
+                const SizedBox(width: 3),
+                Text(
+                  ws!.gitBranch!,
+                  style: const TextStyle(color: AppColors.textMuted, fontSize: 10),
+                ),
+              ],
+            ],
           ),
-        ],
-      ),
+        );
+      },
     );
   }
 }

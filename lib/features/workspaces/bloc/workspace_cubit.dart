@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:path/path.dart' as p;
 import 'package:shared_preferences/shared_preferences.dart';
@@ -55,6 +56,17 @@ class WorkspaceCubit extends Cubit<WorkspaceState> {
     final current = _currentLoaded;
     if (current == null) return;
     emit(current.copyWith(activeWorkspaceId: id));
+  }
+
+  Future<void> setWorkspaceColor(String id, Color? color) async {
+    final current = _currentLoaded;
+    if (current == null) return;
+    final updated = current.workspaces.map((w) {
+      if (w.id != id) return w;
+      return color == null ? w.copyWith(clearColor: true) : w.copyWith(color: color);
+    }).toList();
+    emit(current.copyWith(workspaces: updated));
+    await _save(updated);
   }
 
   Future<void> refreshAll() async {

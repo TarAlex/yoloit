@@ -108,7 +108,7 @@ class IconTextButton extends StatefulWidget {
     this.icon,
     this.onTap,
     this.color = AppColors.textSecondary,
-    this.activeColor = AppColors.primary,
+    this.activeColor = const Color(0xFF9D4EDD),
     this.isActive = false,
     this.dense = false,
   });

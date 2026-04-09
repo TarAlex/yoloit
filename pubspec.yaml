@@ -46,6 +46,8 @@ dependencies:
   re_highlight: ^0.0.1
   shared_preferences: ^2.5.3
   super_clipboard: ^0.9.1
+  flutter_svg: ^2.2.4
+  flutter_secure_storage: ^10.0.0
 
 dev_dependencies:
   flutter_test:

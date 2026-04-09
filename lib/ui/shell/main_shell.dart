@@ -22,6 +22,7 @@ class MainShell extends StatefulWidget {
 class _MainShellState extends State<MainShell> with WindowListener {
   final _splitController = HSplitViewController();
   final _terminalFocusNode = FocusNode();
+  bool _reviewVisible = false;
 
   @override
   void initState() {
@@ -92,7 +93,9 @@ class _MainShellState extends State<MainShell> with WindowListener {
             onInvoke: (_) => _splitController.toggleLeft(),
           ),
           ToggleReviewPanelIntent: CallbackAction<ToggleReviewPanelIntent>(
-            onInvoke: (_) => _splitController.toggleRight(),
+            onInvoke: (_) {
+              setState(() => _reviewVisible = !_reviewVisible);
+            },
           ),
           FocusTerminalIntent: CallbackAction<FocusTerminalIntent>(
             onInvoke: (_) => _terminalFocusNode.requestFocus(),
@@ -110,18 +113,42 @@ class _MainShellState extends State<MainShell> with WindowListener {
                 _TitleBar(
                   splitController: _splitController,
                   onSettings: () => SettingsPage.show(context),
+                  reviewVisible: _reviewVisible,
+                  onToggleReview: () => setState(() => _reviewVisible = !_reviewVisible),
                 ),
                 Expanded(
-                  child: HSplitView(
-                    left: const WorkspacePanel(),
-                    center: Focus(
-                      focusNode: _terminalFocusNode,
-                      child: const TerminalPanel(),
-                    ),
-                    right: const ReviewPanel(),
-                    initialLeftWidth: 260,
-                    initialRightWidth: 360,
-                    controller: _splitController,
+                  child: Stack(
+                    children: [
+                      // Main layout: workspace panel + terminal (no right split)
+                      HSplitView(
+                        left: const WorkspacePanel(),
+                        center: Focus(
+                          focusNode: _terminalFocusNode,
+                          child: const TerminalPanel(),
+                        ),
+                        right: const SizedBox.shrink(),
+                        initialLeftWidth: 260,
+                        initialRightWidth: 0,
+                        controller: _splitController,
+                      ),
+                      // Review panel slides in from the right as overlay
+                      AnimatedSlide(
+                        offset: _reviewVisible ? Offset.zero : const Offset(1, 0),
+                        duration: const Duration(milliseconds: 220),
+                        curve: Curves.easeInOut,
+                        child: Align(
+                          alignment: Alignment.centerRight,
+                          child: SizedBox(
+                            width: 420,
+                            child: Material(
+                              elevation: 16,
+                              shadowColor: Colors.black54,
+                              child: const ReviewPanel(),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               ],
@@ -134,9 +161,16 @@ class _MainShellState extends State<MainShell> with WindowListener {
 }
 
 class _TitleBar extends StatefulWidget {
-  const _TitleBar({required this.splitController, required this.onSettings});
+  const _TitleBar({
+    required this.splitController,
+    required this.onSettings,
+    required this.reviewVisible,
+    required this.onToggleReview,
+  });
   final HSplitViewController splitController;
   final VoidCallback onSettings;
+  final bool reviewVisible;
+  final VoidCallback onToggleReview;
 
   @override
   State<_TitleBar> createState() => _TitleBarState();
@@ -190,8 +224,8 @@ class _TitleBarState extends State<_TitleBar> {
               icon: Icons.rate_review,
               tooltip: 'Toggle Review Panel (⌘⇧\\)',
               semanticsLabel: 'Toggle right panel',
-              active: widget.splitController.rightVisible,
-              onTap: widget.splitController.toggleRight,
+              active: widget.reviewVisible,
+              onTap: widget.onToggleReview,
             ),
             const SizedBox(width: 4),
             _PanelToggleButton(
