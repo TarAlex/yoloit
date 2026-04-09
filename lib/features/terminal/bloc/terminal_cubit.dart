@@ -42,9 +42,11 @@ class TerminalCubit extends Cubit<TerminalState> {
     final sessions = [...current.sessions, session];
     emit(current.copyWith(sessions: sessions, activeIndex: sessions.length - 1));
 
-    // Auto-run the agent command once the shell is ready.
-    await Future<void>.delayed(const Duration(milliseconds: 300));
-    _ptyService.write(sessionId, '${type.launchCommand}\n');
+    // Auto-run the agent command once the shell is ready (skip for plain terminal).
+    if (type.launchCommand.isNotEmpty) {
+      await Future<void>.delayed(const Duration(milliseconds: 400));
+      _ptyService.write(sessionId, '${type.launchCommand}\n');
+    }
   }
 
   void switchTab(int index) {

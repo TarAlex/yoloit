@@ -368,6 +368,7 @@ class _TerminalWidget extends StatefulWidget {
 
 class _TerminalWidgetState extends State<_TerminalWidget> {
   final _controller = TerminalController();
+  final _focusNode = FocusNode();
 
   @override
   void initState() {
@@ -376,21 +377,28 @@ class _TerminalWidgetState extends State<_TerminalWidget> {
     widget.session.terminal.onOutput = (data) {
       PtyService.instance.write(widget.session.id, data);
     };
+    // Request focus so keyboard input works immediately
+    WidgetsBinding.instance.addPostFrameCallback((_) => _focusNode.requestFocus());
   }
 
   @override
   void dispose() {
     widget.session.terminal.onOutput = null;
     _controller.dispose();
+    _focusNode.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    return TerminalView(
-      widget.session.terminal,
-      controller: _controller,
-      theme: const TerminalTheme(
+    return GestureDetector(
+      onTap: _focusNode.requestFocus,
+      child: TerminalView(
+        widget.session.terminal,
+        controller: _controller,
+        focusNode: _focusNode,
+        autofocus: true,
+        theme: const TerminalTheme(
         cursor: Color(0xFF9D4EDD),
         selection: Color(0x449D4EDD),
         foreground: Color(0xFFCECEEE),
@@ -416,6 +424,7 @@ class _TerminalWidgetState extends State<_TerminalWidget> {
         searchHitForeground: Color(0xFF000000),
       ),
       padding: const EdgeInsets.all(8),
+    ),
     );
   }
 }

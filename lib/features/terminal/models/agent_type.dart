@@ -1,12 +1,13 @@
 enum AgentType {
-  copilot('Copilot', 'gh copilot', 'gh copilot --allow-all'),
-  claude('Claude', 'claude', 'claude');
+  copilot('Copilot', 'copilot', 'copilot --allow-all'),
+  claude('Claude', 'claude', 'claude'),
+  terminal('Terminal', 'shell', '');
 
   const AgentType(this.displayName, this.command, this.launchCommand);
   final String displayName;
   /// Short label shown in the terminal header bar.
   final String command;
-  /// Full command sent automatically when the session starts.
+  /// Full command sent automatically when the session starts. Empty = plain shell.
   final String launchCommand;
 
   String get iconLabel {
@@ -15,6 +16,8 @@ enum AgentType {
         return '⊕';
       case AgentType.claude:
         return '✦';
+      case AgentType.terminal:
+        return '>_';
     }
   }
 }
