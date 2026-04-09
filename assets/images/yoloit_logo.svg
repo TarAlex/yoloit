@@ -1,67 +1,49 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 520 200" width="520" height="200">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 540 210" width="540" height="210">
   <defs>
-    <!-- Pink → Purple gradient used on the icon mark -->
-    <linearGradient id="markGrad" x1="100" y1="10" x2="100" y2="185" gradientUnits="userSpaceOnUse">
-      <stop offset="0%"   stop-color="#F472B6"/>
-      <stop offset="100%" stop-color="#6D28D9"/>
-    </linearGradient>
-    <!-- Same gradient for the wordmark -->
-    <linearGradient id="textGrad" x1="0%" y1="0%" x2="0%" y2="100%">
-      <stop offset="0%"   stop-color="#C026D3"/>
+    <linearGradient id="g" x1="100" y1="15" x2="100" y2="198" gradientUnits="userSpaceOnUse">
+      <stop offset="0%"   stop-color="#E879F9"/>
       <stop offset="100%" stop-color="#5B21B6"/>
     </linearGradient>
+    <linearGradient id="tg" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%"   stop-color="#C026D3"/>
+      <stop offset="100%" stop-color="#4C1D95"/>
+    </linearGradient>
+    <filter id="shadow">
+      <feDropShadow dx="0" dy="4" stdDeviation="8" flood-color="#00000022"/>
+    </filter>
   </defs>
 
-  <!-- ═══════════════════════════════════════════════
-       ICON MARK  (200×200 canvas, centred at 100,100)
-       Y = two arms (each with a closed loop at the top)
-             + stem going down to a leaf
-  ══════════════════════════════════════════════════ -->
-  <g stroke="url(#markGrad)" stroke-linecap="round" stroke-linejoin="round"
-     fill="none" stroke-width="14">
+  <!-- ── ICON MARK (200×210) ── -->
+  <rect width="200" height="210" rx="44" fill="white" filter="url(#shadow)"/>
 
-    <!-- Left arm: from junction up-left, loops around a small oval, ends near body -->
-    <path d="
-      M 100 112
-      C  84  96,  65  76,  52  58
-      C  40  40,  40  20,  53  14
-      C  66   8,  80  18,  80  34
-      C  80  48,  70  58,  66  64
-    "/>
+  <!-- Right arm (behind) -->
+  <path d="M 100 118 C 110 104,126 88,138 74 C 150 60,160 46,158 34
+           C 156 22,142 18,132 26 C 122 34,124 50,136 64"
+        fill="none" stroke="url(#g)" stroke-width="13"
+        stroke-linecap="round" stroke-linejoin="round"/>
 
-    <!-- Right arm: mirror of left arm -->
-    <path d="
-      M 100 112
-      C 116  96, 135  76, 148  58
-      C 160  40, 160  20, 147  14
-      C 134   8, 120  18, 120  34
-      C 120  48, 130  58, 134  64
-    "/>
+  <!-- White knockout at crossing -->
+  <path d="M 100 118 C 97 110,94 102,92 96"
+        fill="none" stroke="white" stroke-width="20" stroke-linecap="round"/>
 
-    <!-- Stem (center down) -->
-    <line x1="100" y1="112" x2="100" y2="168"/>
-  </g>
+  <!-- Left arm + stem (in front) -->
+  <path d="M 78 72 C 90 56,92 40,82 30 C 72 20,58 24,56 36
+           C 54 48,64 60,76 72 C 88 86,96 104,100 118 L 100 180"
+        fill="none" stroke="url(#g)" stroke-width="13"
+        stroke-linecap="round" stroke-linejoin="round"/>
 
-  <!-- Leaf at the bottom of the stem (filled, same gradient) -->
-  <path d="M 100 165
-           C  88 173,  84 186, 100 194
-           C 116 186, 112 173, 100 165 Z"
-        fill="url(#markGrad)"/>
+  <!-- Leaf -->
+  <path d="M 100 177 C 89 185,85 198,100 206 C 115 198,111 185,100 177 Z"
+        fill="url(#g)"/>
 
-
-  <!-- ═══════════════════════════════════════════════
-       WORDMARK  (starts at x=218, vertically centred)
-  ══════════════════════════════════════════════════ -->
-
-  <!-- "yoloit" — rounded sans-serif, gradient fill -->
-  <text x="218" y="118"
-        font-family="'SF Pro Rounded', 'Nunito', 'Poppins', 'Helvetica Neue', Arial, sans-serif"
+  <!-- ── WORDMARK ── -->
+  <text x="224" y="118"
+        font-family="'SF Pro Rounded','Nunito','Poppins','Helvetica Neue',Arial,sans-serif"
         font-size="72" font-weight="700" letter-spacing="-2"
-        fill="url(#textGrad)">yoloit</text>
+        fill="url(#tg)">yoloit</text>
 
-  <!-- "AI ORCHESTRATOR" subtitle -->
-  <text x="220" y="148"
-        font-family="'SF Pro Text', 'Nunito', 'Poppins', 'Helvetica Neue', Arial, sans-serif"
-        font-size="18" font-weight="600" letter-spacing="4"
+  <text x="226" y="150"
+        font-family="'SF Pro Text','Nunito','Helvetica Neue',Arial,sans-serif"
+        font-size="18" font-weight="600" letter-spacing="5"
         fill="#4C1D95">AI ORCHESTRATOR</text>
 </svg>

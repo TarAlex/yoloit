@@ -1,43 +1,60 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="1024" height="1024">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 210" width="1024" height="1024">
   <defs>
-    <linearGradient id="g" x1="100" y1="10" x2="100" y2="190" gradientUnits="userSpaceOnUse">
-      <stop offset="0%"   stop-color="#F472B6"/>
-      <stop offset="100%" stop-color="#6D28D9"/>
+    <linearGradient id="g" x1="100" y1="15" x2="100" y2="198" gradientUnits="userSpaceOnUse">
+      <stop offset="0%"   stop-color="#E879F9"/>
+      <stop offset="100%" stop-color="#5B21B6"/>
     </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="4" stdDeviation="8" flood-color="#00000022"/>
+    </filter>
   </defs>
 
-  <!-- White rounded background (for app icon) -->
-  <rect width="200" height="200" rx="44" ry="44" fill="white"/>
+  <!-- Card background with shadow -->
+  <rect width="200" height="210" rx="44" fill="white" filter="url(#shadow)"/>
 
-  <!-- Y mark: two arms with loops + stem + leaf -->
-  <g stroke="url(#g)" stroke-linecap="round" stroke-linejoin="round"
-     fill="none" stroke-width="14">
+  <!--
+    Y-mark = two arms that CROSS (crossed-fingers 🤞 style):
 
-    <!-- Left arm: junction → up-left → loop -->
-    <path d="
-      M 100 112
-      C  84  96,  65  76,  52  58
-      C  40  40,  40  20,  53  14
-      C  66   8,  80  18,  80  34
-      C  80  48,  70  58,  66  64
-    "/>
+    RIGHT ARM (behind) — from center up-right to closed-loop pill
+    Draw first so left arm renders on top at the crossing.
+  -->
+  <path d="
+    M 100 118
+    C 110 104, 126 88, 138 74
+    C 150 60, 160 46, 158 34
+    C 156 22, 142 18, 132 26
+    C 122 34, 124 50, 136 64
+  " fill="none" stroke="url(#g)"
+     stroke-width="13" stroke-linecap="round" stroke-linejoin="round"/>
 
-    <!-- Right arm: junction → up-right → loop (mirror) -->
-    <path d="
-      M 100 112
-      C 116  96, 135  76, 148  58
-      C 160  40, 160  20, 147  14
-      C 134   8, 120  18, 120  34
-      C 120  48, 130  58, 134  64
-    "/>
+  <!--
+    WHITE KNOCKOUT — cuts a gap in the right arm where the left arm
+    crosses over, making the interlace (one arm in front) visible.
+  -->
+  <path d="M 100 118 C 97 110, 94 102, 92 96"
+    fill="none" stroke="white" stroke-width="20" stroke-linecap="round"/>
 
-    <!-- Stem -->
-    <line x1="100" y1="112" x2="100" y2="168"/>
-  </g>
+  <!--
+    LEFT ARM + STEM (in front) — closed loop at upper-left,
+    arm curves down-right through the crossing zone, then straight
+    down as the Y stem to the leaf.
 
-  <!-- Leaf at bottom of stem -->
-  <path d="M 100 165
-           C  88 173,  84 186, 100 194
-           C 116 186, 112 173, 100 165 Z"
+    The loop closes visually: path starts at (78,72) and returns to
+    (76,72) — the round cap overlaps the stroke body, sealing the pill.
+  -->
+  <path d="
+    M 78 72
+    C 90 56, 92 40, 82 30
+    C 72 20, 58 24, 56 36
+    C 54 48, 64 60, 76 72
+    C 88 86, 96 104, 100 118
+    L 100 180
+  " fill="none" stroke="url(#g)"
+     stroke-width="13" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <!-- Leaf at the bottom of the stem -->
+  <path d="M 100 177
+           C  89 185,  85 198, 100 206
+           C 115 198, 111 185, 100 177 Z"
         fill="url(#g)"/>
 </svg>
