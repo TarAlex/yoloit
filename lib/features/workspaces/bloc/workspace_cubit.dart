@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:path/path.dart' as p;
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:yoloit/core/session/session_prefs.dart';
 import 'package:yoloit/core/services/git_service.dart';
 import 'package:yoloit/features/workspaces/bloc/workspace_state.dart';
 import 'package:yoloit/features/workspaces/models/workspace.dart';
@@ -35,7 +36,12 @@ class WorkspaceCubit extends Cubit<WorkspaceState> {
       final workspaces = json
           .map((s) => Workspace.fromJson(jsonDecode(s) as Map<String, dynamic>))
           .toList();
-      emit(WorkspaceLoaded(workspaces: workspaces));
+      final snap = await SessionPrefs.load();
+      final activeId = snap.activeWorkspaceId != null &&
+              workspaces.any((w) => w.id == snap.activeWorkspaceId)
+          ? snap.activeWorkspaceId
+          : null;
+      emit(WorkspaceLoaded(workspaces: workspaces, activeWorkspaceId: activeId));
       // Refresh git info for all workspaces
       for (final ws in workspaces) {
         _refreshGitInfo(ws.id);
@@ -72,6 +78,7 @@ class WorkspaceCubit extends Cubit<WorkspaceState> {
     final current = _currentLoaded;
     if (current == null) return;
     emit(current.copyWith(activeWorkspaceId: id));
+    SessionPrefs.saveActiveWorkspaceId(id);
   }
 
   Future<void> setWorkspaceColor(String id, Color? color) async {

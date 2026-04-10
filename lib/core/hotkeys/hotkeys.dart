@@ -78,7 +78,7 @@ const Map<ShortcutActivator, Intent> yoloitShortcuts = {
   SingleActivator(LogicalKeyboardKey.comma, meta: true): OpenSettingsIntent(),
 
   // Cmd+P — quick file search
-  SingleActivator(LogicalKeyboardKey.keyP, meta: true): OpenFileSearchIntent(),
+  SingleActivator(LogicalKeyboardKey.keyO, meta: true): OpenFileSearchIntent(),
 
   // Cmd+F — quick file search (alias)
   SingleActivator(LogicalKeyboardKey.keyF, meta: true): OpenFileSearchIntent(),

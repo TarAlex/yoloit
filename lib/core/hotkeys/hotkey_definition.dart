@@ -165,7 +165,7 @@ final kHotkeyDefinitions = <HotkeyDefinition>[
     description: 'Quick file search',
     category: 'Search',
     defaultActivator:
-        const SingleActivator(LogicalKeyboardKey.keyP, meta: true),
+        const SingleActivator(LogicalKeyboardKey.keyO, meta: true),
     intent: const OpenFileSearchIntent(),
   ),
   // Settings
