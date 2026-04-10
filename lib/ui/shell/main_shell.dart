@@ -279,9 +279,9 @@ class _FourPaneLayoutState extends State<_FourPaneLayout> {
                   SizedBox(
                     width: _workspaceWidth,
                     child: DecoratedBox(
-                      decoration: BoxDecoration(
+                      decoration: const BoxDecoration(
                         border: Border(
-                          top: BorderSide(color: context.appColors.border, width: 1),
+                          top: BorderSide(color: Color(0xFF32327A), width: 2),
                         ),
                       ),
                       child: const WorkspacePanel(),
@@ -552,7 +552,8 @@ class _PaneWrapper extends StatelessWidget {
     return DecoratedBox(
       decoration: BoxDecoration(
         border: Border(
-          top: BorderSide(color: colors.border, width: 1),
+          // Prominent top strip — 2px, brighter than background — IntelliJ-like panel separator
+          top: BorderSide(color: const Color(0xFF32327A), width: 2),
         ),
       ),
       child: Column(
@@ -689,7 +690,7 @@ class _TitleBarState extends State<_TitleBar> {
                     ),
                     const Spacer(),
                     Text(
-                      '⌘P / ⌘F',
+                      '⌘O / ⌘F',
                       style: TextStyle(color: AppColors.textMuted.withAlpha(120), fontSize: 10),
                     ),
                   ],

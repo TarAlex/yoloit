@@ -37,10 +37,10 @@ class WorkspaceCubit extends Cubit<WorkspaceState> {
           .map((s) => Workspace.fromJson(jsonDecode(s) as Map<String, dynamic>))
           .toList();
       final snap = await SessionPrefs.load();
-      final activeId = snap.activeWorkspaceId != null &&
-              workspaces.any((w) => w.id == snap.activeWorkspaceId)
-          ? snap.activeWorkspaceId
-          : null;
+      final savedId = snap.activeWorkspaceId;
+      final activeId = savedId != null && workspaces.any((w) => w.id == savedId)
+          ? savedId
+          : (workspaces.length == 1 ? workspaces.first.id : null);
       emit(WorkspaceLoaded(workspaces: workspaces, activeWorkspaceId: activeId));
       // Refresh git info for all workspaces
       for (final ws in workspaces) {
