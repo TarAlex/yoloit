@@ -136,40 +136,43 @@ class _FileSearchOverlayState extends State<FileSearchOverlay> {
   @override
   Widget build(BuildContext context) {
     final colors = context.appColors;
-    return Center(
-      child: KeyboardListener(
-        focusNode: FocusNode(),
-        onKeyEvent: (event) {
-          if (event is KeyDownEvent) {
-            if (event.logicalKey == LogicalKeyboardKey.arrowDown) _navigate(1);
-            if (event.logicalKey == LogicalKeyboardKey.arrowUp) _navigate(-1);
-            if (event.logicalKey == LogicalKeyboardKey.enter) _openSelected();
-            if (event.logicalKey == LogicalKeyboardKey.escape) Navigator.of(context).pop();
-          }
-        },
-        child: Container(
-          width: 600,
-          constraints: BoxConstraints(maxHeight: 480),
-          decoration: BoxDecoration(
-            color: colors.surface,
-            borderRadius: BorderRadius.circular(10),
-            border: Border.all(color: colors.border),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withAlpha(100),
-                blurRadius: 32,
-                offset: const Offset(0, 12),
-              ),
-            ],
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              _buildHeader(context),
-              _buildToolbar(),
-              const Divider(height: 1, color: Color(0xFF2A2A3A)),
-              _buildResults(),
-            ],
+    return Align(
+      alignment: Alignment.topCenter,
+      child: Padding(
+        padding: const EdgeInsets.only(top: 72),
+        child: KeyboardListener(
+          focusNode: FocusNode(),
+          onKeyEvent: (event) {
+            if (event is KeyDownEvent) {
+              if (event.logicalKey == LogicalKeyboardKey.arrowDown) _navigate(1);
+              if (event.logicalKey == LogicalKeyboardKey.arrowUp) _navigate(-1);
+              if (event.logicalKey == LogicalKeyboardKey.enter) _openSelected();
+              if (event.logicalKey == LogicalKeyboardKey.escape) Navigator.of(context).pop();
+            }
+          },
+          child: Container(
+            width: 600,
+            height: 480,
+            decoration: BoxDecoration(
+              color: colors.surface,
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: colors.border),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withAlpha(100),
+                  blurRadius: 32,
+                  offset: const Offset(0, 12),
+                ),
+              ],
+            ),
+            child: Column(
+              children: [
+                _buildHeader(context),
+                _buildToolbar(),
+                const Divider(height: 1, color: Color(0xFF2A2A3A)),
+                Expanded(child: _buildResults()),
+              ],
+            ),
           ),
         ),
       ),
@@ -258,47 +261,41 @@ class _FileSearchOverlayState extends State<FileSearchOverlay> {
 
   Widget _buildResults() {
     if (_results.isEmpty && _controller.text.isEmpty) {
-      return Padding(
-        padding: const EdgeInsets.all(24),
+      return Center(
         child: Text(
           'Type to search files…',
           style: TextStyle(color: AppColors.textMuted, fontSize: 13),
-          textAlign: TextAlign.center,
         ),
       );
     }
 
     if (_results.isEmpty && !_loading) {
-      return Padding(
-        padding: const EdgeInsets.all(24),
+      return Center(
         child: Text(
           'No results found',
           style: TextStyle(color: AppColors.textMuted, fontSize: 13),
-          textAlign: TextAlign.center,
         ),
       );
     }
 
-    return Flexible(
-      child: ListView.builder(
-        controller: _scrollController,
-        padding: const EdgeInsets.only(bottom: 8),
-        itemCount: _results.length,
-        itemExtent: 60,
-        itemBuilder: (context, index) {
-          final result = _results[index];
-          final isSelected = index == _selectedIndex;
-          return _ResultTile(
-            result: result,
-            isSelected: isSelected,
-            query: _controller.text.trim(),
-            onTap: () {
-              setState(() => _selectedIndex = index);
-              _openSelected();
-            },
-          );
-        },
-      ),
+    return ListView.builder(
+      controller: _scrollController,
+      padding: const EdgeInsets.only(bottom: 8),
+      itemCount: _results.length,
+      itemExtent: 60,
+      itemBuilder: (context, index) {
+        final result = _results[index];
+        final isSelected = index == _selectedIndex;
+        return _ResultTile(
+          result: result,
+          isSelected: isSelected,
+          query: _controller.text.trim(),
+          onTap: () {
+            setState(() => _selectedIndex = index);
+            _openSelected();
+          },
+        );
+      },
     );
   }
 }
