@@ -23,6 +23,7 @@ import 'package:highlight/languages/swift.dart';
 import 'package:highlight/languages/typescript.dart';
 import 'package:highlight/languages/xml.dart';
 import 'package:highlight/languages/yaml.dart';
+import 'package:yoloit/core/session/session_prefs.dart';
 import 'package:yoloit/core/theme/app_color_scheme.dart';
 import 'package:yoloit/core/theme/app_colors.dart';
 import 'package:yoloit/features/editor/bloc/file_editor_cubit.dart';
@@ -44,6 +45,14 @@ class _FileEditorPanelState extends State<FileEditorPanel> {
   final Map<String, String> _loadedContent = {};
   double _scaleBase = 13.0;
   final _fontSizeNotifier = ValueNotifier<double>(13.0);
+
+  @override
+  void initState() {
+    super.initState();
+    SessionPrefs.load().then((snap) {
+      if (mounted) _fontSizeNotifier.value = snap.editorFontSize;
+    });
+  }
 
   @override
   void dispose() {
@@ -138,6 +147,7 @@ class _FileEditorPanelState extends State<FileEditorPanel> {
             // Update ValueNotifier directly — no setState, no full rebuild
             final newSize = (_scaleBase * d.scale).clamp(8.0, 48.0);
             _fontSizeNotifier.value = newSize;
+            SessionPrefs.saveEditorFontSize(newSize);
           },
           child: Column(
             children: [

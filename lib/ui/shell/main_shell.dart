@@ -3,6 +3,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:window_manager/window_manager.dart';
 import 'package:yoloit/core/hotkeys/hotkey_registry.dart';
 import 'package:yoloit/core/hotkeys/hotkeys.dart';
+import 'package:yoloit/core/session/session_prefs.dart';
 import 'package:yoloit/core/theme/app_color_scheme.dart';
 import 'package:yoloit/core/theme/app_colors.dart';
 import 'package:yoloit/features/editor/bloc/file_editor_cubit.dart';
@@ -30,12 +31,13 @@ class _MainShellState extends State<MainShell> with WindowListener {
   final _terminalFocusNode = FocusNode();
   bool _reviewVisible = true;
   bool _terminalVisible = true;
+  SessionSnapshot? _sessionSnapshot;
 
   @override
   void initState() {
     super.initState();
     windowManager.addListener(this);
-    _initCubits();
+    _loadSessionAndInit();
   }
 
   @override
@@ -46,10 +48,27 @@ class _MainShellState extends State<MainShell> with WindowListener {
     super.dispose();
   }
 
-  void _initCubits() {
+  Future<void> _loadSessionAndInit() async {
+    final snap = await SessionPrefs.load();
+    if (!mounted) return;
+    setState(() {
+      _reviewVisible   = snap.reviewVisible;
+      _terminalVisible = snap.terminalVisible;
+      _sessionSnapshot = snap;
+    });
     WidgetsBinding.instance.addPostFrameCallback((_) {
       context.read<WorkspaceCubit>().load();
-      context.read<TerminalCubit>().initialize();
+      context.read<TerminalCubit>().initialize().then((_) {
+        if (!mounted) return;
+        final tState = context.read<TerminalCubit>().state;
+        if (tState is TerminalLoaded && tState.sessions.isNotEmpty) {
+          final idx = snap.activeTerminalIdx.clamp(0, tState.sessions.length - 1);
+          context.read<TerminalCubit>().switchTab(idx);
+          Future.delayed(const Duration(milliseconds: 300), () {
+            if (mounted) _terminalFocusNode.requestFocus();
+          });
+        }
+      });
     });
   }
 
@@ -143,8 +162,14 @@ class _MainShellState extends State<MainShell> with WindowListener {
                   onSettings: () => SettingsPage.show(context),
                   reviewVisible: _reviewVisible,
                   terminalVisible: _terminalVisible,
-                  onToggleReview: () => setState(() => _reviewVisible = !_reviewVisible),
-                  onToggleTerminal: () => setState(() => _terminalVisible = !_terminalVisible),
+                  onToggleReview: () {
+                    setState(() => _reviewVisible = !_reviewVisible);
+                    SessionPrefs.saveReviewVisible(_reviewVisible);
+                  },
+                  onToggleTerminal: () {
+                    setState(() => _terminalVisible = !_terminalVisible);
+                    SessionPrefs.saveTerminalVisible(_terminalVisible);
+                  },
                   onSearch: _openFileSearch,
                 ),
                 Expanded(
@@ -153,8 +178,15 @@ class _MainShellState extends State<MainShell> with WindowListener {
                     terminalFocusNode: _terminalFocusNode,
                     reviewVisible: _reviewVisible,
                     terminalVisible: _terminalVisible,
-                    onToggleReview: () => setState(() => _reviewVisible = !_reviewVisible),
-                    onToggleTerminal: () => setState(() => _terminalVisible = !_terminalVisible),
+                    initialSnapshot: _sessionSnapshot,
+                    onToggleReview: () {
+                      setState(() => _reviewVisible = !_reviewVisible);
+                      SessionPrefs.saveReviewVisible(_reviewVisible);
+                    },
+                    onToggleTerminal: () {
+                      setState(() => _terminalVisible = !_terminalVisible);
+                      SessionPrefs.saveTerminalVisible(_terminalVisible);
+                    },
                   ),
                 ),
               ],
@@ -177,6 +209,7 @@ class _FourPaneLayout extends StatefulWidget {
     required this.terminalVisible,
     required this.onToggleReview,
     required this.onToggleTerminal,
+    this.initialSnapshot,
   });
 
   final HSplitViewController splitController;
@@ -185,15 +218,16 @@ class _FourPaneLayout extends StatefulWidget {
   final bool terminalVisible;
   final VoidCallback onToggleReview;
   final VoidCallback onToggleTerminal;
+  final SessionSnapshot? initialSnapshot;
 
   @override
   State<_FourPaneLayout> createState() => _FourPaneLayoutState();
 }
 
 class _FourPaneLayoutState extends State<_FourPaneLayout> {
-  double _workspaceWidth = 260;
-  double _editorWidth = 480;
-  double _reviewWidth = 360;
+  late double _workspaceWidth;
+  late double _editorWidth;
+  late double _reviewWidth;
 
   // Vertical heights (null = fill all available space)
   double? _agentsHeight;
@@ -203,11 +237,17 @@ class _FourPaneLayoutState extends State<_FourPaneLayout> {
   static const _minWidth = 160.0;
   static const _minHeight = 120.0;
 
-
   @override
   void initState() {
     super.initState();
     widget.splitController.addListener(_rebuild);
+    final s = widget.initialSnapshot;
+    _workspaceWidth = s?.workspaceWidth ?? 260;
+    _editorWidth    = s?.editorWidth    ?? 480;
+    _reviewWidth    = s?.reviewWidth    ?? 360;
+    _agentsHeight   = s?.agentsHeight;
+    _editorHeight   = s?.editorHeight;
+    _reviewHeight   = s?.reviewHeight;
   }
 
   @override
@@ -248,9 +288,10 @@ class _FourPaneLayoutState extends State<_FourPaneLayout> {
                     ),
                   ),
                   _Divider(
-                    onDrag: (dx) => setState(() {
-                      _workspaceWidth = (_workspaceWidth + dx).clamp(_minWidth, totalWidth / 3);
-                    }),
+                    onDrag: (dx) {
+                      setState(() => _workspaceWidth = (_workspaceWidth + dx).clamp(_minWidth, totalWidth / 3));
+                      SessionPrefs.saveWorkspaceWidth(_workspaceWidth);
+                    },
                   ),
                 ],
 
@@ -264,9 +305,10 @@ class _FourPaneLayoutState extends State<_FourPaneLayout> {
                       child: _PaneWrapper(
                         collapseTooltip: 'Collapse Agents',
                         onCollapse: widget.onToggleTerminal,
-                        onVerticalDrag: (dy) => setState(() {
-                          _agentsHeight = ((_agentsHeight ?? totalHeight) + dy).clamp(_minHeight, totalHeight - 40);
-                        }),
+                        onVerticalDrag: (dy) {
+                          setState(() => _agentsHeight = ((_agentsHeight ?? totalHeight) + dy).clamp(_minHeight, totalHeight - 40));
+                          SessionPrefs.saveAgentsHeight(_agentsHeight);
+                        },
                         child: const _BottomPanel(),
                       ),
                     ),
@@ -276,9 +318,10 @@ class _FourPaneLayoutState extends State<_FourPaneLayout> {
                 if (showEditor) ...[
                   if (showTerminal)
                     _Divider(
-                      onDrag: (dx) => setState(() {
-                        _editorWidth = (_editorWidth - dx).clamp(_minWidth, totalWidth / 2);
-                      }),
+                      onDrag: (dx) {
+                        setState(() => _editorWidth = (_editorWidth - dx).clamp(_minWidth, totalWidth / 2));
+                        SessionPrefs.saveEditorWidth(_editorWidth);
+                      },
                     ),
                   if (showTerminal)
                     SizedBox(
@@ -286,9 +329,10 @@ class _FourPaneLayoutState extends State<_FourPaneLayout> {
                       child: _PaneWrapper(
                         collapseTooltip: 'Close Editor',
                         onCollapse: () => context.read<FileEditorCubit>().hidePanel(),
-                        onVerticalDrag: (dy) => setState(() {
-                          _editorHeight = ((_editorHeight ?? totalHeight) + dy).clamp(_minHeight, totalHeight - 40);
-                        }),
+                        onVerticalDrag: (dy) {
+                          setState(() => _editorHeight = ((_editorHeight ?? totalHeight) + dy).clamp(_minHeight, totalHeight - 40));
+                          SessionPrefs.saveEditorHeight(_editorHeight);
+                        },
                         child: const FileEditorPanel(),
                       ),
                     )
@@ -297,9 +341,10 @@ class _FourPaneLayoutState extends State<_FourPaneLayout> {
                       child: _PaneWrapper(
                         collapseTooltip: 'Close Editor',
                         onCollapse: () => context.read<FileEditorCubit>().hidePanel(),
-                        onVerticalDrag: (dy) => setState(() {
-                          _editorHeight = ((_editorHeight ?? totalHeight) + dy).clamp(_minHeight, totalHeight - 40);
-                        }),
+                        onVerticalDrag: (dy) {
+                          setState(() => _editorHeight = ((_editorHeight ?? totalHeight) + dy).clamp(_minHeight, totalHeight - 40));
+                          SessionPrefs.saveEditorHeight(_editorHeight);
+                        },
                         child: const FileEditorPanel(),
                       ),
                     ),
@@ -308,18 +353,20 @@ class _FourPaneLayoutState extends State<_FourPaneLayout> {
                 // ── Review / File Tree ─────────────────────────────────────────
                 if (showReview) ...[
                   _Divider(
-                    onDrag: (dx) => setState(() {
-                      _reviewWidth = (_reviewWidth - dx).clamp(_minWidth, totalWidth / 2);
-                    }),
+                    onDrag: (dx) {
+                      setState(() => _reviewWidth = (_reviewWidth - dx).clamp(_minWidth, totalWidth / 2));
+                      SessionPrefs.saveReviewWidth(_reviewWidth);
+                    },
                   ),
                   SizedBox(
                     width: _reviewWidth,
                     child: _PaneWrapper(
                       collapseTooltip: 'Collapse Tree',
                       onCollapse: widget.onToggleReview,
-                      onVerticalDrag: (dy) => setState(() {
-                        _reviewHeight = ((_reviewHeight ?? totalHeight) + dy).clamp(_minHeight, totalHeight - 40);
-                      }),
+                      onVerticalDrag: (dy) {
+                        setState(() => _reviewHeight = ((_reviewHeight ?? totalHeight) + dy).clamp(_minHeight, totalHeight - 40));
+                        SessionPrefs.saveReviewHeight(_reviewHeight);
+                      },
                       child: const ReviewPanel(),
                     ),
                   ),

@@ -1,7 +1,9 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_pty/flutter_pty.dart';
+import 'package:yoloit/core/session/session_prefs.dart';
 import 'package:yoloit/features/terminal/bloc/terminal_state.dart';
 import 'package:yoloit/features/terminal/data/logging_service.dart';
 import 'package:yoloit/features/terminal/data/pty_service.dart';
@@ -105,6 +107,7 @@ class TerminalCubit extends Cubit<TerminalState> {
     if (current == null) return;
     if (index < 0 || index >= current.sessions.length) return;
     emit(current.copyWith(activeIndex: index));
+    unawaited(SessionPrefs.saveActiveTerminalIdx(index));
   }
 
   void closeSession(String sessionId) {

@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_colorpicker/flutter_colorpicker.dart';
 import 'package:xterm/xterm.dart' hide TerminalState;
+import 'package:yoloit/core/session/session_prefs.dart';
 import 'package:yoloit/core/theme/app_colors.dart';
 import 'package:yoloit/features/terminal/bloc/terminal_cubit.dart';
 import 'package:yoloit/features/terminal/bloc/terminal_state.dart';
@@ -394,6 +395,10 @@ class _TerminalWidgetState extends State<_TerminalWidget> {
     _bindTerminal();
     _requestFocusAfterFrame();
     HardwareKeyboard.instance.addHandler(_handleHardwareKey);
+    // Load persisted font size
+    SessionPrefs.load().then((snap) {
+      if (mounted) setState(() => _fontSize = snap.terminalFontSize);
+    });
   }
 
   @override
@@ -539,9 +544,9 @@ class _TerminalWidgetState extends State<_TerminalWidget> {
     return GestureDetector(
       onScaleStart: (d) => _scaleBase = _fontSize,
       onScaleUpdate: (d) {
-        setState(() {
-          _fontSize = (_scaleBase * d.scale).clamp(8.0, 32.0);
-        });
+        final newSize = (_scaleBase * d.scale).clamp(8.0, 48.0);
+        setState(() => _fontSize = newSize);
+        SessionPrefs.saveTerminalFontSize(newSize);
       },
       child: Listener(
         behavior: HitTestBehavior.opaque,
