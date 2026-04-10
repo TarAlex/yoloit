@@ -734,9 +734,9 @@ class _EditorBodyState extends State<_EditorBody> {
                                 textStyle: TextStyle(fontFamily: 'monospace', fontSize: fontSize, height: 1.5),
                                 background: colors.background,
                                 gutterStyle: GutterStyle(
-                                  width: 48,
+                                  width: 72,
                                   margin: 8,
-                                  textStyle: const TextStyle(color: AppColors.textMuted, fontSize: 11, fontFamily: 'monospace'),
+                                  textStyle: const TextStyle(color: AppColors.textMuted, fontFamily: 'monospace'),
                                   background: colors.surfaceElevated,
                                 ),
                               ),
