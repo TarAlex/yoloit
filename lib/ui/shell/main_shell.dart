@@ -538,6 +538,36 @@ class _HorizontalDividerState extends State<_HorizontalDivider> {
 
 /// Wraps a panel child with a top-right collapse button and an optional
 /// bottom vertical resize handle.
+/// Draws a [_] style minimize icon — a rectangle outline with a filled bottom bar.
+class _MinimizePainter extends CustomPainter {
+  const _MinimizePainter({required this.color});
+  final Color color;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = color
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.2;
+
+    // Outer rectangle
+    final rect = Rect.fromLTWH(1, 1, size.width - 2, size.height - 2);
+    canvas.drawRect(rect, paint);
+
+    // Bottom filled bar (the _ part)
+    final barPaint = Paint()
+      ..color = color
+      ..style = PaintingStyle.fill;
+    canvas.drawRect(
+      Rect.fromLTWH(1, size.height - 4, size.width - 2, 3),
+      barPaint,
+    );
+  }
+
+  @override
+  bool shouldRepaint(_MinimizePainter old) => old.color != color;
+}
+
 class _PaneWrapper extends StatelessWidget {
   const _PaneWrapper({
     required this.child,
@@ -579,10 +609,9 @@ class _PaneWrapper extends StatelessWidget {
                           borderRadius: BorderRadius.circular(4),
                           border: Border.all(color: colors.border),
                         ),
-                        child: Icon(
-                          Icons.chevron_left,
-                          size: 14,
-                          color: AppColors.textMuted,
+                        child: CustomPaint(
+                          size: const Size(14, 14),
+                          painter: _MinimizePainter(color: AppColors.textMuted),
                         ),
                       ),
                     ),
