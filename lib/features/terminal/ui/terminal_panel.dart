@@ -688,25 +688,37 @@ class _WorkspaceStatusBar extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(width: 8),
-                  Text(
-                    wsName,
-                    style: TextStyle(
-                      color: accentColor.withAlpha(220),
-                      fontSize: 11,
-                      fontWeight: FontWeight.w600,
-                      letterSpacing: 0.3,
+                  Expanded(
+                    child: Row(
+                      children: [
+                        Flexible(
+                          child: Text(
+                            wsName,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              color: accentColor.withAlpha(220),
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                              letterSpacing: 0.3,
+                            ),
+                          ),
+                        ),
+                        if (ws?.gitBranch != null) ...[
+                          const SizedBox(width: 6),
+                          const Icon(Icons.alt_route, size: 10, color: AppColors.textMuted),
+                          const SizedBox(width: 3),
+                          Flexible(
+                            child: Text(
+                              ws!.gitBranch!,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(color: AppColors.textMuted, fontSize: 10),
+                            ),
+                          ),
+                        ],
+                      ],
                     ),
                   ),
-                  if (ws?.gitBranch != null) ...[
-                    const SizedBox(width: 8),
-                    const Icon(Icons.alt_route, size: 10, color: AppColors.textMuted),
-                    const SizedBox(width: 3),
-                    Text(
-                      ws!.gitBranch!,
-                      style: const TextStyle(color: AppColors.textMuted, fontSize: 10),
-                    ),
-                  ],
-                  const Spacer(),
+                  const SizedBox(width: 4),
                   Icon(Icons.palette_outlined, size: 10, color: accentColor.withAlpha(120)),
                 ],
               ),

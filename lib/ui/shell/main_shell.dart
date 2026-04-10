@@ -239,7 +239,17 @@ class _FourPaneLayoutState extends State<_FourPaneLayout> {
               children: [
                 // ── Workspace panel ──────────────────────────────────────────
                 if (showWorkspace) ...[
-                  SizedBox(width: _workspaceWidth, child: const WorkspacePanel()),
+                  SizedBox(
+                    width: _workspaceWidth,
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        border: Border(
+                          top: BorderSide(color: context.appColors.border, width: 1),
+                        ),
+                      ),
+                      child: const WorkspacePanel(),
+                    ),
+                  ),
                   _Divider(
                     onDrag: (dx) => setState(() {
                       _workspaceWidth = (_workspaceWidth + dx).clamp(_minWidth, totalWidth / 3);
@@ -554,47 +564,54 @@ class _PaneWrapper extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.appColors;
-    return Column(
-      children: [
-        Expanded(
-          child: Stack(
-            children: [
-              Positioned.fill(child: child),
-              // Collapse button — top-right corner
-              Positioned(
-                top: 4,
-                right: 4,
-                child: Tooltip(
-                  message: collapseTooltip,
-                  child: Material(
-                    color: Colors.transparent,
-                    child: InkWell(
-                      borderRadius: BorderRadius.circular(4),
-                      onTap: onCollapse,
-                      child: Container(
-                        width: 20,
-                        height: 20,
-                        decoration: BoxDecoration(
-                          color: colors.surfaceElevated.withAlpha(200),
-                          borderRadius: BorderRadius.circular(4),
-                          border: Border.all(color: colors.border),
-                        ),
-                        child: const Icon(
-                          Icons.minimize,
-                          size: 14,
-                          color: AppColors.textMuted,
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        border: Border(
+          top: BorderSide(color: colors.border, width: 1),
+        ),
+      ),
+      child: Column(
+        children: [
+          Expanded(
+            child: Stack(
+              children: [
+                Positioned.fill(child: child),
+                // Collapse button — top-right corner
+                Positioned(
+                  top: 4,
+                  right: 4,
+                  child: Tooltip(
+                    message: collapseTooltip,
+                    child: Material(
+                      color: Colors.transparent,
+                      child: InkWell(
+                        borderRadius: BorderRadius.circular(4),
+                        onTap: onCollapse,
+                        child: Container(
+                          width: 20,
+                          height: 20,
+                          decoration: BoxDecoration(
+                            color: colors.surfaceElevated.withAlpha(200),
+                            borderRadius: BorderRadius.circular(4),
+                            border: Border.all(color: colors.border),
+                          ),
+                          child: const Icon(
+                            Icons.minimize,
+                            size: 14,
+                            color: AppColors.textMuted,
+                          ),
                         ),
                       ),
                     ),
                   ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
-        ),
-        if (onVerticalDrag != null)
-          _HorizontalDivider(onDrag: onVerticalDrag!),
-      ],
+          if (onVerticalDrag != null)
+            _HorizontalDivider(onDrag: onVerticalDrag!),
+        ],
+      ),
     );
   }
 }
