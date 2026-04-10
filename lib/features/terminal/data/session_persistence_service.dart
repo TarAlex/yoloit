@@ -5,38 +5,31 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:yoloit/features/terminal/models/agent_session.dart';
 import 'package:yoloit/features/terminal/models/agent_type.dart';
 
-/// Persists active terminal session metadata across app restarts.
-///
-/// Terminal output (scrollback) cannot be saved because it lives inside the
-/// PTY process.  What we save is enough to re-spawn identical sessions: agent
-/// type, workspace path, and workspace id (for secrets injection).
+/// Persists active terminal session metadata across app restarts, keyed per workspace.
 class SessionPersistenceService {
   SessionPersistenceService._();
   static final instance = SessionPersistenceService._();
 
-  static const _key = 'terminal_sessions_v1';
+  static String _key(String workspaceId) => 'terminal_sessions_v2_$workspaceId';
 
-  /// Saves the current list of sessions.  Call after any mutation.
-  Future<void> save(List<AgentSession> sessions) async {
+  /// Saves sessions for a specific workspace.
+  Future<void> save(List<AgentSession> sessions, String workspaceId) async {
     final prefs = await SharedPreferences.getInstance();
     final data = sessions
-        .map(
-          (s) => {
-            'id': s.id,
-            'type': s.type.name,
-            'workspacePath': s.workspacePath,
-            if (s.workspaceId != null) 'workspaceId': s.workspaceId,
-          },
-        )
+        .map((s) => {
+              'id': s.id,
+              'type': s.type.name,
+              'workspacePath': s.workspacePath,
+              'workspaceId': s.workspaceId ?? workspaceId,
+            })
         .toList();
-    await prefs.setString(_key, jsonEncode(data));
+    await prefs.setString(_key(workspaceId), jsonEncode(data));
   }
 
-  /// Returns saved session descriptors, filtering out workspaces whose paths
-  /// no longer exist on disk.
-  Future<List<_SavedSession>> load() async {
+  /// Returns saved session descriptors for a workspace, filtering deleted paths.
+  Future<List<_SavedSession>> load(String workspaceId) async {
     final prefs = await SharedPreferences.getInstance();
-    final raw = prefs.getString(_key);
+    final raw = prefs.getString(_key(workspaceId));
     if (raw == null || raw.isEmpty) return [];
 
     try {
@@ -47,18 +40,14 @@ class SessionPersistenceService {
         final typeName = map['type'] as String? ?? '';
         final type = AgentType.values.where((t) => t.name == typeName).firstOrNull;
         if (type == null) continue;
-
         final path = map['workspacePath'] as String? ?? '';
         if (!Directory(path).existsSync()) continue;
-
-        results.add(
-          _SavedSession(
-            id: map['id'] as String? ?? '',
-            type: type,
-            workspacePath: path,
-            workspaceId: map['workspaceId'] as String?,
-          ),
-        );
+        results.add(_SavedSession(
+          id: map['id'] as String? ?? '',
+          type: type,
+          workspacePath: path,
+          workspaceId: map['workspaceId'] as String? ?? workspaceId,
+        ));
       }
       return results;
     } catch (_) {
@@ -66,9 +55,9 @@ class SessionPersistenceService {
     }
   }
 
-  Future<void> clear() async {
+  Future<void> clearWorkspace(String workspaceId) async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.remove(_key);
+    await prefs.remove(_key(workspaceId));
   }
 }
 

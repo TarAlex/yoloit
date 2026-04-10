@@ -21,27 +21,57 @@ class TerminalCubit extends Cubit<TerminalState> {
   final _logging = LoggingService.instance;
   final _tmux = TmuxService.instance;
 
-  /// Initialises services and restores previously active sessions.
+  /// All sessions across all workspaces (PTYs kept alive when switching workspaces).
+  final List<AgentSession> _allSessions = [];
+  String? _activeWorkspaceId;
+
+  List<AgentSession> get _workspaceSessions =>
+      _allSessions.where((s) => s.workspaceId == _activeWorkspaceId).toList();
+
+  /// Initialises services (no sessions loaded yet — call setActiveWorkspace).
   Future<void> initialize() async {
     await Future.wait([
       _logging.init(),
       _tmux.init(),
     ]);
     emit(const TerminalLoaded(sessions: [], activeIndex: 0));
-    await _restoreSessions();
   }
 
-  Future<void> _restoreSessions() async {
-    final saved = await _persistence.load();
-    for (final s in saved) {
-      if (saved.indexOf(s) > 0) {
-        await Future<void>.delayed(const Duration(milliseconds: 200));
+  /// Switch to a workspace: load its sessions or spawn a default terminal.
+  Future<void> setActiveWorkspace({
+    required String workspaceId,
+    required String workspacePath,
+  }) async {
+    _activeWorkspaceId = workspaceId;
+
+    // Show workspace sessions that are already running in memory.
+    final running = _workspaceSessions;
+    if (running.isNotEmpty) {
+      emit(TerminalLoaded(sessions: running, activeIndex: 0));
+      return;
+    }
+
+    emit(const TerminalLoaded(sessions: [], activeIndex: 0));
+
+    // Restore persisted sessions for this workspace.
+    final saved = await _persistence.load(workspaceId);
+    if (saved.isNotEmpty) {
+      for (var i = 0; i < saved.length; i++) {
+        if (i > 0) await Future<void>.delayed(const Duration(milliseconds: 200));
+        final s = saved[i];
+        await spawnSession(
+          type: s.type,
+          workspacePath: s.workspacePath,
+          workspaceId: s.workspaceId ?? workspaceId,
+          savedSessionId: s.id,
+        );
       }
+    } else {
+      // No saved sessions → spawn a default plain terminal for this workspace.
       await spawnSession(
-        type: s.type,
-        workspacePath: s.workspacePath,
-        workspaceId: s.workspaceId,
-        savedSessionId: s.id,
+        type: AgentType.terminal,
+        workspacePath: workspacePath,
+        workspaceId: workspaceId,
       );
     }
   }
@@ -52,8 +82,7 @@ class TerminalCubit extends Cubit<TerminalState> {
     String? workspaceId,
     String? savedSessionId,
   }) async {
-    final current = _loaded;
-    if (current == null) return;
+    if (state is! TerminalLoaded) return;
 
     final sessionId =
         savedSessionId ?? '${type.name}_${DateTime.now().millisecondsSinceEpoch}';
@@ -90,9 +119,17 @@ class TerminalCubit extends Cubit<TerminalState> {
     unawaited(_logging.startSession(sessionId, '${type.displayName} @ $workspacePath'));
     _attachPtyToSession(pty, session);
 
-    final sessions = [...current.sessions, session];
-    emit(current.copyWith(sessions: sessions, activeIndex: sessions.length - 1));
-    unawaited(_persistence.save(sessions));
+    _allSessions.add(session);
+    final visible = _workspaceSessions;
+    emit(TerminalLoaded(sessions: visible, activeIndex: visible.length - 1));
+
+    final effectiveWorkspaceId = workspaceId ?? _activeWorkspaceId;
+    if (effectiveWorkspaceId != null) {
+      unawaited(_persistence.save(
+        _allSessions.where((s) => s.workspaceId == effectiveWorkspaceId).toList(),
+        effectiveWorkspaceId,
+      ));
+    }
 
     // Auto-run agent command (skip for plain terminal and when restoring tmux session).
     final isRestore = savedSessionId != null;
@@ -118,11 +155,12 @@ class TerminalCubit extends Cubit<TerminalState> {
       onKillTmux: _tmux.isActive ? _tmux.killSession : null,
     );
     unawaited(_logging.endSession(sessionId));
-    final sessions = current.sessions.where((s) => s.id != sessionId).toList();
-    final newIndex =
-        current.activeIndex.clamp(0, sessions.isEmpty ? 0 : sessions.length - 1);
-    emit(current.copyWith(sessions: sessions, activeIndex: newIndex));
-    unawaited(_persistence.save(sessions));
+    _allSessions.removeWhere((s) => s.id == sessionId);
+    final visible = _workspaceSessions;
+    final newIndex = visible.isEmpty ? 0 : current.activeIndex.clamp(0, visible.length - 1);
+    emit(current.copyWith(sessions: visible, activeIndex: newIndex));
+    final wsId = _activeWorkspaceId;
+    if (wsId != null) unawaited(_persistence.save(visible, wsId));
   }
 
   void resizeActiveTerminal(int columns, int rows) {
@@ -151,11 +189,13 @@ class TerminalCubit extends Cubit<TerminalState> {
   void _onSessionDone(String sessionId) {
     final current = _loaded;
     if (current == null) return;
-    final sessions = current.sessions.map((s) {
-      if (s.id == sessionId) return s.copyWith(status: AgentStatus.idle);
-      return s;
-    }).toList();
-    if (!isClosed) emit(current.copyWith(sessions: sessions));
+    // Update status in _allSessions
+    final idx = _allSessions.indexWhere((s) => s.id == sessionId);
+    if (idx >= 0) {
+      _allSessions[idx] = _allSessions[idx].copyWith(status: AgentStatus.idle);
+    }
+    final visible = _workspaceSessions;
+    if (!isClosed) emit(current.copyWith(sessions: visible));
   }
 
   String _generateSessionId() {
@@ -177,7 +217,6 @@ class TerminalCubit extends Cubit<TerminalState> {
 
   @override
   Future<void> close() {
-    // killAll() detaches PTYs but does NOT kill tmux sessions, so agents survive.
     _ptyService.killAll();
     return super.close();
   }

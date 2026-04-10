@@ -16,6 +16,7 @@ import 'package:yoloit/features/terminal/bloc/terminal_cubit.dart';
 import 'package:yoloit/features/terminal/bloc/terminal_state.dart';
 import 'package:yoloit/features/terminal/ui/terminal_panel.dart';
 import 'package:yoloit/features/workspaces/bloc/workspace_cubit.dart';
+import 'package:yoloit/features/workspaces/bloc/workspace_state.dart';
 import 'package:yoloit/features/workspaces/ui/workspace_panel.dart';
 import 'package:yoloit/ui/widgets/split_view.dart';
 
@@ -57,17 +58,13 @@ class _MainShellState extends State<MainShell> with WindowListener {
       _sessionSnapshot = snap;
     });
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      // Initialize terminal services (no sessions yet — workspace listener will load them)
+      context.read<TerminalCubit>().initialize();
+      // Load workspaces — BlocListener in _BottomPanel will pick up active workspace
       context.read<WorkspaceCubit>().load();
-      context.read<TerminalCubit>().initialize().then((_) {
-        if (!mounted) return;
-        final tState = context.read<TerminalCubit>().state;
-        if (tState is TerminalLoaded && tState.sessions.isNotEmpty) {
-          final idx = snap.activeTerminalIdx.clamp(0, tState.sessions.length - 1);
-          context.read<TerminalCubit>().switchTab(idx);
-          Future.delayed(const Duration(milliseconds: 300), () {
-            if (mounted) _terminalFocusNode.requestFocus();
-          });
-        }
+      // Focus terminal after startup
+      Future.delayed(const Duration(milliseconds: 600), () {
+        if (mounted) _terminalFocusNode.requestFocus();
       });
     });
   }
@@ -393,26 +390,48 @@ class _FourPaneLayoutState extends State<_FourPaneLayout> {
 }
 
 /// Bottom panel that hosts the Agents terminal.
+/// Listens to workspace changes and switches terminal sessions accordingly.
 class _BottomPanel extends StatelessWidget {
   const _BottomPanel();
 
   @override
   Widget build(BuildContext context) {
     final colors = context.appColors;
-    return Column(
-      children: [
-        Container(
-          height: 28,
-          color: colors.surface,
-          child: const Row(
-            children: [
-              _BottomTabButton(label: 'Agents', icon: Icons.terminal, isActive: true),
-            ],
+    return BlocListener<WorkspaceCubit, WorkspaceState>(
+      listenWhen: (prev, curr) {
+        if (curr is! WorkspaceLoaded) return false;
+        if (prev is! WorkspaceLoaded) return true;
+        return prev.activeWorkspaceId != curr.activeWorkspaceId &&
+            curr.activeWorkspaceId != null;
+      },
+      listener: (context, state) {
+        if (state is! WorkspaceLoaded) return;
+        final wsId = state.activeWorkspaceId;
+        if (wsId == null) return;
+        final ws = state.workspaces.firstWhere(
+          (w) => w.id == wsId,
+          orElse: () => state.workspaces.first,
+        );
+        context.read<TerminalCubit>().setActiveWorkspace(
+          workspaceId: wsId,
+          workspacePath: ws.path,
+        );
+      },
+      child: Column(
+        children: [
+          Container(
+            height: 28,
+            color: colors.surface,
+            child: const Row(
+              children: [
+                _BottomTabButton(label: 'Agents', icon: Icons.terminal, isActive: true),
+              ],
+            ),
           ),
-        ),
-        Container(height: 1, color: colors.divider),
-        const Expanded(child: TerminalPanel()),
-      ],
+          Container(height: 1, color: colors.divider),
+          const Expanded(child: TerminalPanel()),
+        ],
+      ),
     );
   }
 }
