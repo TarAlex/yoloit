@@ -157,6 +157,7 @@ class _MainShellState extends State<MainShell> with WindowListener {
                     reviewVisible: _reviewVisible,
                     terminalVisible: _terminalVisible,
                     onToggleReview: () => setState(() => _reviewVisible = !_reviewVisible),
+                    onToggleTerminal: () => setState(() => _terminalVisible = !_terminalVisible),
                   ),
                 ),
               ],
@@ -178,6 +179,7 @@ class _FourPaneLayout extends StatefulWidget {
     required this.reviewVisible,
     required this.terminalVisible,
     required this.onToggleReview,
+    required this.onToggleTerminal,
   });
 
   final HSplitViewController splitController;
@@ -185,6 +187,7 @@ class _FourPaneLayout extends StatefulWidget {
   final bool reviewVisible;
   final bool terminalVisible;
   final VoidCallback onToggleReview;
+  final VoidCallback onToggleTerminal;
 
   @override
   State<_FourPaneLayout> createState() => _FourPaneLayoutState();
@@ -195,7 +198,13 @@ class _FourPaneLayoutState extends State<_FourPaneLayout> {
   double _editorWidth = 480;
   double _reviewWidth = 360;
 
+  // Vertical heights (null = fill all available space)
+  double? _agentsHeight;
+  double? _editorHeight;
+  double? _reviewHeight;
+
   static const _minWidth = 160.0;
+  static const _minHeight = 120.0;
 
 
   @override
@@ -224,6 +233,7 @@ class _FourPaneLayoutState extends State<_FourPaneLayout> {
         return LayoutBuilder(
           builder: (context, constraints) {
             final totalWidth = constraints.maxWidth;
+            final totalHeight = constraints.maxHeight;
 
             return Row(
               children: [
@@ -239,10 +249,19 @@ class _FourPaneLayoutState extends State<_FourPaneLayout> {
 
                 // ── Terminal/Agents (toggleable, fills remaining when visible) ─
                 if (showTerminal)
-                  Expanded(
+                  _sizedOrExpanded(
+                    width: null,
+                    height: _agentsHeight,
                     child: Focus(
                       focusNode: widget.terminalFocusNode,
-                      child: const _BottomPanel(),
+                      child: _PaneWrapper(
+                        collapseTooltip: 'Collapse Agents',
+                        onCollapse: widget.onToggleTerminal,
+                        onVerticalDrag: (dy) => setState(() {
+                          _agentsHeight = ((_agentsHeight ?? totalHeight) + dy).clamp(_minHeight, totalHeight - 40);
+                        }),
+                        child: const _BottomPanel(),
+                      ),
                     ),
                   ),
 
@@ -254,11 +273,29 @@ class _FourPaneLayoutState extends State<_FourPaneLayout> {
                         _editorWidth = (_editorWidth - dx).clamp(_minWidth, totalWidth / 2);
                       }),
                     ),
-                  // When terminal is hidden, editor fills remaining space
                   if (showTerminal)
-                    SizedBox(width: _editorWidth, child: const FileEditorPanel())
+                    SizedBox(
+                      width: _editorWidth,
+                      child: _PaneWrapper(
+                        collapseTooltip: 'Close Editor',
+                        onCollapse: () => context.read<FileEditorCubit>().hidePanel(),
+                        onVerticalDrag: (dy) => setState(() {
+                          _editorHeight = ((_editorHeight ?? totalHeight) + dy).clamp(_minHeight, totalHeight - 40);
+                        }),
+                        child: const FileEditorPanel(),
+                      ),
+                    )
                   else
-                    const Expanded(child: FileEditorPanel()),
+                    Expanded(
+                      child: _PaneWrapper(
+                        collapseTooltip: 'Close Editor',
+                        onCollapse: () => context.read<FileEditorCubit>().hidePanel(),
+                        onVerticalDrag: (dy) => setState(() {
+                          _editorHeight = ((_editorHeight ?? totalHeight) + dy).clamp(_minHeight, totalHeight - 40);
+                        }),
+                        child: const FileEditorPanel(),
+                      ),
+                    ),
                 ],
 
                 // ── Review / File Tree ─────────────────────────────────────────
@@ -268,7 +305,17 @@ class _FourPaneLayoutState extends State<_FourPaneLayout> {
                       _reviewWidth = (_reviewWidth - dx).clamp(_minWidth, totalWidth / 2);
                     }),
                   ),
-                  SizedBox(width: _reviewWidth, child: const ReviewPanel()),
+                  SizedBox(
+                    width: _reviewWidth,
+                    child: _PaneWrapper(
+                      collapseTooltip: 'Collapse Tree',
+                      onCollapse: widget.onToggleReview,
+                      onVerticalDrag: (dy) => setState(() {
+                        _reviewHeight = ((_reviewHeight ?? totalHeight) + dy).clamp(_minHeight, totalHeight - 40);
+                      }),
+                      child: const ReviewPanel(),
+                    ),
+                  ),
                 ],
 
                 // ── Fallback when only workspace (or nothing) is showing ───────
@@ -280,6 +327,14 @@ class _FourPaneLayoutState extends State<_FourPaneLayout> {
         );
       },
     );
+  }
+
+  // ignore: unused_element
+  Widget _sizedOrExpanded({required double? width, required double? height, required Widget child}) {
+    if (width != null) {
+      return SizedBox(width: width, height: height, child: child);
+    }
+    return height != null ? SizedBox(height: height, child: Expanded(child: child)) : Expanded(child: child);
   }
 }
 
@@ -445,6 +500,101 @@ class _DividerState extends State<_Divider> {
           color: _hovering ? colors.primary.withAlpha(120) : colors.divider,
         ),
       ),
+    );
+  }
+}
+
+/// Thin horizontal draggable divider at the bottom of a pane for vertical resize.
+class _HorizontalDivider extends StatefulWidget {
+  const _HorizontalDivider({required this.onDrag});
+  final ValueChanged<double> onDrag;
+
+  @override
+  State<_HorizontalDivider> createState() => _HorizontalDividerState();
+}
+
+class _HorizontalDividerState extends State<_HorizontalDivider> {
+  bool _hovering = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.appColors;
+    return MouseRegion(
+      cursor: SystemMouseCursors.resizeRow,
+      onEnter: (_) => setState(() => _hovering = true),
+      onExit: (_) => setState(() => _hovering = false),
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onVerticalDragUpdate: (d) => widget.onDrag(d.delta.dy),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 120),
+          height: 4,
+          color: _hovering ? colors.primary.withAlpha(120) : colors.divider,
+        ),
+      ),
+    );
+  }
+}
+
+/// Wraps a panel child with a top-right collapse button and an optional
+/// bottom vertical resize handle.
+class _PaneWrapper extends StatelessWidget {
+  const _PaneWrapper({
+    required this.child,
+    required this.onCollapse,
+    this.collapseTooltip = 'Collapse',
+    this.onVerticalDrag,
+  });
+
+  final Widget child;
+  final VoidCallback onCollapse;
+  final String collapseTooltip;
+  final ValueChanged<double>? onVerticalDrag;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.appColors;
+    return Column(
+      children: [
+        Expanded(
+          child: Stack(
+            children: [
+              Positioned.fill(child: child),
+              // Collapse button — top-right corner
+              Positioned(
+                top: 4,
+                right: 4,
+                child: Tooltip(
+                  message: collapseTooltip,
+                  child: Material(
+                    color: Colors.transparent,
+                    child: InkWell(
+                      borderRadius: BorderRadius.circular(4),
+                      onTap: onCollapse,
+                      child: Container(
+                        width: 20,
+                        height: 20,
+                        decoration: BoxDecoration(
+                          color: colors.surfaceElevated.withAlpha(200),
+                          borderRadius: BorderRadius.circular(4),
+                          border: Border.all(color: colors.border),
+                        ),
+                        child: Icon(
+                          Icons.chevron_left,
+                          size: 14,
+                          color: AppColors.textMuted,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        if (onVerticalDrag != null)
+          _HorizontalDivider(onDrag: onVerticalDrag!),
+      ],
     );
   }
 }
