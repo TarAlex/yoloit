@@ -42,14 +42,15 @@ class _FileEditorPanelState extends State<FileEditorPanel> {
   final Map<String, CodeController> _controllers = {};
   /// Tracks which content was last loaded into each controller (to avoid loops).
   final Map<String, String> _loadedContent = {};
-  double _fontSize = 13.0;
   double _scaleBase = 13.0;
+  final _fontSizeNotifier = ValueNotifier<double>(13.0);
 
   @override
   void dispose() {
     for (final c in _controllers.values) {
       c.dispose();
     }
+    _fontSizeNotifier.dispose();
     super.dispose();
   }
 
@@ -132,11 +133,11 @@ class _FileEditorPanelState extends State<FileEditorPanel> {
         }
 
         return GestureDetector(
-          onScaleStart: (d) => _scaleBase = _fontSize,
+          onScaleStart: (d) => _scaleBase = _fontSizeNotifier.value,
           onScaleUpdate: (d) {
-            setState(() {
-              _fontSize = (_scaleBase * d.scale).clamp(8.0, 32.0);
-            });
+            // Update ValueNotifier directly — no setState, no full rebuild
+            final newSize = (_scaleBase * d.scale).clamp(8.0, 48.0);
+            _fontSizeNotifier.value = newSize;
           },
           child: Column(
             children: [
@@ -148,7 +149,7 @@ class _FileEditorPanelState extends State<FileEditorPanel> {
                         ? _ErrorView(message: activeTab.error!)
                         : activeTab.isDiff
                             ? _DiffBody(tab: activeTab)
-                            : _EditorBody(key: ValueKey(activeTab.filePath), tab: activeTab, codeController: controller!, fontSize: _fontSize),
+                            : _EditorBody(key: ValueKey(activeTab.filePath), tab: activeTab, codeController: controller!, fontSizeNotifier: _fontSizeNotifier),
               ),
             ],
           ),
@@ -334,10 +335,10 @@ class _ErrorView extends StatelessWidget {
 // ── Editor body (StatefulWidget) ────────────────────────────────────────────
 
 class _EditorBody extends StatefulWidget {
-  const _EditorBody({super.key, required this.tab, required this.codeController, this.fontSize = 13.0});
+  const _EditorBody({super.key, required this.tab, required this.codeController, required this.fontSizeNotifier});
   final EditorTab tab;
   final CodeController codeController;
-  final double fontSize;
+  final ValueNotifier<double> fontSizeNotifier;
   @override
   State<_EditorBody> createState() => _EditorBodyState();
 }
@@ -712,19 +713,22 @@ class _EditorBodyState extends State<_EditorBody> {
                     child: Column(
                       children: [
                         Expanded(
-                          child: CodeTheme(
-                            data: CodeThemeData(styles: _darkTheme),
-                            child: CodeField(
-                              controller: widget.codeController,
-                              expands: true,
-                              wrap: _wordWrap,
-                              textStyle: TextStyle(fontFamily: 'monospace', fontSize: widget.fontSize, height: 1.5),
-                              background: colors.background,
-                              gutterStyle: GutterStyle(
-                                width: 48,
-                                margin: 8,
-                                textStyle: const TextStyle(color: AppColors.textMuted, fontSize: 11, fontFamily: 'monospace'),
-                                background: colors.surfaceElevated,
+                          child: ValueListenableBuilder<double>(
+                            valueListenable: widget.fontSizeNotifier,
+                            builder: (context, fontSize, _) => CodeTheme(
+                              data: CodeThemeData(styles: _darkTheme),
+                              child: CodeField(
+                                controller: widget.codeController,
+                                expands: true,
+                                wrap: _wordWrap,
+                                textStyle: TextStyle(fontFamily: 'monospace', fontSize: fontSize, height: 1.5),
+                                background: colors.background,
+                                gutterStyle: GutterStyle(
+                                  width: 48,
+                                  margin: 8,
+                                  textStyle: const TextStyle(color: AppColors.textMuted, fontSize: 11, fontFamily: 'monospace'),
+                                  background: colors.surfaceElevated,
+                                ),
                               ),
                             ),
                           ),
