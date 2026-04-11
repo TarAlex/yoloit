@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_svg/flutter_svg.dart';
@@ -862,10 +864,16 @@ class _ResourceChip extends StatefulWidget {
 
 class _ResourceChipState extends State<_ResourceChip> {
   ResourceSnapshot _snap = ResourceMonitorService.instance.current;
-  late final _sub = ResourceMonitorService.instance.stream
-      .listen((s) { if (mounted) setState(() => _snap = s); });
+  late final StreamSubscription<ResourceSnapshot> _sub;
 
   OverlayEntry? _overlay;
+
+  @override
+  void initState() {
+    super.initState();
+    _sub = ResourceMonitorService.instance.stream
+        .listen((s) { if (mounted) setState(() => _snap = s); });
+  }
 
   @override
   void dispose() {
@@ -941,8 +949,14 @@ class _ResourcePanel extends StatefulWidget {
 
 class _ResourcePanelState extends State<_ResourcePanel> {
   late ResourceSnapshot _snap = widget.snapshot;
-  late final _sub = ResourceMonitorService.instance.stream
-      .listen((s) { if (mounted) setState(() => _snap = s); });
+  late final StreamSubscription<ResourceSnapshot> _sub;
+
+  @override
+  void initState() {
+    super.initState();
+    _sub = ResourceMonitorService.instance.stream
+        .listen((s) { if (mounted) setState(() => _snap = s); });
+  }
 
   @override
   void dispose() {
