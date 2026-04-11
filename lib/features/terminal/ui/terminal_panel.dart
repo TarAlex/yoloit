@@ -58,7 +58,7 @@ class _EmptyTerminal extends StatelessWidget {
                   ),
                   const SizedBox(height: 16),
                   const Text(
-                    'Agent Terminal',
+                    'AI Agents',
                     style: TextStyle(
                       color: AppColors.textPrimary,
                       fontSize: 18,
@@ -149,22 +149,6 @@ class _TerminalHeader extends StatelessWidget {
       ),
       child: Row(
         children: [
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12),
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 120),
-              child: const Text(
-                'Agent Terminal',
-                style: TextStyle(
-                  color: AppColors.textPrimary,
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600,
-                ),
-                overflow: TextOverflow.ellipsis,
-              ),
-            ),
-          ),
-          VerticalDivider(width: 1, color: colors.border),
           // Scrollable session tabs — takes all available space
           Expanded(
             child: ListView.builder(
@@ -179,6 +163,7 @@ class _TerminalHeader extends StatelessWidget {
                   isActive: isActive,
                   onTap: () => context.read<TerminalCubit>().switchTab(i),
                   onClose: () => context.read<TerminalCubit>().closeSession(session.id),
+                  onRename: (name) => context.read<TerminalCubit>().renameSession(session.id, name),
                 );
               },
             ),
@@ -212,12 +197,14 @@ class _AgentTab extends StatefulWidget {
     required this.isActive,
     required this.onTap,
     required this.onClose,
+    required this.onRename,
   });
 
   final AgentSession session;
   final bool isActive;
   final VoidCallback onTap;
   final VoidCallback onClose;
+  final ValueChanged<String> onRename;
 
   @override
   State<_AgentTab> createState() => _AgentTabState();
@@ -225,6 +212,53 @@ class _AgentTab extends StatefulWidget {
 
 class _AgentTabState extends State<_AgentTab> {
   bool _hovering = false;
+  bool _editing = false;
+  late final TextEditingController _nameController;
+  final _nameFocus = FocusNode();
+
+  @override
+  void initState() {
+    super.initState();
+    _nameController = TextEditingController(text: widget.session.displayName);
+    _nameFocus.addListener(() {
+      if (!_nameFocus.hasFocus && _editing) _commitRename();
+    });
+  }
+
+  @override
+  void didUpdateWidget(_AgentTab oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!_editing && oldWidget.session.displayName != widget.session.displayName) {
+      _nameController.text = widget.session.displayName;
+    }
+  }
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    _nameFocus.dispose();
+    super.dispose();
+  }
+
+  void _startEditing() {
+    setState(() {
+      _editing = true;
+      _nameController.text = widget.session.displayName;
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _nameFocus.requestFocus();
+      _nameController.selection = TextSelection(
+        baseOffset: 0,
+        extentOffset: _nameController.text.length,
+      );
+    });
+  }
+
+  void _commitRename() {
+    final name = _nameController.text.trim();
+    widget.onRename(name);
+    setState(() => _editing = false);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -239,11 +273,12 @@ class _AgentTabState extends State<_AgentTab> {
       onExit: (_) => setState(() => _hovering = false),
       cursor: SystemMouseCursors.click,
       child: GestureDetector(
-        onTap: widget.onTap,
+        onTap: _editing ? null : widget.onTap,
+        onDoubleTap: _editing ? null : _startEditing,
         child: AnimatedContainer(
-          duration: Duration(milliseconds: 100),
-          margin: EdgeInsets.symmetric(horizontal: 2, vertical: 6),
-          padding: EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+          duration: const Duration(milliseconds: 100),
+          margin: const EdgeInsets.symmetric(horizontal: 2, vertical: 6),
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
           decoration: BoxDecoration(
             color: widget.isActive
                 ? colors.tabActiveBg
@@ -263,14 +298,43 @@ class _AgentTabState extends State<_AgentTab> {
                 style: TextStyle(fontSize: 12, color: colors.primaryLight),
               ),
               const SizedBox(width: 5),
-              Text(
-                session.displayName,
-                style: TextStyle(
-                  color: widget.isActive ? AppColors.textPrimary : AppColors.textSecondary,
-                  fontSize: 12,
-                  fontWeight: widget.isActive ? FontWeight.w600 : FontWeight.w400,
+              if (_editing)
+                SizedBox(
+                  width: 90,
+                  height: 20,
+                  child: TextField(
+                    controller: _nameController,
+                    focusNode: _nameFocus,
+                    style: const TextStyle(
+                      color: AppColors.textPrimary,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                    ),
+                    decoration: InputDecoration(
+                      isDense: true,
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(3),
+                        borderSide: BorderSide(color: colors.primary, width: 1),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(3),
+                        borderSide: BorderSide(color: colors.primary, width: 1.5),
+                      ),
+                    ),
+                    onSubmitted: (_) => _commitRename(),
+                    onEditingComplete: _commitRename,
+                  ),
+                )
+              else
+                Text(
+                  session.displayName,
+                  style: TextStyle(
+                    color: widget.isActive ? AppColors.textPrimary : AppColors.textSecondary,
+                    fontSize: 12,
+                    fontWeight: widget.isActive ? FontWeight.w600 : FontWeight.w400,
+                  ),
                 ),
-              ),
               const SizedBox(width: 5),
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
@@ -301,7 +365,7 @@ class _AgentTabState extends State<_AgentTab> {
                   ],
                 ),
               ),
-              if (_hovering) ...[
+              if (_hovering && !_editing) ...[
                 const SizedBox(width: 4),
                 GestureDetector(
                   onTap: widget.onClose,

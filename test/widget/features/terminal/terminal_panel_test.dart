@@ -40,13 +40,13 @@ void main() {
   setUp(() => SharedPreferences.setMockInitialValues({}));
 
   group('TerminalPanel widget tests', () {
-    testWidgets('empty state shows Agent Terminal header', (tester) async {
+    testWidgets('empty state shows AI Agents header', (tester) async {
       await tester.pumpWidget(_buildTerminalTest(
         terminalState: const TerminalInitial(),
       ));
       await tester.pump();
 
-      expect(find.text('Agent Terminal'), findsAtLeastNWidgets(1));
+      expect(find.text('AI Agents'), findsAtLeastNWidgets(1));
     });
 
     testWidgets('empty state shows instruction text', (tester) async {
@@ -62,7 +62,7 @@ void main() {
       await tester.pumpWidget(_buildTerminalTest(
         terminalState: const TerminalInitial(),
         workspaceState: const WorkspaceLoaded(
-          workspaces: [Workspace(id: 'ws_1', name: 'proj', path: '/proj')],
+          workspaces: [Workspace(id: 'ws_1', name: 'proj', paths: ['/proj'])],
           activeWorkspaceId: 'ws_1',
         ),
       ));

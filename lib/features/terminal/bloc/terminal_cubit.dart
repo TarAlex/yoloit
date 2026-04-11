@@ -28,13 +28,22 @@ class TerminalCubit extends Cubit<TerminalState> {
   List<AgentSession> get _workspaceSessions =>
       _allSessions.where((s) => s.workspaceId == _activeWorkspaceId).toList();
 
+  /// Emits a TerminalLoaded with both visible (workspace) sessions and allSessions.
+  void _emitLoaded(List<AgentSession> visible, int activeIndex) {
+    emit(TerminalLoaded(
+      sessions: visible,
+      activeIndex: activeIndex,
+      allSessions: List.unmodifiable(_allSessions),
+    ));
+  }
+
   /// Initialises services (no sessions loaded yet — call setActiveWorkspace).
   Future<void> initialize() async {
     await Future.wait([
       _logging.init(),
       _tmux.init(),
     ]);
-    emit(const TerminalLoaded(sessions: [], activeIndex: 0));
+    _emitLoaded([], 0);
   }
 
   /// Switch to a workspace: load its sessions or spawn a default terminal.
@@ -47,11 +56,11 @@ class TerminalCubit extends Cubit<TerminalState> {
     // Show workspace sessions that are already running in memory.
     final running = _workspaceSessions;
     if (running.isNotEmpty) {
-      emit(TerminalLoaded(sessions: running, activeIndex: 0));
+      _emitLoaded(running, 0);
       return;
     }
 
-    emit(const TerminalLoaded(sessions: [], activeIndex: 0));
+    _emitLoaded([], 0);
 
     // Restore persisted sessions for this workspace.
     final saved = await _persistence.load(workspaceId);
@@ -121,7 +130,7 @@ class TerminalCubit extends Cubit<TerminalState> {
 
     _allSessions.add(session);
     final visible = _workspaceSessions;
-    emit(TerminalLoaded(sessions: visible, activeIndex: visible.length - 1));
+    _emitLoaded(visible, visible.length - 1);
 
     final effectiveWorkspaceId = workspaceId ?? _activeWorkspaceId;
     if (effectiveWorkspaceId != null) {
@@ -143,8 +152,22 @@ class TerminalCubit extends Cubit<TerminalState> {
     final current = _loaded;
     if (current == null) return;
     if (index < 0 || index >= current.sessions.length) return;
-    emit(current.copyWith(activeIndex: index));
+    emit(current.copyWith(activeIndex: index, allSessions: List.unmodifiable(_allSessions)));
     unawaited(SessionPrefs.saveActiveTerminalIdx(index));
+  }
+
+  void renameSession(String sessionId, String name) {
+    final idx = _allSessions.indexWhere((s) => s.id == sessionId);
+    if (idx == -1) return;
+    _allSessions[idx] = _allSessions[idx].copyWith(
+      customName: name.trim().isEmpty ? null : name.trim(),
+      clearCustomName: name.trim().isEmpty,
+    );
+    final visible = _workspaceSessions;
+    final current = _loaded;
+    _emitLoaded(visible, current?.activeIndex ?? 0);
+    final wsId = _activeWorkspaceId;
+    if (wsId != null) unawaited(_persistence.save(visible, wsId));
   }
 
   void closeSession(String sessionId) {
@@ -158,7 +181,7 @@ class TerminalCubit extends Cubit<TerminalState> {
     _allSessions.removeWhere((s) => s.id == sessionId);
     final visible = _workspaceSessions;
     final newIndex = visible.isEmpty ? 0 : current.activeIndex.clamp(0, visible.length - 1);
-    emit(current.copyWith(sessions: visible, activeIndex: newIndex));
+    _emitLoaded(visible, newIndex);
     final wsId = _activeWorkspaceId;
     if (wsId != null) unawaited(_persistence.save(visible, wsId));
   }
@@ -195,7 +218,7 @@ class TerminalCubit extends Cubit<TerminalState> {
       _allSessions[idx] = _allSessions[idx].copyWith(status: AgentStatus.idle);
     }
     final visible = _workspaceSessions;
-    if (!isClosed) emit(current.copyWith(sessions: visible));
+    if (!isClosed) emit(current.copyWith(sessions: visible, allSessions: List.unmodifiable(_allSessions)));
   }
 
   String _generateSessionId() {

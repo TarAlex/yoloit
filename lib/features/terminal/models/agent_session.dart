@@ -12,6 +12,7 @@ class AgentSession extends Equatable {
     this.workspaceId,
     this.status = AgentStatus.idle,
     this.sessionId,
+    this.customName,
   }) : terminal = Terminal(maxLines: 10000);
 
   // Private constructor that preserves an existing terminal instance.
@@ -23,6 +24,7 @@ class AgentSession extends Equatable {
     this.workspaceId,
     this.status = AgentStatus.idle,
     this.sessionId,
+    this.customName,
   });
 
   final String id;
@@ -32,11 +34,14 @@ class AgentSession extends Equatable {
   final String? workspaceId;
   final AgentStatus status;
   final String? sessionId;
+  final String? customName;
   final Terminal terminal;
 
   AgentSession copyWith({
     AgentStatus? status,
     String? sessionId,
+    String? customName,
+    bool clearCustomName = false,
   }) {
     return AgentSession._preserve(
       id: id,
@@ -46,11 +51,12 @@ class AgentSession extends Equatable {
       terminal: terminal,
       status: status ?? this.status,
       sessionId: sessionId ?? this.sessionId,
+      customName: clearCustomName ? null : (customName ?? this.customName),
     );
   }
 
-  String get displayName => type.displayName;
+  String get displayName => customName?.isNotEmpty == true ? customName! : type.displayName;
 
   @override
-  List<Object?> get props => [id, type.name, workspacePath, status, sessionId];
+  List<Object?> get props => [id, type.name, workspacePath, status, sessionId, customName];
 }
