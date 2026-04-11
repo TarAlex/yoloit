@@ -11,12 +11,13 @@ import 'package:yoloit/features/runs/ui/run_panel.dart';
 import 'package:yoloit/features/workspaces/bloc/workspace_cubit.dart';
 import 'package:yoloit/features/workspaces/bloc/workspace_state.dart';
 
+enum _FileTreeTab { files, diff }
+
 class ReviewPanel extends StatelessWidget {
   const ReviewPanel({super.key});
 
   @override
   Widget build(BuildContext context) {
-
     return BlocBuilder<ReviewCubit, ReviewState>(
       builder: (context, state) {
         if (state is ReviewLoaded) {
@@ -66,6 +67,7 @@ class _ReviewContent extends StatefulWidget {
 
 class _ReviewContentState extends State<_ReviewContent> {
   bool _runCollapsed = false;
+  _FileTreeTab _currentTab = _FileTreeTab.files;
 
   @override
   Widget build(BuildContext context) {
@@ -74,9 +76,15 @@ class _ReviewContentState extends State<_ReviewContent> {
       color: colors.surface,
       child: Column(
         children: [
-          _ReviewHeader(state: widget.state),
+          _ReviewTabBar(
+            state: widget.state,
+            currentTab: _currentTab,
+            onTabChanged: (tab) => setState(() => _currentTab = tab),
+          ),
           Expanded(
-            child: _FileTreeSection(state: widget.state),
+            child: _currentTab == _FileTreeTab.files
+                ? _FileTreeSection(state: widget.state)
+                : _GitChangesSection(state: widget.state),
           ),
           if (widget.state.prStatus != null) _PrStatusSection(pr: widget.state.prStatus!),
           // ── Run panel (collapsible) ───────────────────────────────────────
@@ -174,40 +182,233 @@ class _CollapsibleRunPanelState extends State<_CollapsibleRunPanel> {
   }
 }
 
-class _ReviewHeader extends StatelessWidget {
-  const _ReviewHeader({required this.state});
+// ── Tab bar replacing the old "Changes & Review" header ─────────────────────
+class _ReviewTabBar extends StatelessWidget {
+  const _ReviewTabBar({
+    required this.state,
+    required this.currentTab,
+    required this.onTabChanged,
+  });
+
   final ReviewLoaded state;
+  final _FileTreeTab currentTab;
+  final ValueChanged<_FileTreeTab> onTabChanged;
 
   @override
   Widget build(BuildContext context) {
+    final changedCount = state.changedFiles.length;
+
     return Container(
       height: 36,
-      padding: EdgeInsets.symmetric(horizontal: 12),
       decoration: BoxDecoration(
         border: Border(bottom: BorderSide(color: const Color(0xFF32327A), width: 1)),
       ),
       child: Row(
         children: [
-          const Text(
-            'Changes & Review',
-            style: TextStyle(
-              color: AppColors.textPrimary,
-              fontSize: 13,
-              fontWeight: FontWeight.w600,
-            ),
+          _TabItem(
+            label: 'FILES',
+            isActive: currentTab == _FileTreeTab.files,
+            onTap: () => onTabChanged(_FileTreeTab.files),
+          ),
+          _TabItem(
+            label: 'DIFF',
+            badge: changedCount > 0 ? changedCount : null,
+            isActive: currentTab == _FileTreeTab.diff,
+            onTap: () => onTabChanged(_FileTreeTab.diff),
           ),
           const Spacer(),
           GestureDetector(
             onTap: () => context.read<ReviewCubit>().refresh(),
-            child: const Icon(Icons.refresh, size: 14, color: AppColors.textMuted),
+            child: const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 8),
+              child: Icon(Icons.refresh, size: 14, color: AppColors.textMuted),
+            ),
           ),
-          const SizedBox(width: 8),
-          const Icon(Icons.more_horiz, size: 14, color: AppColors.textMuted),
         ],
       ),
     );
   }
 }
+
+class _TabItem extends StatefulWidget {
+  const _TabItem({
+    required this.label,
+    required this.isActive,
+    required this.onTap,
+    this.badge,
+  });
+
+  final String label;
+  final bool isActive;
+  final VoidCallback onTap;
+  final int? badge;
+
+  @override
+  State<_TabItem> createState() => _TabItemState();
+}
+
+class _TabItemState extends State<_TabItem> {
+  bool _hovering = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.appColors;
+    final labelColor = widget.isActive ? AppColors.textPrimary : AppColors.textMuted;
+
+    return MouseRegion(
+      onEnter: (_) => setState(() => _hovering = true),
+      onExit: (_) => setState(() => _hovering = false),
+      cursor: SystemMouseCursors.click,
+      child: GestureDetector(
+        onTap: widget.onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 100),
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          decoration: BoxDecoration(
+            color: _hovering && !widget.isActive
+                ? colors.surfaceHighlight
+                : Colors.transparent,
+            border: Border(
+              bottom: BorderSide(
+                color: widget.isActive ? colors.primary : Colors.transparent,
+                width: 2,
+              ),
+            ),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                widget.label,
+                style: TextStyle(
+                  color: labelColor,
+                  fontSize: 11,
+                  fontWeight: widget.isActive ? FontWeight.w700 : FontWeight.w500,
+                  letterSpacing: 0.6,
+                ),
+              ),
+              if (widget.badge != null) ...[
+                const SizedBox(width: 5),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                  decoration: BoxDecoration(
+                    color: AppColors.neonOrange.withAlpha(40),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Text(
+                    '${widget.badge}',
+                    style: const TextStyle(
+                      color: AppColors.neonOrange,
+                      fontSize: 9,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ── Git Changes tab ──────────────────────────────────────────────────────────
+class _GitChangesSection extends StatelessWidget {
+  const _GitChangesSection({required this.state});
+  final ReviewLoaded state;
+
+  @override
+  Widget build(BuildContext context) {
+    final staged = state.changedFiles.where((f) => f.isStaged).toList();
+    final unstaged = state.changedFiles.where((f) => !f.isStaged).toList();
+
+    if (state.changedFiles.isEmpty) {
+      return const Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.check_circle_outline, size: 28, color: AppColors.textMuted),
+            SizedBox(height: 10),
+            Text(
+              'No changes',
+              style: TextStyle(color: AppColors.textMuted, fontSize: 12),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return ListView(
+      padding: EdgeInsets.zero,
+      children: [
+        if (staged.isNotEmpty) ...[
+          _ChangesSectionHeader(
+            label: 'STAGED',
+            count: staged.length,
+            icon: Icons.check_circle_outline,
+            iconColor: AppColors.neonGreen,
+          ),
+          ...staged.map((f) => _ChangedFileTile(file: f)),
+        ],
+        if (unstaged.isNotEmpty) ...[
+          _ChangesSectionHeader(
+            label: 'CHANGES',
+            count: unstaged.length,
+            icon: Icons.edit_outlined,
+            iconColor: AppColors.neonOrange,
+          ),
+          ...unstaged.map((f) => _ChangedFileTile(file: f)),
+        ],
+      ],
+    );
+  }
+}
+
+class _ChangesSectionHeader extends StatelessWidget {
+  const _ChangesSectionHeader({
+    required this.label,
+    required this.count,
+    required this.icon,
+    required this.iconColor,
+  });
+
+  final String label;
+  final int count;
+  final IconData icon;
+  final Color iconColor;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
+      child: Row(
+        children: [
+          Icon(icon, size: 11, color: iconColor),
+          const SizedBox(width: 5),
+          Text(
+            label,
+            style: const TextStyle(
+              color: AppColors.textMuted,
+              fontSize: 10,
+              fontWeight: FontWeight.w700,
+              letterSpacing: 0.8,
+            ),
+          ),
+          const SizedBox(width: 5),
+          Text(
+            '($count)',
+            style: const TextStyle(
+              color: AppColors.textMuted,
+              fontSize: 10,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 
 class _FileTreeSection extends StatelessWidget {
   const _FileTreeSection({required this.state});
