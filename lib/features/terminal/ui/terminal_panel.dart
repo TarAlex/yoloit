@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_colorpicker/flutter_colorpicker.dart';
+import 'package:super_clipboard/super_clipboard.dart';
 import 'package:xterm/xterm.dart' hide TerminalState;
 import 'package:yoloit/core/session/session_prefs.dart';
 import 'package:yoloit/core/theme/app_colors.dart';
@@ -87,7 +88,8 @@ class _EmptyTerminal extends StatelessWidget {
                             padding: const EdgeInsets.symmetric(horizontal: 4),
                             child: _AgentLaunchButton(
                               type: type,
-                              workspacePath: wsState.activeWorkspace!.path,
+                              workspacePath: wsState.activeWorkspace!.workspaceDir,
+                              workspaceId: wsState.activeWorkspace!.id,
                             ),
                           );
                         }).toList(),
@@ -143,7 +145,7 @@ class _TerminalHeader extends StatelessWidget {
       height: 44,
       decoration: BoxDecoration(
         color: colors.surface,
-        border: Border(bottom: BorderSide(color: colors.border)),
+        border: Border(bottom: BorderSide(color: const Color(0xFF32327A), width: 1)),
       ),
       child: Row(
         children: [
@@ -163,58 +165,40 @@ class _TerminalHeader extends StatelessWidget {
             ),
           ),
           VerticalDivider(width: 1, color: colors.border),
+          // Scrollable session tabs — takes all available space
           Expanded(
-            child: BlocBuilder<WorkspaceCubit, WorkspaceState>(
-              builder: (context, wsState) {
-                final workspace = wsState is WorkspaceLoaded ? wsState.activeWorkspace : null;
-                return Stack(
-                  children: [
-                    // Tab bar fills full width, padded right to avoid overlap with buttons.
-                    Positioned.fill(
-                      child: ListView.builder(
-                        scrollDirection: Axis.horizontal,
-                        itemCount: sessions.length,
-                        padding: EdgeInsets.only(
-                          left: 4,
-                          right: workspace != null ? 244 : 4,
-                        ),
-                        itemBuilder: (context, i) {
-                          final session = sessions[i];
-                          final isActive = i == activeIndex;
-                          return _AgentTab(
-                            session: session,
-                            isActive: isActive,
-                            onTap: () => context.read<TerminalCubit>().switchTab(i),
-                            onClose: () => context.read<TerminalCubit>().closeSession(session.id),
-                          );
-                        },
-                      ),
-                    ),
-                    // Launch buttons pinned to the right.
-                    if (workspace != null)
-                      Positioned(
-                        right: 0,
-                        top: 0,
-                        bottom: 0,
-                        width: 240,
-                        child: SingleChildScrollView(
-                          scrollDirection: Axis.horizontal,
-                          child: Row(
-                            children: [
-                              ...AgentType.values.map((type) => _AgentLaunchButton(
-                                    type: type,
-                                    workspacePath: workspace.path,
-                                    compact: true,
-                                  )),
-                              const SizedBox(width: 8),
-                            ],
-                          ),
-                        ),
-                      ),
-                  ],
+            child: ListView.builder(
+              scrollDirection: Axis.horizontal,
+              itemCount: sessions.length,
+              padding: const EdgeInsets.only(left: 4, right: 4),
+              itemBuilder: (context, i) {
+                final session = sessions[i];
+                final isActive = i == activeIndex;
+                return _AgentTab(
+                  session: session,
+                  isActive: isActive,
+                  onTap: () => context.read<TerminalCubit>().switchTab(i),
+                  onClose: () => context.read<TerminalCubit>().closeSession(session.id),
                 );
               },
             ),
+          ),
+          // "+" button to launch a new agent session
+          BlocBuilder<WorkspaceCubit, WorkspaceState>(
+            builder: (context, wsState) {
+              final workspace = wsState is WorkspaceLoaded ? wsState.activeWorkspace : null;
+              if (workspace == null) return const SizedBox.shrink();
+              return Container(
+                decoration: BoxDecoration(
+                  border: Border(left: BorderSide(color: colors.border)),
+                ),
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                child: _AddSessionButton(
+                  workspacePath: workspace.workspaceDir,
+                  workspaceId: workspace.id,
+                ),
+              );
+            },
           ),
         ],
       ),
@@ -388,6 +372,8 @@ class _TerminalWidgetState extends State<_TerminalWidget> {
   final _focusNode = FocusNode();
   double _fontSize = 13.0;
   double _scaleBase = 13.0;
+  Size _terminalSize = Size.zero;
+  Offset? _clickDownPosition;
 
   @override
   void initState() {
@@ -407,8 +393,11 @@ class _TerminalWidgetState extends State<_TerminalWidget> {
     if (old.session.id != widget.session.id) {
       old.session.terminal.onOutput = null;
       old.session.terminal.onResize = null;
+      // Remove old handler before re-adding to prevent duplicates
+      HardwareKeyboard.instance.removeHandler(_handleHardwareKey);
       _bindTerminal();
       _requestFocusAfterFrame();
+      HardwareKeyboard.instance.addHandler(_handleHardwareKey);
     }
   }
 
@@ -440,6 +429,33 @@ class _TerminalWidgetState extends State<_TerminalWidget> {
   ///   Ctrl+Backspace     → Ctrl+W  (\x17) — erase word backward (PC style)
   ///   Cmd+←             → Ctrl+A  (\x01) — beginning of line
   ///   Cmd+→             → Ctrl+E  (\x05) — end of line
+  /// xterm onKeyEvent — intercepts Shift+Enter to send the Kitty keyboard
+  /// protocol escape sequence (\x1b[13;2u) so modern CLIs (Copilot, Claude
+  /// Code) treat it as a newline in the input buffer instead of submitting.
+  KeyEventResult _onTerminalKeyEvent(FocusNode node, KeyEvent event) {
+    if (event is! KeyDownEvent && event is! KeyRepeatEvent) {
+      return KeyEventResult.ignored;
+    }
+    // Shift+Enter → ESC+CR (newline-in-input for Copilot/Claude Code)
+    if (event.logicalKey == LogicalKeyboardKey.enter &&
+        HardwareKeyboard.instance.isShiftPressed &&
+        !HardwareKeyboard.instance.isMetaPressed &&
+        !HardwareKeyboard.instance.isControlPressed &&
+        !HardwareKeyboard.instance.isAltPressed) {
+      _writePty('\x1b\r');
+      return KeyEventResult.handled;
+    }
+    // Cmd+V — already handled by _handleHardwareKey; block xterm's native
+    // paste so text isn't inserted twice.
+    if (event.logicalKey == LogicalKeyboardKey.keyV &&
+        HardwareKeyboard.instance.isMetaPressed &&
+        !HardwareKeyboard.instance.isControlPressed &&
+        !HardwareKeyboard.instance.isAltPressed) {
+      return KeyEventResult.handled;
+    }
+    return KeyEventResult.ignored;
+  }
+
   ///   Opt+←             → ESC+b   (\x1bb) — word backward
   ///   Opt+→             → ESC+f   (\x1bf) — word forward
   ///   Cmd+K             → Ctrl+L  (\x0c) — clear screen
@@ -519,10 +535,61 @@ class _TerminalWidgetState extends State<_TerminalWidget> {
     PtyService.instance.write(widget.session.id, sequence);
   }
 
+  /// Click-to-move cursor: when the user single-clicks on the prompt row
+  /// (not in alternate buffer / vim / etc.), send arrow keys to move the
+  /// cursor to the clicked column. Same behavior as Superset desktop app.
+  void _handleTerminalClick(Offset localPosition) {
+    final terminal = widget.session.terminal;
+    // Don't interfere with vim/less/etc. (alternate screen)
+    if (terminal.isUsingAltBuffer) return;
+    // Don't interfere with active text selection
+    if (_controller.selection != null) return;
+
+    const padding = 8.0;
+    final innerWidth = _terminalSize.width - padding * 2;
+    final innerHeight = _terminalSize.height - padding * 2;
+    if (innerWidth <= 0 || innerHeight <= 0) return;
+
+    final cellWidth = innerWidth / terminal.viewWidth;
+    final cellHeight = innerHeight / terminal.viewHeight;
+
+    final clickCol = ((localPosition.dx - padding) / cellWidth)
+        .floor()
+        .clamp(0, terminal.viewWidth - 1);
+    final clickRow = ((localPosition.dy - padding) / cellHeight)
+        .floor()
+        .clamp(0, terminal.viewHeight - 1);
+
+    // Only move when click is on the same row as the cursor
+    if (clickRow != terminal.buffer.cursorY) return;
+
+    final delta = clickCol - terminal.buffer.cursorX;
+    if (delta == 0) return;
+
+    // Right arrow: \x1b[C  Left arrow: \x1b[D
+    final arrow = delta > 0 ? '\x1b[C' : '\x1b[D';
+    _writePty(arrow * delta.abs());
+  }
+
   Future<void> _pasteAsFileRef() async {
+    // Read clipboard text first to decide how to paste.
+    final clipboard = SystemClipboard.instance;
+    if (clipboard != null) {
+      final reader = await clipboard.read();
+      if (reader.canProvide(Formats.plainText)) {
+        final text = await reader.readValue(Formats.plainText);
+        if (text != null && text.isNotEmpty && text.trim().split(RegExp(r'\s+')).length <= 1000) {
+          // Short text — paste directly as plain text.
+          if (!mounted) return;
+          PtyService.instance.write(widget.session.id, text);
+          return;
+        }
+      }
+    }
+
+    // Long text or image — save to file and paste the path.
     final path = await ClipboardFileService.instance.saveClipboardToFile();
     if (path == null || !mounted) return;
-    // Write the path directly into the PTY (no newline — user confirms with Enter).
     PtyService.instance.write(widget.session.id, path);
   }
 
@@ -539,8 +606,6 @@ class _TerminalWidgetState extends State<_TerminalWidget> {
   @override
   Widget build(BuildContext context) {
     final colors = context.appColors;
-    // Listener fires on pointer-down (before gesture recognisers), giving
-    // the most reliable focus request on macOS desktop.
     return GestureDetector(
       onScaleStart: (d) => _scaleBase = _fontSize,
       onScaleUpdate: (d) {
@@ -548,43 +613,133 @@ class _TerminalWidgetState extends State<_TerminalWidget> {
         setState(() => _fontSize = newSize);
         SessionPrefs.saveTerminalFontSize(newSize);
       },
-      child: Listener(
-        behavior: HitTestBehavior.opaque,
-        onPointerDown: (_) {
-          if (!_focusNode.hasFocus) _focusNode.requestFocus();
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          _terminalSize = Size(constraints.maxWidth, constraints.maxHeight);
+          return Listener(
+            behavior: HitTestBehavior.opaque,
+            onPointerDown: (event) {
+              if (!_focusNode.hasFocus) _focusNode.requestFocus();
+              _clickDownPosition = event.localPosition;
+            },
+            onPointerUp: (event) {
+              final down = _clickDownPosition;
+              _clickDownPosition = null;
+              if (down == null) return;
+              // Only treat as a click if pointer didn't move much (no drag/selection)
+              if ((event.localPosition - down).distance > 6.0) return;
+              _handleTerminalClick(event.localPosition);
+            },
+            child: TerminalView(
+              widget.session.terminal,
+              controller: _controller,
+              focusNode: _focusNode,
+              autofocus: true,
+              onKeyEvent: _onTerminalKeyEvent,
+              textStyle: TerminalStyle(fontSize: _fontSize),
+              theme: TerminalTheme(
+                cursor: colors.primary,
+                selection: colors.primary.withAlpha(68),
+                foreground: const Color(0xFFCECEEE),
+                background: const Color(0xFF070714),
+                black: const Color(0xFF1A1A2E),
+                red: const Color(0xFFFF4F6A),
+                green: const Color(0xFF00FF9F),
+                yellow: const Color(0xFFFFD700),
+                blue: const Color(0xFF00B4FF),
+                magenta: const Color(0xFFB87FFF),
+                cyan: const Color(0xFF00E5FF),
+                white: const Color(0xFFCECEEE),
+                brightBlack: const Color(0xFF44446A),
+                brightRed: const Color(0xFFFF6B85),
+                brightGreen: const Color(0xFF4DFFBE),
+                brightYellow: const Color(0xFFFFE866),
+                brightBlue: const Color(0xFF33C5FF),
+                brightMagenta: const Color(0xFFCDA0FF),
+                brightCyan: const Color(0xFF33EEFF),
+                brightWhite: const Color(0xFFFFFFFF),
+                searchHitBackground: const Color(0xFFFF9500),
+                searchHitBackgroundCurrent: const Color(0xFFFFB700),
+                searchHitForeground: const Color(0xFF000000),
+              ),
+              padding: const EdgeInsets.all(8),
+            ),
+          );
         },
-        child: TerminalView(
-          widget.session.terminal,
-          controller: _controller,
-          focusNode: _focusNode,
-          autofocus: true,
-          textStyle: TerminalStyle(fontSize: _fontSize),
-          theme: TerminalTheme(
-            cursor: colors.primary,
-            selection: colors.primary.withAlpha(68),
-            foreground: const Color(0xFFCECEEE),
-            background: const Color(0xFF070714),
-            black: const Color(0xFF1A1A2E),
-            red: const Color(0xFFFF4F6A),
-            green: const Color(0xFF00FF9F),
-            yellow: const Color(0xFFFFD700),
-            blue: const Color(0xFF00B4FF),
-            magenta: const Color(0xFFB87FFF),
-            cyan: const Color(0xFF00E5FF),
-            white: const Color(0xFFCECEEE),
-            brightBlack: const Color(0xFF44446A),
-            brightRed: const Color(0xFFFF6B85),
-            brightGreen: const Color(0xFF4DFFBE),
-            brightYellow: const Color(0xFFFFE866),
-            brightBlue: const Color(0xFF33C5FF),
-            brightMagenta: const Color(0xFFCDA0FF),
-            brightCyan: const Color(0xFF33EEFF),
-            brightWhite: const Color(0xFFFFFFFF),
-            searchHitBackground: const Color(0xFFFF9500),
-            searchHitBackgroundCurrent: const Color(0xFFFFB700),
-            searchHitForeground: const Color(0xFF000000),
+      ),
+    );
+  }
+}
+
+class _AddSessionButton extends StatelessWidget {
+  const _AddSessionButton({
+    required this.workspacePath,
+    required this.workspaceId,
+  });
+
+  final String workspacePath;
+  final String workspaceId;
+
+  void _showMenu(BuildContext context) {
+    final renderBox = context.findRenderObject() as RenderBox;
+    final offset = renderBox.localToGlobal(Offset.zero);
+    final size = renderBox.size;
+
+    showMenu<AgentType>(
+      context: context,
+      position: RelativeRect.fromLTRB(
+        offset.dx,
+        offset.dy + size.height,
+        offset.dx + size.width,
+        0,
+      ),
+      items: AgentType.values.map((type) {
+        final colors = context.appColors;
+        return PopupMenuItem<AgentType>(
+          value: type,
+          height: 36,
+          child: Row(
+            children: [
+              Text(type.iconLabel, style: TextStyle(fontSize: 13, color: colors.primaryLight)),
+              const SizedBox(width: 8),
+              Text(
+                type.displayName,
+                style: TextStyle(color: AppColors.textPrimary, fontSize: 13),
+              ),
+            ],
           ),
-          padding: const EdgeInsets.all(8),
+        );
+      }).toList(),
+    ).then((type) {
+      if (type != null && context.mounted) {
+        context.read<TerminalCubit>().spawnSession(
+              type: type,
+              workspacePath: workspacePath,
+              workspaceId: workspaceId,
+            );
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.appColors;
+    return Tooltip(
+      message: 'New agent session',
+      child: GestureDetector(
+        onTap: () => _showMenu(context),
+        child: MouseRegion(
+          cursor: SystemMouseCursors.click,
+          child: Container(
+            width: 28,
+            height: 28,
+            decoration: BoxDecoration(
+              color: colors.primary.withAlpha(40),
+              borderRadius: BorderRadius.circular(6),
+              border: Border.all(color: colors.primary.withAlpha(80)),
+            ),
+            child: Icon(Icons.add, size: 16, color: colors.primaryLight),
+          ),
         ),
       ),
     );
@@ -595,12 +750,12 @@ class _AgentLaunchButton extends StatelessWidget {
   const _AgentLaunchButton({
     required this.type,
     required this.workspacePath,
-    this.compact = false,
+    required this.workspaceId,
   });
 
   final AgentType type;
   final String workspacePath;
-  final bool compact;
+  final String workspaceId;
 
   @override
   Widget build(BuildContext context) {
@@ -611,12 +766,10 @@ class _AgentLaunchButton extends StatelessWidget {
         onTap: () => context.read<TerminalCubit>().spawnSession(
               type: type,
               workspacePath: workspacePath,
+              workspaceId: workspaceId,
             ),
         child: Container(
-          padding: EdgeInsets.symmetric(
-            horizontal: compact ? 8 : 12,
-            vertical: compact ? 4 : 6,
-          ),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
           decoration: BoxDecoration(
             color: colors.primary.withAlpha(40),
             borderRadius: BorderRadius.circular(6),
@@ -625,8 +778,8 @@ class _AgentLaunchButton extends StatelessWidget {
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Text(type.iconLabel, style: TextStyle(fontSize: 12)),
-              SizedBox(width: 5),
+              Text(type.iconLabel, style: const TextStyle(fontSize: 12)),
+              const SizedBox(width: 5),
               Text(
                 type.displayName,
                 style: TextStyle(
