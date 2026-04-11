@@ -642,17 +642,9 @@ class _ConsoleState extends State<_Console> {
                               color: AppColors.textMuted, fontSize: 12),
                         ),
                       )
-                    : SelectionArea(
-                        child: ListView.builder(
-                          controller: widget.scrollController,
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 12, vertical: 6),
-                          itemCount: output.length,
-                          itemBuilder: (context, i) {
-                            final line = output[i];
-                            return _OutputLine(line: line);
-                          },
-                        ),
+                    : _FullLogView(
+                        output: output,
+                        scrollController: widget.scrollController,
                       ),
               ),
             ],
@@ -670,37 +662,57 @@ class _ConsoleState extends State<_Console> {
   }
 }
 
-class _OutputLine extends StatelessWidget {
-  const _OutputLine({required this.line});
-  final RunOutputLine line;
+/// Renders all output lines as a single selectable block.
+/// Ctrl+A / ⌘A selects everything; ⌘C copies the selection.
+class _FullLogView extends StatelessWidget {
+  const _FullLogView({
+    required this.output,
+    required this.scrollController,
+  });
+
+  final List<RunOutputLine> output;
+  final ScrollController scrollController;
 
   @override
   Widget build(BuildContext context) {
-    final text = line.text;
-    final isError = line.isError;
-
-    final Color color;
-    if (text.startsWith('\n[Process exited')) {
-      color = const Color(0xFF44446A);
-    } else if (text.startsWith('Reloaded') || text.contains('🔥')) {
-      color = AppColors.neonGreen;
-    } else if (isError) {
-      color = AppColors.neonRed;
-    } else if (text.toLowerCase().contains('error')) {
-      color = AppColors.neonOrange;
-    } else {
-      color = AppColors.terminalText;
+    // Build a TextSpan that colours error lines red / orange.
+    final spans = <TextSpan>[];
+    for (final line in output) {
+      final t = line.text;
+      final Color color;
+      if (t.startsWith('\n[Process exited')) {
+        color = const Color(0xFF44446A);
+      } else if (t.startsWith('Reloaded') || t.contains('🔥')) {
+        color = AppColors.neonGreen;
+      } else if (line.isError) {
+        color = AppColors.neonRed;
+      } else if (t.toLowerCase().contains('error')) {
+        color = AppColors.neonOrange;
+      } else {
+        color = AppColors.terminalText;
+      }
+      spans.add(TextSpan(text: '$t\n', style: TextStyle(color: color)));
     }
 
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 0.5),
-      child: SelectableText(
-        text,
-        style: TextStyle(
-          color: color,
-          fontSize: 12,
-          fontFamily: 'monospace',
-          height: 1.4,
+    return Scrollbar(
+      controller: scrollController,
+      child: SingleChildScrollView(
+        controller: scrollController,
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        child: SelectableText.rich(
+          TextSpan(
+            style: const TextStyle(
+              fontSize: 12,
+              fontFamily: 'monospace',
+              height: 1.4,
+            ),
+            children: spans,
+          ),
+          // Let the OS handle Ctrl+A / ⌘A for select-all within this widget.
+          contextMenuBuilder: (context, editableTextState) =>
+              AdaptiveTextSelectionToolbar.editableText(
+            editableTextState: editableTextState,
+          ),
         ),
       ),
     );

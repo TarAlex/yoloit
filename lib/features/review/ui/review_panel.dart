@@ -90,11 +90,22 @@ class _ReviewContentState extends State<_ReviewContent> {
   }
 }
 
-/// Collapsible Run panel shown at the bottom of the Review panel.
-class _CollapsibleRunPanel extends StatelessWidget {
+/// Collapsible, vertically resizable Run panel shown at the bottom of the Review panel.
+class _CollapsibleRunPanel extends StatefulWidget {
   const _CollapsibleRunPanel({required this.collapsed, required this.onToggle});
   final bool collapsed;
   final VoidCallback onToggle;
+
+  @override
+  State<_CollapsibleRunPanel> createState() => _CollapsibleRunPanelState();
+}
+
+class _CollapsibleRunPanelState extends State<_CollapsibleRunPanel> {
+  static const _minHeight = 80.0;
+  static const _maxHeight = 800.0;
+  static const _defaultHeight = 220.0;
+
+  double _height = _defaultHeight;
 
   @override
   Widget build(BuildContext context) {
@@ -102,43 +113,60 @@ class _CollapsibleRunPanel extends StatelessWidget {
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        // Header strip (always visible)
+        // Drag handle strip (also acts as toggle header)
         GestureDetector(
-          onTap: onToggle,
-          child: Container(
-            height: 28,
-            padding: const EdgeInsets.symmetric(horizontal: 10),
-            decoration: BoxDecoration(
-              color: colors.surface,
-              border: Border(top: BorderSide(color: colors.border)),
-            ),
-            child: Row(
-              children: [
-                const Icon(Icons.play_circle_outline, size: 13, color: AppColors.textMuted),
-                const SizedBox(width: 6),
-                const Text(
-                  'Run',
-                  style: TextStyle(
-                    color: AppColors.textSecondary,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
+          onTap: widget.onToggle,
+          onVerticalDragUpdate: (details) {
+            if (widget.collapsed) return;
+            setState(() {
+              _height = (_height - details.delta.dy)
+                  .clamp(_minHeight, _maxHeight);
+            });
+          },
+          child: MouseRegion(
+            cursor: widget.collapsed
+                ? SystemMouseCursors.click
+                : SystemMouseCursors.resizeRow,
+            child: Container(
+              height: 28,
+              padding: const EdgeInsets.symmetric(horizontal: 10),
+              decoration: BoxDecoration(
+                color: colors.surface,
+                border: Border(top: BorderSide(color: colors.border)),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.play_circle_outline, size: 13, color: AppColors.textMuted),
+                  const SizedBox(width: 6),
+                  const Text(
+                    'Run',
+                    style: TextStyle(
+                      color: AppColors.textSecondary,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
-                ),
-                const Spacer(),
-                AnimatedRotation(
-                  turns: collapsed ? -0.25 : 0,
-                  duration: const Duration(milliseconds: 150),
-                  child: const Icon(Icons.expand_less, size: 14, color: AppColors.textMuted),
-                ),
-              ],
+                  const Spacer(),
+                  if (!widget.collapsed)
+                    const Icon(Icons.drag_handle, size: 14, color: AppColors.textMuted),
+                  const SizedBox(width: 6),
+                  AnimatedRotation(
+                    turns: widget.collapsed ? -0.25 : 0,
+                    duration: const Duration(milliseconds: 150),
+                    child: const Icon(Icons.expand_less, size: 14, color: AppColors.textMuted),
+                  ),
+                ],
+              ),
             ),
           ),
         ),
-        // Body (collapses)
+        // Body (collapses / resizes)
         AnimatedCrossFade(
           duration: const Duration(milliseconds: 180),
-          crossFadeState: collapsed ? CrossFadeState.showSecond : CrossFadeState.showFirst,
-          firstChild: const SizedBox(height: 220, child: RunPanel()),
+          crossFadeState: widget.collapsed
+              ? CrossFadeState.showSecond
+              : CrossFadeState.showFirst,
+          firstChild: SizedBox(height: _height, child: const RunPanel()),
           secondChild: const SizedBox.shrink(),
         ),
       ],
