@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:yoloit/core/theme/app_color_scheme.dart';
 import 'package:yoloit/core/theme/app_colors.dart';
@@ -100,7 +101,10 @@ class _Header extends StatelessWidget {
 
     return Container(
       height: 36,
-      color: colors.surface,
+      decoration: BoxDecoration(
+        color: colors.surface,
+        border: Border(bottom: BorderSide(color: const Color(0xFF32327A), width: 1)),
+      ),
       child: Row(
         children: [
           // Session tabs
@@ -357,10 +361,13 @@ class _ConfigList extends StatelessWidget {
                         children: [
                           Icon(Icons.add, size: 12, color: colors.primary),
                           const SizedBox(width: 6),
-                          Text(
-                            'Add Configuration',
-                            style: TextStyle(
-                                color: colors.primary, fontSize: 11),
+                          Flexible(
+                            child: Text(
+                              'Add Configuration',
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                  color: colors.primary, fontSize: 11),
+                            ),
                           ),
                         ],
                       ),
@@ -529,74 +536,128 @@ class _SmallIconButton extends StatelessWidget {
 
 // ── Console Output ───────────────────────────────────────────────────────────
 
-class _Console extends StatelessWidget {
+class _Console extends StatefulWidget {
   const _Console({required this.state, required this.scrollController});
   final RunState state;
   final ScrollController scrollController;
 
   @override
+  State<_Console> createState() => _ConsoleState();
+}
+
+class _ConsoleState extends State<_Console> {
+  final _focusNode = FocusNode();
+
+  @override
+  void dispose() {
+    _focusNode.dispose();
+    super.dispose();
+  }
+
+  void _copyAll() {
+    final session = widget.state.activeSession;
+    if (session == null) return;
+    final text = session.output.map((l) => l.text).join('\n');
+    Clipboard.setData(ClipboardData(text: text));
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Output copied to clipboard'),
+        duration: Duration(seconds: 1),
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final session = state.activeSession;
+    final session = widget.state.activeSession;
 
     if (session == null) {
       return _EmptyConsole(
-        hasWorkspace: state.workspacePath != null,
-        configs: state.configs,
+        hasWorkspace: widget.state.workspacePath != null,
+        configs: widget.state.configs,
       );
     }
 
     final output = session.output;
 
-    return Container(
-      color: AppColors.terminalBackground,
-      child: Column(
-        children: [
-          Container(
-            height: 24,
-            padding: const EdgeInsets.symmetric(horizontal: 10),
-            color: AppColors.surface,
-            child: Row(
-              children: [
-                Text(
-                  '> ${session.config.command}',
-                  style: const TextStyle(
-                    color: AppColors.textMuted,
-                    fontSize: 11,
-                    fontFamily: 'monospace',
-                  ),
-                  overflow: TextOverflow.ellipsis,
-                ),
-                const Spacer(),
-                if (session.startedAt != null)
-                  Text(
-                    _formatTime(session.startedAt!),
-                    style: const TextStyle(
-                        color: AppColors.textMuted, fontSize: 10),
-                  ),
-              ],
-            ),
-          ),
-          Expanded(
-            child: output.isEmpty
-                ? const Center(
-                    child: Text(
-                      'No output yet…',
-                      style: TextStyle(
-                          color: AppColors.textMuted, fontSize: 12),
+    return KeyboardListener(
+      focusNode: _focusNode,
+      autofocus: true,
+      onKeyEvent: (event) {
+        if (event is KeyDownEvent &&
+            (HardwareKeyboard.instance.isMetaPressed ||
+                HardwareKeyboard.instance.isControlPressed) &&
+            event.logicalKey == LogicalKeyboardKey.keyA) {
+          _copyAll();
+        }
+      },
+      child: GestureDetector(
+        onTap: _focusNode.requestFocus,
+        child: Container(
+          color: AppColors.terminalBackground,
+          child: Column(
+            children: [
+              Container(
+                height: 24,
+                padding: const EdgeInsets.symmetric(horizontal: 10),
+                color: AppColors.surface,
+                child: Row(
+                  children: [
+                    Text(
+                      '> ${session.config.command}',
+                      style: const TextStyle(
+                        color: AppColors.textMuted,
+                        fontSize: 11,
+                        fontFamily: 'monospace',
+                      ),
+                      overflow: TextOverflow.ellipsis,
                     ),
-                  )
-                : ListView.builder(
-                    controller: scrollController,
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 12, vertical: 6),
-                    itemCount: output.length,
-                    itemBuilder: (context, i) {
-                      final line = output[i];
-                      return _OutputLine(line: line);
-                    },
-                  ),
+                    const Spacer(),
+                    if (session.startedAt != null)
+                      Text(
+                        _formatTime(session.startedAt!),
+                        style: const TextStyle(
+                            color: AppColors.textMuted, fontSize: 10),
+                      ),
+                    const SizedBox(width: 8),
+                    Tooltip(
+                      message: 'Copy all (⌘A)',
+                      child: InkWell(
+                        onTap: _copyAll,
+                        child: const Icon(Icons.copy_outlined,
+                            size: 12, color: AppColors.textMuted),
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                  ],
+                ),
+              ),
+              Expanded(
+                child: output.isEmpty
+                    ? const Center(
+                        child: Text(
+                          'No output yet…',
+                          style: TextStyle(
+                              color: AppColors.textMuted, fontSize: 12),
+                        ),
+                      )
+                    : SelectionArea(
+                        child: ListView.builder(
+                          controller: widget.scrollController,
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 12, vertical: 6),
+                          itemCount: output.length,
+                          itemBuilder: (context, i) {
+                            final line = output[i];
+                            return _OutputLine(line: line);
+                          },
+                        ),
+                      ),
+              ),
+            ],
           ),
-        ],
+        ),
       ),
     );
   }
@@ -663,8 +724,10 @@ class _EmptyConsole extends StatelessWidget {
     return Container(
       color: AppColors.terminalBackground,
       child: Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.symmetric(vertical: 24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
           children: [
             Container(
               padding: const EdgeInsets.all(16),
@@ -708,6 +771,7 @@ class _EmptyConsole extends StatelessWidget {
               ),
             ],
           ],
+          ),
         ),
       ),
     );

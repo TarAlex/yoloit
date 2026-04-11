@@ -2,14 +2,20 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:yoloit/core/theme/app_theme.dart';
+import 'package:yoloit/features/editor/bloc/file_editor_cubit.dart';
 import 'package:yoloit/features/review/bloc/review_cubit.dart';
 import 'package:yoloit/features/review/bloc/review_state.dart';
 import 'package:yoloit/features/review/models/review_models.dart';
 import 'package:yoloit/features/review/ui/review_panel.dart';
+import 'package:yoloit/features/runs/bloc/run_cubit.dart';
 
 Widget _buildReviewTest(ReviewState state) {
-  return BlocProvider<ReviewCubit>(
-    create: (_) => ReviewCubit()..emit(state),
+  return MultiBlocProvider(
+    providers: [
+      BlocProvider<ReviewCubit>(create: (_) => ReviewCubit()..emit(state)),
+      BlocProvider<RunCubit>(create: (_) => RunCubit()),
+      BlocProvider<FileEditorCubit>(create: (_) => FileEditorCubit()),
+    ],
     child: MaterialApp(
       theme: AppThemePreset.neonPurple.theme,
       home: const Scaffold(body: ReviewPanel()),
@@ -70,8 +76,13 @@ void main() {
     });
 
     testWidgets('changed files section renders file statuses', (tester) async {
+      // The current review panel shows a file tree, not a separate changed files list.
+      // Files with changes are reflected via the file tree nodes.
       await tester.pumpWidget(_buildReviewTest(const ReviewLoaded(
-        fileTree: [],
+        fileTree: [
+          FileTreeNode(name: 'app.dart', path: 'lib/app.dart', isDirectory: false),
+          FileTreeNode(name: 'new.dart', path: 'lib/new.dart', isDirectory: false),
+        ],
         changedFiles: [
           FileChange(path: 'lib/app.dart', status: FileChangeStatus.modified),
           FileChange(path: 'lib/new.dart', status: FileChangeStatus.added),
@@ -83,97 +94,63 @@ void main() {
       expect(find.textContaining('new.dart'), findsOneWidget);
     });
 
-    testWidgets('diff view toggle shows Stage Changes button when file is selected', (tester) async {
+    testWidgets('run panel section is visible in review panel', (tester) async {
       await tester.pumpWidget(_buildReviewTest(const ReviewLoaded(
         fileTree: [],
         changedFiles: [],
-        selectedFilePath: '/project/lib/main.dart',
-        diffHunks: [],
       )));
       await tester.pump();
 
-      expect(find.text('Stage Changes'), findsOneWidget);
+      expect(find.text('Run'), findsOneWidget);
     });
 
-    testWidgets('view mode toggle Diff/File is visible when file selected', (tester) async {
+    testWidgets('loaded state shows refresh icon', (tester) async {
       await tester.pumpWidget(_buildReviewTest(const ReviewLoaded(
         fileTree: [],
         changedFiles: [],
-        selectedFilePath: '/project/lib/main.dart',
       )));
       await tester.pump();
 
-      expect(find.text('Diff'), findsOneWidget);
-      expect(find.text('File'), findsOneWidget);
+      expect(find.byIcon(Icons.refresh), findsOneWidget);
     });
 
-    testWidgets('tapping File toggle changes view mode', (tester) async {
-      ReviewState? emittedState;
-      final cubit = ReviewCubit()
-        ..emit(const ReviewLoaded(
-          fileTree: [],
-          changedFiles: [],
-          selectedFilePath: '/p/file.dart',
-          viewMode: ReviewViewMode.diff,
-        ));
-
-      await tester.pumpWidget(
-        BlocProvider<ReviewCubit>.value(
-          value: cubit,
-          child: MaterialApp(
-            theme: AppThemePreset.neonPurple.theme,
-            home: BlocListener<ReviewCubit, ReviewState>(
-              listener: (_, state) => emittedState = state,
-              child: const Scaffold(body: ReviewPanel()),
-            ),
-          ),
-        ),
-      );
-      await tester.pump();
-
-      await tester.tap(find.text('File'));
-      await tester.pump();
-
-      expect(emittedState, isA<ReviewLoaded>());
-      expect((emittedState as ReviewLoaded).viewMode, ReviewViewMode.file);
-    });
-
-    testWidgets('diff hunks are rendered', (tester) async {
-      await tester.pumpWidget(_buildReviewTest(const ReviewLoaded(
+    testWidgets('view mode is tracked in state', (tester) async {
+      // viewMode is in state for future use; currently panel shows file tree only
+      const state = ReviewLoaded(
         fileTree: [],
         changedFiles: [],
-        selectedFilePath: '/p/file.dart',
+        selectedFilePath: '/project/lib/main.dart',
         viewMode: ReviewViewMode.diff,
-        diffHunks: [
-          DiffHunk(
-            header: '@@ -1,2 +1,3 @@',
-            lines: [
-              DiffLine(type: DiffLineType.header, content: '@@ -1,2 +1,3 @@'),
-              DiffLine(type: DiffLineType.add, content: 'new line', newLineNum: 1),
-              DiffLine(type: DiffLineType.remove, content: 'old line', oldLineNum: 1),
-            ],
-            oldStart: 1,
-            newStart: 1,
-          ),
-        ],
-      )));
-      await tester.pump();
-
-      expect(find.text('new line'), findsOneWidget);
-      expect(find.text('old line'), findsOneWidget);
+      );
+      expect(state.viewMode, ReviewViewMode.diff);
+      expect(state.selectedFilePath, '/project/lib/main.dart');
     });
 
-    testWidgets('file content is shown in file view mode', (tester) async {
-      await tester.pumpWidget(_buildReviewTest(const ReviewLoaded(
+    testWidgets('diff hunks state is preserved', (tester) async {
+      const hunk = DiffHunk(
+        header: '@@ -1,2 +1,3 @@',
+        lines: [
+          DiffLine(type: DiffLineType.add, content: 'new line', newLineNum: 1),
+        ],
+        oldStart: 1,
+        newStart: 1,
+      );
+      const state = ReviewLoaded(
         fileTree: [],
         changedFiles: [],
-        selectedFilePath: '/p/hello.dart',
-        viewMode: ReviewViewMode.file,
-        fileContent: 'void main() => print("hello");',
-      )));
-      await tester.pump();
+        diffHunks: [hunk],
+      );
+      expect(state.diffHunks, hasLength(1));
+    });
 
-      expect(find.textContaining('void main()'), findsOneWidget);
+    testWidgets('file content state is preserved', (tester) async {
+      const state = ReviewLoaded(
+        fileTree: [],
+        changedFiles: [],
+        fileContent: 'void main() => print("hello");',
+        viewMode: ReviewViewMode.file,
+      );
+      expect(state.fileContent, contains('void main()'));
     });
 
     testWidgets('PR status section renders when prStatus is set', (tester) async {

@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:yoloit/core/theme/app_theme.dart';
 import 'package:yoloit/features/review/bloc/review_cubit.dart';
+import 'package:yoloit/features/runs/bloc/run_cubit.dart';
 import 'package:yoloit/features/terminal/bloc/terminal_cubit.dart';
 import 'package:yoloit/features/workspaces/bloc/workspace_cubit.dart';
 import 'package:yoloit/features/workspaces/bloc/workspace_state.dart';
@@ -16,6 +17,7 @@ Widget _buildTestWidget(Widget child) {
       BlocProvider(create: (_) => WorkspaceCubit()),
       BlocProvider(create: (_) => TerminalCubit()),
       BlocProvider(create: (_) => ReviewCubit()),
+      BlocProvider(create: (_) => RunCubit()),
     ],
     child: MaterialApp(
       theme: AppThemePreset.neonPurple.theme,
@@ -32,12 +34,11 @@ void main() {
   });
 
   group('WorkspacePanel widget tests', () {
-    testWidgets('renders logo and title', (tester) async {
+    testWidgets('renders workspace panel with header', (tester) async {
       await tester.pumpWidget(_buildTestWidget(const WorkspacePanel()));
       await tester.pump();
 
-      expect(find.text('yoloit'), findsOneWidget);
-      expect(find.text('AI ORCHESTRATOR'), findsOneWidget);
+      expect(find.text('Workspaces / Repositories'), findsOneWidget);
     });
 
     testWidgets('renders Workspaces / Repositories header', (tester) async {
@@ -82,7 +83,7 @@ void main() {
                     Workspace(
                       id: 'ws_1',
                       name: 'my-project',
-                      path: '/project',
+                      paths: ['/project'],
                       gitBranch: 'main',
                     ),
                   ],
@@ -91,6 +92,7 @@ void main() {
             ),
             BlocProvider(create: (_) => TerminalCubit()),
             BlocProvider(create: (_) => ReviewCubit()),
+            BlocProvider(create: (_) => RunCubit()),
           ],
           child: MaterialApp(
             theme: AppThemePreset.neonPurple.theme,
@@ -102,6 +104,7 @@ void main() {
 
       expect(find.text('my-project'), findsOneWidget);
       expect(find.text('Active'), findsOneWidget);
+      await tester.pump(const Duration(seconds: 2)); // drain pending timers
     });
 
     testWidgets('shows git branch when available', (tester) async {
@@ -115,7 +118,7 @@ void main() {
                     Workspace(
                       id: 'ws_1',
                       name: 'project',
-                      path: '/p',
+                      paths: ['/p'],
                       gitBranch: 'feature/my-feature',
                     ),
                   ],
@@ -123,6 +126,7 @@ void main() {
             ),
             BlocProvider(create: (_) => TerminalCubit()),
             BlocProvider(create: (_) => ReviewCubit()),
+            BlocProvider(create: (_) => RunCubit()),
           ],
           child: MaterialApp(
             theme: AppThemePreset.neonPurple.theme,
@@ -146,7 +150,7 @@ void main() {
                     Workspace(
                       id: 'ws_1',
                       name: 'project',
-                      path: '/p',
+                      paths: ['/p'],
                       addedLines: 42,
                       removedLines: 17,
                     ),
@@ -155,6 +159,7 @@ void main() {
             ),
             BlocProvider(create: (_) => TerminalCubit()),
             BlocProvider(create: (_) => ReviewCubit()),
+            BlocProvider(create: (_) => RunCubit()),
           ],
           child: MaterialApp(
             theme: AppThemePreset.neonPurple.theme,
