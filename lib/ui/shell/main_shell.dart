@@ -1076,9 +1076,12 @@ class _ResourcePanelState extends State<_ResourcePanel> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Text(
-                          'HOST MEMORY',
-                          style: TextStyle(color: Color(0xFF6060A0), fontSize: 9, letterSpacing: 0.8),
+                        Tooltip(
+                          message: 'Total RAM of your Mac (all processes combined)',
+                          child: const Text(
+                            'SYSTEM RAM',
+                            style: TextStyle(color: Color(0xFF6060A0), fontSize: 9, letterSpacing: 0.8),
+                          ),
                         ),
                         const SizedBox(height: 5),
                         Row(

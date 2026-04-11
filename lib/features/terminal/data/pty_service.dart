@@ -16,6 +16,7 @@ class PtyService {
   Pty launch({
     required String sessionId,
     required String workspacePath,
+    String? label,
     Map<String, String>? extraEnv,
   }) {
     final existing = _ptys[sessionId];
@@ -44,7 +45,7 @@ class PtyService {
     );
 
     _ptys[sessionId] = pty;
-    ResourceMonitorService.instance.registerSession(pty.pid, sessionId);
+    ResourceMonitorService.instance.registerSession(pty.pid, label ?? sessionId);
     return pty;
   }
 
@@ -59,6 +60,7 @@ class PtyService {
       int columns,
       int rows,
     }) tmuxLauncher,
+    String? label,
     Map<String, String>? extraEnv,
   }) {
     final existing = _ptys[sessionId];
@@ -85,7 +87,7 @@ class PtyService {
 
     _ptys[sessionId] = pty;
     _tmuxSessions.add(sessionId);
-    ResourceMonitorService.instance.registerSession(pty.pid, sessionId);
+    ResourceMonitorService.instance.registerSession(pty.pid, label ?? sessionId);
     return pty;
   }
 

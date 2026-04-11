@@ -395,10 +395,14 @@ String formatBytes(int bytes) {
   return '${(bytes / (1024 * 1024)).toStringAsFixed(0)} MB';
 }
 
-/// Clean up a session label for display (e.g. "copilot_session_1" → "Copilot Session 1").
+/// Clean up a session label for display.
+/// Strips trailing timestamp suffixes (e.g. "copilot_1775852898220" → "Copilot").
 String formatSessionLabel(String label) {
-  return label
+  // Remove trailing numeric timestamp suffix (13+ digits)
+  final cleaned = label.replaceAll(RegExp(r'_\d{10,}$'), '');
+  return cleaned
       .split(RegExp(r'[_\-]'))
       .map((w) => w.isEmpty ? '' : '${w[0].toUpperCase()}${w.substring(1)}')
-      .join(' ');
+      .join(' ')
+      .trim();
 }

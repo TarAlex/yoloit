@@ -113,6 +113,7 @@ class TerminalCubit extends Cubit<TerminalState> {
     if (_tmux.isActive) {
       pty = _ptyService.launchTmux(
         sessionId: sessionId,
+        label: type.displayName,
         workspacePath: workspacePath,
         tmuxLauncher: _tmux.launch,
         extraEnv: extraEnv,
@@ -120,6 +121,7 @@ class TerminalCubit extends Cubit<TerminalState> {
     } else {
       pty = _ptyService.launch(
         sessionId: sessionId,
+        label: type.displayName,
         workspacePath: workspacePath,
         extraEnv: extraEnv,
       );
