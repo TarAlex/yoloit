@@ -756,7 +756,7 @@ class _SessionSettingsState extends State<_SessionSettings> {
           _ToggleRow(
             icon: Icons.bug_report_outlined,
             title: 'Log app diagnostics to file',
-            subtitle: 'Saved to ~/.config/yoloit/app.log (max 5 MB, rotates)',
+            subtitle: 'Saved to ~/Library/Logs/yoloit/app.log (max 5 MB, rotates)',
             value: _appLoggingOn,
             onChanged: (v) async {
               await AppLogger.instance.setEnabled(v);

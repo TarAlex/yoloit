@@ -62,7 +62,7 @@ class AppLogger {
   /// Path to the current log file (may not exist yet if logging is off).
   Future<String> get logPath async {
     final home = Platform.environment['HOME'] ?? '/tmp';
-    return '$home/.config/yoloit/app.log';
+    return '$home/Library/Logs/yoloit/app.log';
   }
 
   Future<String> readLog() async {
@@ -87,12 +87,16 @@ class AppLogger {
       _sink = f.openWrite(mode: FileMode.append);
       _writeLine('');
       _writeLine('══════ yoloit started ${DateTime.now().toIso8601String()} ══════');
+    }).catchError((e) {
+      // Ignore — file logging unavailable (e.g. permission issue)
     });
   }
 
   Future<File> _openFile() async {
     final home = Platform.environment['HOME'] ?? '/tmp';
-    final dir = Directory('$home/.config/yoloit');
+    // Write to ~/Library/Logs/yoloit/ to respect macOS sandbox app container
+    // while still being easily accessible.
+    final dir = Directory('$home/Library/Logs/yoloit');
     if (!dir.existsSync()) dir.createSync(recursive: true);
     final f = File('${dir.path}/app.log');
     // Rotate if > 5 MB
