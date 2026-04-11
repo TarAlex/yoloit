@@ -155,18 +155,24 @@ class _FileEditorPanelState extends State<FileEditorPanel> {
           child: Column(
             children: [
               _TabBar(state: state),
-              if (!activeTab.isDiff && !activeTab.isLoading && _isMarkdown(activeTab.filePath))
-                _MarkdownToggleBar(
-                  isPreview: _previewPaths.contains(activeTab.filePath),
-                  onToggle: () => setState(() {
-                    final path = activeTab.filePath;
-                    if (_previewPaths.contains(path)) {
-                      _previewPaths.remove(path);
-                    } else {
-                      _previewPaths.add(path);
-                    }
-                  }),
-                ),
+              // Toggle bar: animated height — always in tree to avoid layout jumps
+              AnimatedSize(
+                duration: const Duration(milliseconds: 150),
+                curve: Curves.easeInOut,
+                child: (!activeTab.isDiff && !activeTab.isLoading && _isMarkdown(activeTab.filePath))
+                    ? _MarkdownToggleBar(
+                        isPreview: _previewPaths.contains(activeTab.filePath),
+                        onToggle: () => setState(() {
+                          final path = activeTab.filePath;
+                          if (_previewPaths.contains(path)) {
+                            _previewPaths.remove(path);
+                          } else {
+                            _previewPaths.add(path);
+                          }
+                        }),
+                      )
+                    : const SizedBox.shrink(),
+              ),
               Expanded(
                 child: activeTab.isLoading
                     ? const Center(child: CircularProgressIndicator())
