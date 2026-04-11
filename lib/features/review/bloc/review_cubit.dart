@@ -11,25 +11,45 @@ import 'package:yoloit/features/review/models/review_models.dart';
 class ReviewCubit extends Cubit<ReviewState> {
   ReviewCubit() : super(const ReviewInitial());
 
-  String? _workspacePath;
+  List<String> _workspacePaths = [];
 
-  Future<void> loadWorkspace(String workspacePath) async {
-    _workspacePath = workspacePath;
+  /// Primary path used for git operations (first path in the list).
+  String? get _primaryPath => _workspacePaths.isEmpty ? null : _workspacePaths.first;
+
+  Future<void> loadWorkspace(List<String> paths) async {
+    _workspacePaths = paths;
     emit(const ReviewLoaded(fileTree: [], changedFiles: []));
     await refresh();
   }
 
   Future<void> refresh() async {
-    final path = _workspacePath;
-    if (path == null) return;
+    if (_workspacePaths.isEmpty) return;
 
     final current = _loaded;
-    final fileTree = await _buildFileTree(path);
-    final changedFiles = await DiffService.instance.getChangedFiles(path);
+    // Build a root node per path, each expanded one level.
+    final List<FileTreeNode> roots = [];
+    for (final path in _workspacePaths) {
+      final children = await _buildFileTree(path);
+      roots.add(FileTreeNode(
+        name: p.basename(path),
+        path: path,
+        isDirectory: true,
+        isExpanded: true,
+        children: children,
+      ));
+    }
+    // Collect changed files from all paths.
+    final List<FileChange> allChanged = [];
+    for (final path in _workspacePaths) {
+      try {
+        final changed = await DiffService.instance.getChangedFiles(path);
+        allChanged.addAll(changed);
+      } catch (_) {}
+    }
 
     emit(ReviewLoaded(
-      fileTree: fileTree,
-      changedFiles: changedFiles,
+      fileTree: roots,
+      changedFiles: allChanged,
       selectedFilePath: current?.selectedFilePath,
       diffHunks: current?.diffHunks ?? [],
       fileContent: current?.fileContent,
@@ -49,11 +69,12 @@ class ReviewCubit extends Cubit<ReviewState> {
       isLoadingFile: true,
     ));
 
-    final workspacePath = _workspacePath ?? '';
-    final relativePath = p.relative(absolutePath, from: workspacePath);
+    // Find which workspace root this file belongs to.
+    final gitRoot = _gitRootFor(absolutePath) ?? _primaryPath ?? '';
+    final relativePath = p.relative(absolutePath, from: gitRoot);
 
     // Load diff and file content in parallel
-    final diffFuture = DiffService.instance.getDiff(workspacePath, relativePath);
+    final diffFuture = DiffService.instance.getDiff(gitRoot, relativePath);
     final fileFuture = FileViewerService.instance.readFile(absolutePath);
 
     final results = await Future.wait([diffFuture, fileFuture]);
@@ -86,17 +107,25 @@ class ReviewCubit extends Cubit<ReviewState> {
   }
 
   Future<void> stageFile(String filePath) async {
-    final workspacePath = _workspacePath;
-    if (workspacePath == null) return;
-    await GitService.instance.stageFile(workspacePath, filePath);
+    final root = _gitRootFor(filePath) ?? _primaryPath;
+    if (root == null) return;
+    await GitService.instance.stageFile(root, filePath);
     await refresh();
   }
 
   Future<void> unstageFile(String filePath) async {
-    final workspacePath = _workspacePath;
-    if (workspacePath == null) return;
-    await GitService.instance.unstageFile(workspacePath, filePath);
+    final root = _gitRootFor(filePath) ?? _primaryPath;
+    if (root == null) return;
+    await GitService.instance.unstageFile(root, filePath);
     await refresh();
+  }
+
+  /// Returns the workspace path that is a prefix of [absolutePath].
+  String? _gitRootFor(String absolutePath) {
+    for (final path in _workspacePaths) {
+      if (absolutePath.startsWith(path)) return path;
+    }
+    return null;
   }
 
   Future<List<FileTreeNode>> _buildFileTree(String dirPath) async {

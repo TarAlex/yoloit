@@ -201,7 +201,10 @@ class _TabBar extends StatelessWidget {
     final colors = context.appColors;
     return Container(
       height: 36,
-      color: colors.surface,
+      decoration: BoxDecoration(
+        color: colors.surface,
+        border: Border(bottom: BorderSide(color: const Color(0xFF32327A), width: 1)),
+      ),
       child: Row(
         children: [
           Expanded(

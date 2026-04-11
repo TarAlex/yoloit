@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 import 'package:flutter_pty/flutter_pty.dart';
+import 'package:yoloit/core/services/resource_monitor_service.dart';
 
 class PtyService {
   PtyService._();
@@ -27,6 +28,7 @@ class PtyService {
       ...Platform.environment,
       'TERM': 'xterm-256color',
       'COLORTERM': 'truecolor',
+      'PATH': _enrichedPath(),
       if (extraEnv != null) ...extraEnv,
     };
 
@@ -42,6 +44,7 @@ class PtyService {
     );
 
     _ptys[sessionId] = pty;
+    ResourceMonitorService.instance.registerSession(pty.pid, sessionId);
     return pty;
   }
 
@@ -68,6 +71,7 @@ class PtyService {
       ...Platform.environment,
       'TERM': 'xterm-256color',
       'COLORTERM': 'truecolor',
+      'PATH': _enrichedPath(),
       if (extraEnv != null) ...extraEnv,
     };
 
@@ -81,7 +85,21 @@ class PtyService {
 
     _ptys[sessionId] = pty;
     _tmuxSessions.add(sessionId);
+    ResourceMonitorService.instance.registerSession(pty.pid, sessionId);
     return pty;
+  }
+
+  /// Builds a PATH that includes common tool locations missed by GUI apps.
+  static String _enrichedPath() {
+    final home = Platform.environment['HOME'] ?? '';
+    final existing = Platform.environment['PATH'] ?? '/usr/bin:/bin';
+    final extras = [
+      if (home.isNotEmpty) '$home/.local/bin',
+      '/opt/homebrew/bin',
+      '/opt/homebrew/sbin',
+      '/usr/local/bin',
+    ].join(':');
+    return '$extras:$existing';
   }
 
   void write(String sessionId, String data) {
@@ -98,7 +116,11 @@ class PtyService {
   /// Kills the PTY and, if it is a tmux session, also kills the tmux session.
   /// Use this when the user explicitly closes a tab.
   void kill(String sessionId, {Future<void> Function(String)? onKillTmux}) {
-    _ptys[sessionId]?.kill();
+    final pty = _ptys[sessionId];
+    if (pty != null) {
+      ResourceMonitorService.instance.unregisterSession(pty.pid);
+      pty.kill();
+    }
     _ptys.remove(sessionId);
     if (_tmuxSessions.remove(sessionId) && onKillTmux != null) {
       onKillTmux(sessionId);
@@ -107,8 +129,9 @@ class PtyService {
 
   /// Detaches all PTYs without killing tmux sessions (called on app exit).
   void killAll() {
-    for (final pty in _ptys.values) {
-      pty.kill();
+    for (final entry in _ptys.entries) {
+      ResourceMonitorService.instance.unregisterSession(entry.value.pid);
+      entry.value.kill();
     }
     _ptys.clear();
     _tmuxSessions.clear();

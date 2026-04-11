@@ -9,92 +9,138 @@ class RunService {
   RunService._();
   static final instance = RunService._();
 
-  final Map<String, Process> _processes = {};
-  final Map<String, StreamSubscription<String>> _stdoutSubs = {};
-  final Map<String, StreamSubscription<String>> _stderrSubs = {};
+  final Map<String, String> _sessionTmux = {};
+  final Map<String, Process> _tails = {};
+  final Map<String, List<StreamSubscription>> _subs = {};
+
+  static String tmuxName(String configId) =>
+      'yoloit_run_${configId.replaceAll(RegExp(r"[^a-zA-Z0-9]"), "_")}';
+
+  static Future<String> logPath(String configId) async {
+    final home = Platform.environment["HOME"] ?? "/tmp";
+    final dir = Directory("$home/.config/yoloit/runs");
+    await dir.create(recursive: true);
+    return "${dir.path}/${tmuxName(configId)}.log";
+  }
 
   Future<void> start({
     required String sessionId,
+    required String configId,
     required String command,
     required String workingDir,
     Map<String, String> env = const {},
     required OutputCallback onOutput,
     required ExitCallback onExit,
   }) async {
-    final parts = _parseCommand(command);
-    final executable = parts.first;
-    final args = parts.skip(1).toList();
+    final name = tmuxName(configId);
+    final log = await logPath(configId);
+    _sessionTmux[sessionId] = name;
 
-    final fullEnv = Map<String, String>.from(Platform.environment)..addAll(env);
+    await File(log).writeAsString("");
+    await Process.run("tmux", ["kill-session", "-t", name]);
 
-    final process = await Process.start(
-      executable,
-      args,
-      workingDirectory: workingDir,
-      environment: fullEnv,
-      runInShell: true,
+    final envStr = env.entries
+        .map((e) => "export ${e.key}=\"${e.value}\"")
+        .join("; ");
+    final prefix = envStr.isNotEmpty ? "$envStr; " : "";
+    final bash = "${prefix}cd \"\$YOLOIT_DIR\" && $command 2>&1 | tee \"\$YOLOIT_LOG\"; "
+        "echo \"__YOLOIT_EXIT_\$?\" >> \"\$YOLOIT_LOG\"";
+
+    final result = await Process.run(
+      "tmux",
+      ["new-session", "-d", "-s", name, "-x", "220", "-y", "50",
+       "bash", "-c", bash],
+      environment: {
+        ...Platform.environment,
+        "YOLOIT_DIR": workingDir,
+        "YOLOIT_LOG": log,
+      },
     );
 
-    _processes[sessionId] = process;
+    if (result.exitCode != 0) {
+      onOutput("Failed to start tmux session: ${result.stderr}", true);
+      onExit(1);
+      return;
+    }
 
-    _stdoutSubs[sessionId] = process.stdout
+    await _tailLog(
+      sessionId: sessionId, log: log, fromStart: true,
+      onOutput: onOutput, onExit: onExit,
+    );
+  }
+
+  Future<bool> reconnect({
+    required String sessionId,
+    required String configId,
+    required OutputCallback onOutput,
+    required ExitCallback onExit,
+  }) async {
+    final name = tmuxName(configId);
+    final check = await Process.run("tmux", ["has-session", "-t", name]);
+    if (check.exitCode != 0) return false;
+    _sessionTmux[sessionId] = name;
+    final log = await logPath(configId);
+    await _tailLog(
+      sessionId: sessionId, log: log, fromStart: false,
+      onOutput: onOutput, onExit: onExit,
+    );
+    return true;
+  }
+
+  Future<void> _tailLog({
+    required String sessionId,
+    required String log,
+    required bool fromStart,
+    required OutputCallback onOutput,
+    required ExitCallback onExit,
+  }) async {
+    final args = fromStart ? ["-n", "+1", "-F", log] : ["-n", "0", "-F", log];
+    final tail = await Process.start("tail", args);
+    _tails[sessionId] = tail;
+
+    final outSub = tail.stdout
         .transform(utf8.decoder)
         .transform(const LineSplitter())
-        .listen((line) => onOutput(line, false));
-
-    _stderrSubs[sessionId] = process.stderr
-        .transform(utf8.decoder)
-        .transform(const LineSplitter())
-        .listen((line) => onOutput(line, true));
-
-    process.exitCode.then((code) {
-      _cleanup(sessionId);
-      onExit(code);
+        .listen((line) {
+      if (line.startsWith("__YOLOIT_EXIT_")) {
+        final code = int.tryParse(line.substring("__YOLOIT_EXIT_".length)) ?? 0;
+        _cleanup(sessionId);
+        onExit(code);
+      } else {
+        onOutput(line, false);
+      }
     });
+
+    final errSub = tail.stderr
+        .transform(utf8.decoder)
+        .transform(const LineSplitter())
+        .listen((_) {});
+
+    _subs[sessionId] = [outSub, errSub];
   }
 
   void stop(String sessionId) {
-    _processes[sessionId]?.kill(ProcessSignal.sigterm);
+    final name = _sessionTmux[sessionId];
+    if (name != null) Process.run("tmux", ["kill-session", "-t", name]);
     _cleanup(sessionId);
   }
 
-  void sendStdin(String sessionId, String text) {
-    _processes[sessionId]?.stdin.write(text);
+  void sendHotReload(String sessionId) => _sendKeys(sessionId, "r");
+  void sendHotRestart(String sessionId) => _sendKeys(sessionId, "R");
+  void sendStdin(String sessionId, String text) => _sendKeys(sessionId, text);
+
+  void _sendKeys(String sessionId, String keys) {
+    final name = _sessionTmux[sessionId];
+    if (name != null) Process.run("tmux", ["send-keys", "-t", name, keys, ""]);
   }
 
-  bool isRunning(String sessionId) => _processes.containsKey(sessionId);
+  bool isRunning(String sessionId) => _tails.containsKey(sessionId);
 
   void _cleanup(String sessionId) {
-    _stdoutSubs[sessionId]?.cancel();
-    _stderrSubs[sessionId]?.cancel();
-    _stdoutSubs.remove(sessionId);
-    _stderrSubs.remove(sessionId);
-    _processes.remove(sessionId);
-  }
-
-  List<String> _parseCommand(String command) {
-    final result = <String>[];
-    final current = StringBuffer();
-    var inQuotes = false;
-    var quoteChar = '';
-    for (final char in command.split('')) {
-      if (inQuotes) {
-        if (char == quoteChar) {
-          inQuotes = false;
-        } else {
-          current.write(char);
-        }
-      } else if (char == '"' || char == "'") {
-        inQuotes = true;
-        quoteChar = char;
-      } else if (char == ' ' && current.isNotEmpty) {
-        result.add(current.toString());
-        current.clear();
-      } else if (char != ' ') {
-        current.write(char);
-      }
-    }
-    if (current.isNotEmpty) result.add(current.toString());
-    return result;
+    for (final sub in _subs[sessionId] ?? []) sub.cancel();
+    final proc = _tails.remove(sessionId);
+    if (proc != null) proc.kill(ProcessSignal.sigterm);
+    _subs.remove(sessionId);
+    _sessionTmux.remove(sessionId);
   }
 }

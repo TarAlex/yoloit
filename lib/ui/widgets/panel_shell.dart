@@ -72,9 +72,12 @@ class _PanelHeader extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       height: 28,
-      color: colors.surface,
       decoration: BoxDecoration(
-        border: Border(bottom: BorderSide(color: colors.divider, width: 1)),
+        color: colors.surface,
+        border: Border(
+          top: BorderSide(color: const Color(0xFF32327A), width: 2),
+          bottom: BorderSide(color: colors.divider, width: 1),
+        ),
       ),
       padding: const EdgeInsets.symmetric(horizontal: 8),
       child: Row(

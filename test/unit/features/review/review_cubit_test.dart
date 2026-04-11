@@ -17,7 +17,7 @@ void main() {
     blocTest<ReviewCubit, ReviewState>(
       'loadWorkspace emits ReviewLoaded',
       build: () => ReviewCubit(),
-      act: (cubit) => cubit.loadWorkspace('/tmp'),
+      act: (cubit) => cubit.loadWorkspace(['/tmp']),
       verify: (cubit) => expect(cubit.state, isA<ReviewLoaded>()),
     );
 

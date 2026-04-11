@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:yoloit/core/theme/app_colors.dart';
+import 'package:yoloit/core/theme/app_theme.dart';
 import 'package:yoloit/core/theme/theme_manager.dart';
 import 'package:yoloit/features/settings/ui/settings_page.dart';
 
@@ -15,7 +16,7 @@ void main() {
     testWidgets('shows Settings title', (tester) async {
       await tester.pumpWidget(
         MaterialApp(
-          theme: ThemeData.dark(),
+          theme: AppThemePreset.neonPurple.theme,
           home: const Scaffold(body: SettingsPage()),
         ),
       );
@@ -26,7 +27,7 @@ void main() {
     testWidgets('shows Appearance section', (tester) async {
       await tester.pumpWidget(
         MaterialApp(
-          theme: ThemeData.dark(),
+          theme: AppThemePreset.neonPurple.theme,
           home: const Scaffold(body: SettingsPage()),
         ),
       );
@@ -37,7 +38,7 @@ void main() {
     testWidgets('shows Keyboard Shortcuts section', (tester) async {
       await tester.pumpWidget(
         MaterialApp(
-          theme: ThemeData.dark(),
+          theme: AppThemePreset.neonPurple.theme,
           home: const Scaffold(body: SettingsPage()),
         ),
       );
@@ -48,7 +49,7 @@ void main() {
     testWidgets('shows all shortcut entries', (tester) async {
       await tester.pumpWidget(
         MaterialApp(
-          theme: ThemeData.dark(),
+          theme: AppThemePreset.neonPurple.theme,
           home: const Scaffold(body: SettingsPage()),
         ),
       );
@@ -60,7 +61,7 @@ void main() {
     testWidgets('shows About section with app name', (tester) async {
       await tester.pumpWidget(
         MaterialApp(
-          theme: ThemeData.dark(),
+          theme: AppThemePreset.neonPurple.theme,
           home: const Scaffold(body: SettingsPage()),
         ),
       );
@@ -71,7 +72,7 @@ void main() {
     testWidgets('close button pops dialog', (tester) async {
       await tester.pumpWidget(
         MaterialApp(
-          theme: ThemeData.dark(),
+          theme: AppThemePreset.neonPurple.theme,
           home: Scaffold(
             body: Builder(
               builder: (ctx) => TextButton(
@@ -94,7 +95,7 @@ void main() {
     testWidgets('theme swatches visible for all 5 presets', (tester) async {
       await tester.pumpWidget(
         MaterialApp(
-          theme: ThemeData.dark(),
+          theme: AppThemePreset.neonPurple.theme,
           home: const Scaffold(
             body: SizedBox(
               width: 600,

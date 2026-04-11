@@ -4,6 +4,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:yoloit/features/runs/bloc/run_state.dart';
 import 'package:yoloit/features/runs/data/run_config_storage.dart';
 import 'package:yoloit/features/runs/data/run_service.dart';
+import 'package:yoloit/features/runs/data/run_session_storage.dart';
 import 'package:yoloit/features/runs/models/run_config.dart';
 import 'package:yoloit/features/runs/models/run_session.dart';
 
@@ -14,16 +15,39 @@ class RunCubit extends Cubit<RunState> {
 
   Future<void> loadForWorkspace(String workspacePath) async {
     final configs = await RunConfigStorage.instance.load(workspacePath);
-    if (configs.isEmpty && await _isFlutterProject(workspacePath)) {
-      final presets = [
-        RunConfig.flutterRunMacos(workspacePath),
-        RunConfig.flutterTest(),
-        RunConfig.flutterBuildMacos(),
-      ];
-      await RunConfigStorage.instance.save(workspacePath, presets);
-      emit(state.copyWith(configs: presets, workspacePath: workspacePath));
-    } else {
-      emit(state.copyWith(configs: configs, workspacePath: workspacePath));
+    var savedSessions = await RunSessionStorage.instance.load(workspacePath);
+
+    final effectiveConfigs = configs.isEmpty && await _isFlutterProject(workspacePath)
+        ? [
+            RunConfig.flutterRunMacos(workspacePath),
+            RunConfig.flutterTest(),
+            RunConfig.flutterBuildMacos(),
+          ]
+        : configs;
+
+    if (effectiveConfigs != configs) {
+      await RunConfigStorage.instance.save(workspacePath, effectiveConfigs);
+    }
+
+    emit(state.copyWith(
+      configs: effectiveConfigs,
+      workspacePath: workspacePath,
+      sessions: savedSessions,
+      activeSessionId: savedSessions.lastOrNull?.id,
+    ));
+
+    // Reconnect to any sessions that were running when the app last closed
+    for (final session in savedSessions.where((s) => s.status == RunStatus.running)) {
+      final alive = await RunService.instance.reconnect(
+        sessionId: session.id,
+        configId: session.config.id,
+        onOutput: (line, isError) => _appendOutput(session.id, line, isError),
+        onExit: (code) => _onExit(session.id, code),
+      );
+      if (!alive) {
+        // tmux session gone — mark as stopped
+        _updateSession(session.id, (s) => s.copyWith(status: RunStatus.stopped));
+      }
     }
   }
 
@@ -52,10 +76,14 @@ class RunCubit extends Cubit<RunState> {
       activeSessionId: sessionId,
     ));
 
+    // Persist immediately so status=running is saved before any app restart
+    _persistSessions();
+
     final effectiveDir = config.workingDir ?? workspacePath;
 
     await RunService.instance.start(
       sessionId: sessionId,
+      configId: config.id,
       command: config.command,
       workingDir: effectiveDir,
       env: config.env,
@@ -66,8 +94,8 @@ class RunCubit extends Cubit<RunState> {
 
   void stopRun(String sessionId) {
     RunService.instance.stop(sessionId);
-    _updateSession(
-        sessionId, (s) => s.copyWith(status: RunStatus.stopped));
+    _updateSession(sessionId, (s) => s.copyWith(status: RunStatus.stopped));
+    _persistSessions();
   }
 
   void sendHotReload(String sessionId) {
@@ -80,6 +108,7 @@ class RunCubit extends Cubit<RunState> {
 
   void clearOutput(String sessionId) {
     _updateSession(sessionId, (s) => s.copyWith(output: []));
+    _persistSessions();
   }
 
   void setActiveSession(String sessionId) {
@@ -98,6 +127,7 @@ class RunCubit extends Cubit<RunState> {
       activeSessionId: activeId,
       clearActiveSession: activeId == null,
     ));
+    _persistSessions();
   }
 
   Future<void> addConfig(RunConfig config) async {
@@ -144,6 +174,7 @@ class RunCubit extends Cubit<RunState> {
         exitCode: code,
       ),
     );
+    _persistSessions();
   }
 
   void _updateSession(
@@ -152,5 +183,11 @@ class RunCubit extends Cubit<RunState> {
         .map((s) => s.id == sessionId ? updater(s) : s)
         .toList();
     emit(state.copyWith(sessions: sessions));
+  }
+
+  void _persistSessions() {
+    final path = state.workspacePath;
+    if (path == null) return;
+    RunSessionStorage.instance.save(path, state.sessions);
   }
 }

@@ -55,8 +55,8 @@ void main() {
       build: () => WorkspaceCubit(),
       seed: () => const WorkspaceLoaded(
         workspaces: [
-          Workspace(id: 'ws_1', name: 'alpha', path: '/a'),
-          Workspace(id: 'ws_2', name: 'beta', path: '/b'),
+          Workspace(id: 'ws_1', name: 'alpha', paths: ['/a']),
+          Workspace(id: 'ws_2', name: 'beta', paths: ['/b']),
         ],
       ),
       act: (cubit) => cubit.removeWorkspace('ws_1'),
@@ -74,8 +74,8 @@ void main() {
       build: () => WorkspaceCubit(),
       seed: () => const WorkspaceLoaded(
         workspaces: [
-          Workspace(id: 'ws_1', name: 'alpha', path: '/a'),
-          Workspace(id: 'ws_2', name: 'beta', path: '/b'),
+          Workspace(id: 'ws_1', name: 'alpha', paths: ['/a']),
+          Workspace(id: 'ws_2', name: 'beta', paths: ['/b']),
         ],
       ),
       act: (cubit) => cubit.setActive('ws_2'),
@@ -89,7 +89,7 @@ void main() {
       build: () => WorkspaceCubit(),
       seed: () => const WorkspaceLoaded(
         workspaces: [
-          Workspace(id: 'ws_1', name: 'alpha', path: '/a'),
+          Workspace(id: 'ws_1', name: 'alpha', paths: ['/a']),
         ],
         activeWorkspaceId: 'ws_1',
       ),
@@ -102,8 +102,8 @@ void main() {
     test('WorkspaceLoaded.activeWorkspace returns correct workspace', () {
       const state = WorkspaceLoaded(
         workspaces: [
-          Workspace(id: 'ws_1', name: 'alpha', path: '/a'),
-          Workspace(id: 'ws_2', name: 'beta', path: '/b'),
+          Workspace(id: 'ws_1', name: 'alpha', paths: ['/a']),
+          Workspace(id: 'ws_2', name: 'beta', paths: ['/b']),
         ],
         activeWorkspaceId: 'ws_2',
       );
@@ -113,7 +113,7 @@ void main() {
 
     test('WorkspaceLoaded.activeWorkspace returns null when no active', () {
       const state = WorkspaceLoaded(workspaces: [
-        Workspace(id: 'ws_1', name: 'alpha', path: '/a'),
+        Workspace(id: 'ws_1', name: 'alpha', paths: ['/a']),
       ]);
       expect(state.activeWorkspace, isNull);
     });

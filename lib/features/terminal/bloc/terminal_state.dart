@@ -16,10 +16,14 @@ class TerminalLoaded extends TerminalState {
   const TerminalLoaded({
     required this.sessions,
     required this.activeIndex,
+    this.allSessions = const [],
   });
 
+  /// Sessions visible in current workspace.
   final List<AgentSession> sessions;
   final int activeIndex;
+  /// All sessions across all workspaces — used by the sidebar active-sessions panel.
+  final List<AgentSession> allSessions;
 
   AgentSession? get activeSession =>
       sessions.isEmpty ? null : sessions[activeIndex.clamp(0, sessions.length - 1)];
@@ -27,13 +31,15 @@ class TerminalLoaded extends TerminalState {
   TerminalLoaded copyWith({
     List<AgentSession>? sessions,
     int? activeIndex,
+    List<AgentSession>? allSessions,
   }) {
     return TerminalLoaded(
       sessions: sessions ?? this.sessions,
       activeIndex: activeIndex ?? this.activeIndex,
+      allSessions: allSessions ?? this.allSessions,
     );
   }
 
   @override
-  List<Object?> get props => [sessions.map((s) => s.id).toList(), activeIndex];
+  List<Object?> get props => [sessions.map((s) => s.id).toList(), activeIndex, allSessions.map((s) => s.id).toList()];
 }

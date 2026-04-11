@@ -14,6 +14,18 @@ class RunOutputLine extends Equatable {
   final bool isError;
   final DateTime timestamp;
 
+  Map<String, dynamic> toJson() => {
+        'text': text,
+        'isError': isError,
+        'ts': timestamp.millisecondsSinceEpoch,
+      };
+
+  factory RunOutputLine.fromJson(Map<String, dynamic> j) => RunOutputLine(
+        text: j['text'] as String,
+        isError: j['isError'] as bool,
+        timestamp: DateTime.fromMillisecondsSinceEpoch(j['ts'] as int),
+      );
+
   @override
   List<Object?> get props => [text, isError, timestamp];
 }
@@ -57,6 +69,33 @@ class RunSession extends Equatable {
       startedAt: startedAt ?? this.startedAt,
     );
   }
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'config': config.toJson(),
+        'workspacePath': workspacePath,
+        'status': status.name,
+        'output': output.map((l) => l.toJson()).toList(),
+        'exitCode': exitCode,
+        'startedAt': startedAt?.millisecondsSinceEpoch,
+      };
+
+  factory RunSession.fromJson(Map<String, dynamic> j) => RunSession(
+        id: j['id'] as String,
+        config: RunConfig.fromJson(j['config'] as Map<String, dynamic>),
+        workspacePath: j['workspacePath'] as String,
+        status: RunStatus.values.firstWhere(
+          (s) => s.name == (j['status'] as String? ?? 'stopped'),
+          orElse: () => RunStatus.stopped,
+        ),
+        output: (j['output'] as List<dynamic>? ?? [])
+            .map((e) => RunOutputLine.fromJson(e as Map<String, dynamic>))
+            .toList(),
+        exitCode: j['exitCode'] as int?,
+        startedAt: j['startedAt'] != null
+            ? DateTime.fromMillisecondsSinceEpoch(j['startedAt'] as int)
+            : null,
+      );
 
   @override
   List<Object?> get props => [id, status, output, exitCode];

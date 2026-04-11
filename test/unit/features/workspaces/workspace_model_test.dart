@@ -6,11 +6,10 @@ void main() {
     const workspace = Workspace(
       id: 'ws_1',
       name: 'my-project',
-      path: '/Users/dev/my-project',
+      paths: ['/Users/dev/my-project'],
       gitBranch: 'main',
       addedLines: 150,
       removedLines: 50,
-      isActive: false,
     );
 
     test('copyWith preserves unchanged fields', () {
@@ -65,7 +64,7 @@ void main() {
       const same = Workspace(
         id: 'ws_1',
         name: 'my-project',
-        path: '/Users/dev/my-project',
+        paths: ['/Users/dev/my-project'],
         gitBranch: 'main',
         addedLines: 150,
         removedLines: 50,
@@ -74,7 +73,7 @@ void main() {
     });
 
     test('workspaces with different ids are not equal', () {
-      const other = Workspace(id: 'ws_2', name: 'my-project', path: '/Users/dev/my-project');
+      const other = Workspace(id: 'ws_2', name: 'my-project', paths: ['/Users/dev/my-project']);
       expect(workspace, isNot(equals(other)));
     });
   });

@@ -7,12 +7,15 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:yoloit/core/session/session_prefs.dart';
 import 'package:yoloit/core/services/git_service.dart';
 import 'package:yoloit/features/workspaces/bloc/workspace_state.dart';
+import 'package:yoloit/features/workspaces/data/workspace_dir_service.dart';
 import 'package:yoloit/features/workspaces/models/workspace.dart';
 
 class WorkspaceCubit extends Cubit<WorkspaceState> {
   WorkspaceCubit() : super(const WorkspaceInitial());
 
   static const _storageKey = 'workspaces';
+
+  final _dirService = WorkspaceDirService.instance;
 
   /// Default palette for auto-assigning workspace accent colours.
   static const _kWorkspacePalette = [
@@ -36,6 +39,10 @@ class WorkspaceCubit extends Cubit<WorkspaceState> {
       final workspaces = json
           .map((s) => Workspace.fromJson(jsonDecode(s) as Map<String, dynamic>))
           .toList();
+      // Sync symlinks for all workspaces on startup.
+      for (final ws in workspaces) {
+        _dirService.syncSymlinks(ws);
+      }
       final snap = await SessionPrefs.load();
       final savedId = snap.activeWorkspaceId;
       final activeId = savedId != null && workspaces.any((w) => w.id == savedId)
@@ -51,23 +58,73 @@ class WorkspaceCubit extends Cubit<WorkspaceState> {
     }
   }
 
-  Future<void> addWorkspace(String folderPath) async {
-    final name = p.basename(folderPath);
-    final id = '${name}_${DateTime.now().millisecondsSinceEpoch}';
+  /// Creates a new workspace with a user-defined [name] and initial [folderPath].
+  Future<void> addWorkspace(String folderPath, {String? customName}) async {
+    final name = customName ?? p.basename(folderPath);
+    final id = '${name.replaceAll(RegExp(r'[^a-zA-Z0-9_-]'), '_')}_${DateTime.now().millisecondsSinceEpoch}';
     final current = _currentLoaded;
     if (current == null) return;
-    // Assign a default accent colour cycling through the palette.
     final defaultColor = _kWorkspacePalette[current.workspaces.length % _kWorkspacePalette.length];
-    final workspace = Workspace(id: id, name: name, path: folderPath, color: defaultColor);
+    final workspace = Workspace(
+      id: id,
+      name: name,
+      paths: [folderPath],
+      color: defaultColor,
+    );
+    await _dirService.syncSymlinks(workspace);
     final updated = [...current.workspaces, workspace];
     emit(current.copyWith(workspaces: updated));
     await _save(updated);
     await _refreshGitInfo(id);
   }
 
+  /// Adds an additional folder path to an existing workspace.
+  Future<void> addPathToWorkspace(String workspaceId, String folderPath) async {
+    final current = _currentLoaded;
+    if (current == null) return;
+    final updated = current.workspaces.map((w) {
+      if (w.id != workspaceId) return w;
+      if (w.paths.contains(folderPath)) return w;
+      return w.copyWith(paths: [...w.paths, folderPath]);
+    }).toList();
+    emit(current.copyWith(workspaces: updated));
+    await _save(updated);
+    final ws = updated.firstWhere((w) => w.id == workspaceId);
+    await _dirService.syncSymlinks(ws);
+  }
+
+  /// Removes a folder path from a workspace. Removes the workspace entirely if
+  /// it becomes empty.
+  Future<void> removePathFromWorkspace(String workspaceId, String folderPath) async {
+    final current = _currentLoaded;
+    if (current == null) return;
+    final List<Workspace> updated = [];
+    String? removedActiveId;
+    for (final w in current.workspaces) {
+      if (w.id != workspaceId) {
+        updated.add(w);
+        continue;
+      }
+      final newPaths = w.paths.where((p) => p != folderPath).toList();
+      if (newPaths.isEmpty) {
+        // Workspace has no more folders — remove it.
+        await _dirService.deleteDir(w.id);
+        if (current.activeWorkspaceId == w.id) removedActiveId = w.id;
+      } else {
+        final updated2 = w.copyWith(paths: newPaths);
+        await _dirService.syncSymlinks(updated2);
+        updated.add(updated2);
+      }
+    }
+    final newActiveId = removedActiveId != null ? null : current.activeWorkspaceId;
+    emit(WorkspaceLoaded(workspaces: updated, activeWorkspaceId: newActiveId));
+    await _save(updated);
+  }
+
   Future<void> removeWorkspace(String id) async {
     final current = _currentLoaded;
     if (current == null) return;
+    await _dirService.deleteDir(id);
     final updated = current.workspaces.where((w) => w.id != id).toList();
     final newActiveId = current.activeWorkspaceId == id ? null : current.activeWorkspaceId;
     emit(WorkspaceLoaded(workspaces: updated, activeWorkspaceId: newActiveId));
@@ -92,6 +149,18 @@ class WorkspaceCubit extends Cubit<WorkspaceState> {
     await _save(updated);
   }
 
+  /// Renames a workspace.
+  Future<void> renameWorkspace(String id, String newName) async {
+    final current = _currentLoaded;
+    if (current == null) return;
+    final updated = current.workspaces.map((w) {
+      if (w.id != id) return w;
+      return w.copyWith(name: newName);
+    }).toList();
+    emit(current.copyWith(workspaces: updated));
+    await _save(updated);
+  }
+
   Future<void> refreshAll() async {
     final current = _currentLoaded;
     if (current == null) return;
@@ -104,7 +173,9 @@ class WorkspaceCubit extends Cubit<WorkspaceState> {
     final current = _currentLoaded;
     if (current == null) return;
     final ws = current.workspaces.firstWhere((w) => w.id == id, orElse: () => throw StateError(''));
+    if (ws.paths.isEmpty) return;
     try {
+      // Use primary path for git info.
       final branch = await GitService.instance.getBranch(ws.path);
       final stats = await GitService.instance.getDiffStats(ws.path);
       final updated = current.workspaces.map((w) {

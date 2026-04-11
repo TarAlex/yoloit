@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:yoloit/core/theme/app_theme.dart';
 import 'package:yoloit/ui/widgets/split_view.dart';
 
 void main() {
@@ -43,8 +44,9 @@ void main() {
   group('HSplitView widget', () {
     testWidgets('renders all three panels', (tester) async {
       await tester.pumpWidget(
-        const MaterialApp(
-          home: Scaffold(
+        MaterialApp(
+          theme: AppThemePreset.neonPurple.theme,
+          home: const Scaffold(
             body: HSplitView(
               left: Text('LEFT'),
               center: Text('CENTER'),
@@ -63,6 +65,7 @@ void main() {
       final controller = HSplitViewController();
       await tester.pumpWidget(
         MaterialApp(
+          theme: AppThemePreset.neonPurple.theme,
           home: Scaffold(
             body: HSplitView(
               left: const Text('LEFT'),
@@ -87,6 +90,7 @@ void main() {
       final controller = HSplitViewController();
       await tester.pumpWidget(
         MaterialApp(
+          theme: AppThemePreset.neonPurple.theme,
           home: Scaffold(
             body: HSplitView(
               left: const Text('LEFT'),
@@ -109,6 +113,7 @@ void main() {
       final controller = HSplitViewController();
       await tester.pumpWidget(
         MaterialApp(
+          theme: AppThemePreset.neonPurple.theme,
           home: Scaffold(
             body: HSplitView(
               left: const Text('LEFT'),
