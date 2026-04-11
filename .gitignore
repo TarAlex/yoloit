@@ -1,11 +1,20 @@
 # Miscellaneous
 *.class
-*.lock
-*.log
 *.pyc
 *.swp
 .buildlog/
 .history
+
+# Project-specific temp / generated files
+settings_page_test_new.dart
+flutter_*.log
+run.sh
+
+# Golden test failure artifacts (generated on test failure, not source)
+test/golden/failures/
+
+# App logs
+*.log
 
 
 
