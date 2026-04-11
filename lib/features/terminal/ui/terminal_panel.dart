@@ -365,11 +365,14 @@ class _AgentTabState extends State<_AgentTab> {
                   ],
                 ),
               ),
-              if (_hovering && !_editing) ...[
+              if (!_editing) ...[
                 const SizedBox(width: 4),
-                GestureDetector(
-                  onTap: widget.onClose,
-                  child: const Icon(Icons.close, size: 10, color: AppColors.textMuted),
+                Opacity(
+                  opacity: _hovering ? 1.0 : 0.0,
+                  child: GestureDetector(
+                    onTap: _hovering ? widget.onClose : null,
+                    child: const Icon(Icons.close, size: 10, color: AppColors.textMuted),
+                  ),
                 ),
               ],
             ],
