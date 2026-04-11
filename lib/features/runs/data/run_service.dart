@@ -58,8 +58,12 @@ class RunService {
         .map((e) => "export ${e.key}=\"${e.value}\"")
         .join("; ");
     final prefix = envStr.isNotEmpty ? "$envStr; " : "";
-    final bash = "${prefix}cd \"\$YOLOIT_DIR\" && $command 2>&1 | tee \"\$YOLOIT_LOG\"; "
-        "echo \"__YOLOIT_EXIT_\$?\" >> \"\$YOLOIT_LOG\"";
+    // Inline workingDir and log directly into the bash string so they are
+    // available even when the tmux server does not inherit the client's env.
+    final enrichedPath = _enrichedPath();
+    final bash = "export PATH=\"$enrichedPath\"; "
+        "${prefix}cd \"$workingDir\" && $command 2>&1 | tee \"$log\"; "
+        "echo \"__YOLOIT_EXIT_\$?\" >> \"$log\"";
 
     final result = await Process.run(
       "tmux",
@@ -67,9 +71,7 @@ class RunService {
        "bash", "-c", bash],
       environment: {
         ...Platform.environment,
-        "PATH": _enrichedPath(),
-        "YOLOIT_DIR": workingDir,
-        "YOLOIT_LOG": log,
+        "PATH": enrichedPath,
       },
     );
 

@@ -738,32 +738,39 @@ class _TitleBar extends StatelessWidget {
             ),
             const Spacer(),
             // Search button in center
-            GestureDetector(
-              onTap: onSearch,
-              child: Container(
-                height: 32,
-                constraints: const BoxConstraints(minWidth: 240, maxWidth: 420),
-                decoration: BoxDecoration(
-                  color: colors.background,
-                  borderRadius: BorderRadius.circular(5),
-                  border: Border.all(color: colors.border),
-                ),
-                padding: const EdgeInsets.symmetric(horizontal: 8),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const Icon(Icons.search, size: 15, color: AppColors.textMuted),
-                    const SizedBox(width: 8),
-                    const Text(
-                      'Quick open…',
-                      style: TextStyle(color: AppColors.textMuted, fontSize: 14),
+            Flexible(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 420),
+                child: GestureDetector(
+                  onTap: onSearch,
+                  child: Container(
+                    height: 32,
+                    decoration: BoxDecoration(
+                      color: colors.background,
+                      borderRadius: BorderRadius.circular(5),
+                      border: Border.all(color: colors.border),
                     ),
-                    const Spacer(),
-                    Text(
-                      '⌘O',
-                      style: TextStyle(color: AppColors.textMuted.withAlpha(120), fontSize: 12),
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(Icons.search, size: 15, color: AppColors.textMuted),
+                        const SizedBox(width: 8),
+                        const Flexible(
+                          child: Text(
+                            'Quick open…',
+                            style: TextStyle(color: AppColors.textMuted, fontSize: 14),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          '⌘O',
+                          style: TextStyle(color: AppColors.textMuted.withAlpha(120), fontSize: 12),
+                        ),
+                      ],
                     ),
-                  ],
+                  ),
                 ),
               ),
             ),
