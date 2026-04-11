@@ -720,7 +720,7 @@ class _TitleBar extends StatelessWidget {
         child: Row(
           children: [
             const SizedBox(width: 82), // space for macOS traffic lights + gap
-            // Panel toggle buttons
+            // Left panel toggle buttons (fixed, left-anchored)
             _PanelToggleButton(
               icon: Icons.view_sidebar,
               tooltip: 'Toggle Workspaces (⌘\\)',
@@ -736,49 +736,48 @@ class _TitleBar extends StatelessWidget {
               active: agentsVis == PanelVisibility.open,
               onTap: onToggleAgents,
             ),
-            const Spacer(),
-            // Search button in center
-            Flexible(
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 420),
-                child: GestureDetector(
-                  onTap: onSearch,
-                  child: Container(
-                    height: 32,
-                    decoration: BoxDecoration(
-                      color: colors.background,
-                      borderRadius: BorderRadius.circular(5),
-                      border: Border.all(color: colors.border),
-                    ),
-                    padding: const EdgeInsets.symmetric(horizontal: 8),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const Icon(Icons.search, size: 15, color: AppColors.textMuted),
-                        const SizedBox(width: 8),
-                        const Flexible(
-                          child: Text(
-                            'Quick open…',
-                            style: TextStyle(color: AppColors.textMuted, fontSize: 14),
-                            overflow: TextOverflow.ellipsis,
+            // Center: search always centered in remaining space
+            Expanded(
+              child: Center(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 420),
+                  child: GestureDetector(
+                    onTap: onSearch,
+                    child: Container(
+                      height: 32,
+                      decoration: BoxDecoration(
+                        color: colors.background,
+                        borderRadius: BorderRadius.circular(5),
+                        border: Border.all(color: colors.border),
+                      ),
+                      padding: const EdgeInsets.symmetric(horizontal: 8),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(Icons.search, size: 15, color: AppColors.textMuted),
+                          const SizedBox(width: 8),
+                          const Flexible(
+                            child: Text(
+                              'Quick open…',
+                              style: TextStyle(color: AppColors.textMuted, fontSize: 14),
+                              overflow: TextOverflow.ellipsis,
+                            ),
                           ),
-                        ),
-                        const SizedBox(width: 8),
-                        Text(
-                          '⌘O',
-                          style: TextStyle(color: AppColors.textMuted.withAlpha(120), fontSize: 12),
-                        ),
-                      ],
+                          const SizedBox(width: 8),
+                          Text(
+                            '⌘O',
+                            style: TextStyle(color: AppColors.textMuted.withAlpha(120), fontSize: 12),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
                 ),
               ),
             ),
-            const Spacer(),
-            // Resource monitor chip
+            // Right panel buttons (fixed, always right-anchored)
             const _ResourceChip(),
             const SizedBox(width: 8),
-            // File editor toggle
             BlocBuilder<FileEditorCubit, FileEditorState>(
               builder: (context, editorState) => _PanelToggleButton(
                 icon: Icons.edit_document,
