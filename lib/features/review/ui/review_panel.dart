@@ -152,12 +152,11 @@ class _ReviewHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colors = context.appColors;
     return Container(
       height: 40,
       padding: EdgeInsets.symmetric(horizontal: 12),
       decoration: BoxDecoration(
-        border: Border(bottom: BorderSide(color: colors.border)),
+        border: Border(bottom: BorderSide(color: const Color(0xFF32327A), width: 1)),
       ),
       child: Row(
         children: [

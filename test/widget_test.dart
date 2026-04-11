@@ -4,7 +4,9 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:yoloit/core/theme/app_theme.dart';
 import 'package:yoloit/core/theme/theme_manager.dart';
+import 'package:yoloit/features/editor/bloc/file_editor_cubit.dart';
 import 'package:yoloit/features/review/bloc/review_cubit.dart';
+import 'package:yoloit/features/runs/bloc/run_cubit.dart';
 import 'package:yoloit/features/terminal/bloc/terminal_cubit.dart';
 import 'package:yoloit/features/workspaces/bloc/workspace_cubit.dart';
 import 'package:yoloit/ui/shell/main_shell.dart';
@@ -16,6 +18,8 @@ Widget _testApp() => MultiBlocProvider(
         BlocProvider(create: (_) => WorkspaceCubit()),
         BlocProvider(create: (_) => TerminalCubit()),
         BlocProvider(create: (_) => ReviewCubit()),
+        BlocProvider(create: (_) => FileEditorCubit()),
+        BlocProvider(create: (_) => RunCubit()),
       ],
       child: MaterialApp(
         theme: AppThemePreset.neonPurple.theme,
@@ -39,5 +43,8 @@ void main() {
     expect(find.byType(Scaffold), findsWidgets);
     // All three panels attempt to render
     expect(find.byType(MaterialApp), findsOneWidget);
+
+    // Drain pending timers (e.g. 600ms focus delay in MainShell.initState)
+    await tester.pump(const Duration(seconds: 1));
   });
 }
