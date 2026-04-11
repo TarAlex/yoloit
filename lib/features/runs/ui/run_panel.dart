@@ -67,15 +67,22 @@ class _RunPanelViewState extends State<_RunPanelView> {
 
     return Container(
       color: AppColors.terminalBackground,
-      child: Column(
+      child: Row(
         children: [
-          _Header(state: state),
+          // Left: configurations list (always visible)
+          _ConfigList(state: state),
+          Container(width: 1, color: colors.divider),
+          // Right: session tabs + console output
           Expanded(
-            child: Row(
+            child: Column(
               children: [
-                _ConfigList(state: state),
-                Container(width: 1, color: colors.divider),
-                Expanded(child: _Console(state: state, scrollController: _scrollController)),
+                _ConsoleHeader(state: state),
+                Expanded(
+                  child: _Console(
+                    state: state,
+                    scrollController: _scrollController,
+                  ),
+                ),
               ],
             ),
           ),
@@ -85,10 +92,10 @@ class _RunPanelViewState extends State<_RunPanelView> {
   }
 }
 
-// ── Header ──────────────────────────────────────────────────────────────────
+// ── Console Header (tabs + action buttons, shown inside the right area) ──────
 
-class _Header extends StatelessWidget {
-  const _Header({required this.state});
+class _ConsoleHeader extends StatelessWidget {
+  const _ConsoleHeader({required this.state});
   final RunState state;
 
   @override
@@ -329,21 +336,34 @@ class _ConfigList extends StatelessWidget {
             child: ListView(
               padding: const EdgeInsets.only(bottom: 4),
               children: [
-                ...state.configs.map((c) => _ConfigItem(
-                      config: c,
-                      isRunning: state.sessions.any(
-                        (s) =>
-                            s.config.id == c.id &&
-                            s.status == RunStatus.running,
-                      ),
-                      onRun: () => cubit.startRun(c),
-                      onEdit: () async {
-                        final updated =
-                            await RunConfigDialog.show(context, initial: c);
-                        if (updated != null) cubit.updateConfig(updated);
-                      },
-                      onDelete: () => cubit.removeConfig(c.id),
-                    )),
+                ...state.configs.map((c) {
+                  final runningSession = state.sessions
+                      .where((s) =>
+                          s.config.id == c.id &&
+                          s.status == RunStatus.running)
+                      .firstOrNull;
+                  return _ConfigItem(
+                    config: c,
+                    isRunning: runningSession != null,
+                    onRun: () {
+                      if (runningSession != null) {
+                        // Already running — hot reload if flutter, else focus
+                        if (c.isFlutterRun) {
+                          cubit.sendHotReload(runningSession.id);
+                        }
+                        cubit.setActiveSession(runningSession.id);
+                      } else {
+                        cubit.startRun(c);
+                      }
+                    },
+                    onEdit: () async {
+                      final updated =
+                          await RunConfigDialog.show(context, initial: c);
+                      if (updated != null) cubit.updateConfig(updated);
+                    },
+                    onDelete: () => cubit.removeConfig(c.id),
+                  );
+                }),
                 Padding(
                   padding:
                       const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
