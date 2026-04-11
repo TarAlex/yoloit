@@ -68,7 +68,7 @@ class WorkspacePanelState extends State<WorkspacePanel> {
           orElse: () => state.workspaces.first,
         );
         return WorktreeSection(
-          workspacePath: active.path,
+          workspacePaths: active.paths,
           workspaceName: active.name,
         );
       },

@@ -9,11 +9,11 @@ import 'package:yoloit/core/theme/app_color_scheme.dart';
 class WorktreeSection extends StatefulWidget {
   const WorktreeSection({
     super.key,
-    required this.workspacePath,
+    required this.workspacePaths,
     required this.workspaceName,
   });
 
-  final String workspacePath;
+  final List<String> workspacePaths;
   final String workspaceName;
 
   @override
@@ -21,9 +21,10 @@ class WorktreeSection extends StatefulWidget {
 }
 
 class _WorktreeSectionState extends State<WorktreeSection> {
-  List<WorktreeEntry> _worktrees = [];
+  /// path → worktrees for that repo
+  Map<String, List<WorktreeEntry>> _worktreesByPath = {};
+  Map<String, String?> _errorsByPath = {};
   bool _loading = true;
-  String? _error;
 
   @override
   void initState() {
@@ -34,7 +35,7 @@ class _WorktreeSectionState extends State<WorktreeSection> {
   @override
   void didUpdateWidget(WorktreeSection oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.workspacePath != widget.workspacePath) {
+    if (oldWidget.workspacePaths != widget.workspacePaths) {
       _load();
     }
   }
@@ -42,32 +43,34 @@ class _WorktreeSectionState extends State<WorktreeSection> {
   Future<void> _load() async {
     setState(() {
       _loading = true;
-      _error = null;
+      _errorsByPath = {};
     });
-    try {
-      final worktrees = await WorktreeService.instance.listWorktrees(widget.workspacePath);
-      if (mounted) {
-        setState(() {
-          _worktrees = worktrees;
-          _loading = false;
-        });
+    final results = <String, List<WorktreeEntry>>{};
+    final errors = <String, String?>{};
+    for (final path in widget.workspacePaths) {
+      try {
+        results[path] = await WorktreeService.instance.listWorktrees(path);
+        errors[path] = null;
+      } catch (e) {
+        results[path] = [];
+        errors[path] = e.toString();
       }
-    } catch (e) {
-      if (mounted) {
-        setState(() {
-          _error = e.toString();
-          _loading = false;
-        });
-      }
+    }
+    if (mounted) {
+      setState(() {
+        _worktreesByPath = results;
+        _errorsByPath = errors;
+        _loading = false;
+      });
     }
   }
 
-  Future<void> _prune() async {
-    await WorktreeService.instance.pruneWorktrees(widget.workspacePath);
+  Future<void> _prune(String path) async {
+    await WorktreeService.instance.pruneWorktrees(path);
     await _load();
   }
 
-  Future<void> _removeWorktree(WorktreeEntry entry) async {
+  Future<void> _removeWorktree(String repoPath, WorktreeEntry entry) async {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => _ConfirmRemoveDialog(worktreePath: entry.path),
@@ -75,7 +78,7 @@ class _WorktreeSectionState extends State<WorktreeSection> {
     if (confirmed != true || !mounted) return;
 
     final error = await WorktreeService.instance.removeWorktree(
-      widget.workspacePath,
+      repoPath,
       entry.path,
     );
     if (!mounted) return;
@@ -91,11 +94,11 @@ class _WorktreeSectionState extends State<WorktreeSection> {
     }
   }
 
-  Future<void> _showAddDialog() async {
+  Future<void> _showAddDialog(String repoPath) async {
     await showDialog<void>(
       context: context,
       builder: (ctx) => _AddWorktreeDialog(
-        repoPath: widget.workspacePath,
+        repoPath: repoPath,
         onAdded: _load,
       ),
     );
@@ -104,6 +107,8 @@ class _WorktreeSectionState extends State<WorktreeSection> {
   @override
   Widget build(BuildContext context) {
     final colors = context.appColors;
+    final multiRepo = widget.workspacePaths.length > 1;
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -132,11 +137,6 @@ class _WorktreeSectionState extends State<WorktreeSection> {
                 onTap: _load,
                 tooltip: 'Refresh worktrees',
               ),
-              _SmallIconButton(
-                icon: Icons.cleaning_services_outlined,
-                onTap: _prune,
-                tooltip: 'Prune stale worktrees',
-              ),
             ],
           ),
         ),
@@ -149,50 +149,104 @@ class _WorktreeSectionState extends State<WorktreeSection> {
               child: CircularProgressIndicator(strokeWidth: 1.5),
             ),
           )
-        else if (_error != null)
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-            child: Text(
-              _error!,
-              style: const TextStyle(color: AppColors.neonRed, fontSize: 10),
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-            ),
-          )
-        else ...[
-          ..._worktrees.map((entry) => _WorktreeTile(
-                entry: entry,
-                onRemove: entry.isMain ? null : () => _removeWorktree(entry),
-              )),
-          // Add worktree button
-          Padding(
-            padding: const EdgeInsets.fromLTRB(12, 4, 12, 4),
-            child: GestureDetector(
-              onTap: _showAddDialog,
-              child: Container(
-                height: 28,
-                padding: EdgeInsets.symmetric(horizontal: 8),
-                decoration: BoxDecoration(
-                  border: Border.all(color: colors.border),
-                  borderRadius: BorderRadius.circular(4),
-                ),
+        else
+          for (final path in widget.workspacePaths) ...[
+            // Per-repo header when multiple repos
+            if (multiRepo)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(12, 8, 8, 2),
                 child: Row(
                   children: [
-                    Icon(Icons.add, size: 11, color: AppColors.textMuted),
-                    const SizedBox(width: 5),
-                    Text(
-                      'Add worktree',
-                      style: TextStyle(
-                        color: AppColors.textMuted,
-                        fontSize: 11,
+                    const Icon(Icons.folder_outlined, size: 11, color: AppColors.textMuted),
+                    const SizedBox(width: 4),
+                    Flexible(
+                      child: Text(
+                        p.basename(path),
+                        style: const TextStyle(
+                          color: AppColors.textSecondary,
+                          fontSize: 10,
+                          fontWeight: FontWeight.w500,
+                        ),
+                        overflow: TextOverflow.ellipsis,
                       ),
+                    ),
+                    const Spacer(),
+                    _SmallIconButton(
+                      icon: Icons.cleaning_services_outlined,
+                      onTap: () => _prune(path),
+                      tooltip: 'Prune stale worktrees',
                     ),
                   ],
                 ),
               ),
-            ),
-          ),
-        ],
+            if (_errorsByPath[path] != null)
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                child: Text(
+                  _errorsByPath[path]!,
+                  style: const TextStyle(color: AppColors.neonRed, fontSize: 10),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              )
+            else ...[
+              ...(_worktreesByPath[path] ?? []).map((entry) => _WorktreeTile(
+                    entry: entry,
+                    onRemove: entry.isMain ? null : () => _removeWorktree(path, entry),
+                  )),
+              // Add worktree button (only for single repo, or inline per repo)
+              if (!multiRepo)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 4, 12, 4),
+                  child: GestureDetector(
+                    onTap: () => _showAddDialog(path),
+                    child: Container(
+                      height: 28,
+                      padding: const EdgeInsets.symmetric(horizontal: 8),
+                      decoration: BoxDecoration(
+                        border: Border.all(color: colors.border),
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: const Row(
+                        children: [
+                          Icon(Icons.add, size: 11, color: AppColors.textMuted),
+                          SizedBox(width: 5),
+                          Text(
+                            'Add worktree',
+                            style: TextStyle(
+                              color: AppColors.textMuted,
+                              fontSize: 11,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              if (multiRepo && (_worktreesByPath[path]?.isNotEmpty ?? false))
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 2, 12, 4),
+                  child: GestureDetector(
+                    onTap: () => _showAddDialog(path),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.add, size: 10, color: AppColors.textMuted),
+                        const SizedBox(width: 4),
+                        Text(
+                          'Add worktree',
+                          style: const TextStyle(
+                            color: AppColors.textMuted,
+                            fontSize: 10,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+            ],
+            if (multiRepo && path != widget.workspacePaths.last)
+              const Divider(height: 4, thickness: 0.5, indent: 12, endIndent: 12),
+          ],
       ],
     );
   }
