@@ -3,11 +3,16 @@ import 'package:flutter/material.dart';
 import 'package:window_manager/window_manager.dart';
 import 'package:yoloit/app.dart';
 import 'package:yoloit/core/hotkeys/hotkey_registry.dart';
+import 'package:yoloit/core/services/app_logger.dart';
 import 'package:yoloit/core/services/resource_monitor_service.dart';
 import 'package:yoloit/core/theme/theme_manager.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // Init app-level file logger early (before FlutterError hook) so it can
+  // capture errors that occur during startup.
+  await AppLogger.instance.init();
 
   // Suppress Flutter keyboard state assertion errors that occur when the PTY
   // terminal emulator causes macOS to re-inject key events (duplicate KeyDown).
@@ -23,6 +28,9 @@ void main() async {
     }
     originalOnError?.call(details);
   };
+
+  // Install logger hooks after FlutterError handler so AppLogger wraps it.
+  AppLogger.instance.install();
 
   await ThemeManager.instance.load();
   await HotkeyRegistry.instance.load();
