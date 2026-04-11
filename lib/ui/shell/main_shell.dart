@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 import 'package:window_manager/window_manager.dart';
 import 'package:yoloit/core/hotkeys/hotkey_registry.dart';
 import 'package:yoloit/core/hotkeys/hotkeys.dart';
@@ -9,16 +10,21 @@ import 'package:yoloit/core/theme/app_colors.dart';
 import 'package:yoloit/features/editor/bloc/file_editor_cubit.dart';
 import 'package:yoloit/features/editor/bloc/file_editor_state.dart';
 import 'package:yoloit/features/editor/ui/file_editor_panel.dart';
+import 'package:yoloit/features/review/bloc/review_cubit.dart';
 import 'package:yoloit/features/review/ui/review_panel.dart';
 import 'package:yoloit/features/search/ui/file_search_overlay.dart';
 import 'package:yoloit/features/settings/ui/settings_page.dart';
 import 'package:yoloit/features/terminal/bloc/terminal_cubit.dart';
 import 'package:yoloit/features/terminal/bloc/terminal_state.dart';
 import 'package:yoloit/features/terminal/ui/terminal_panel.dart';
+import 'package:yoloit/features/runs/bloc/run_cubit.dart';
 import 'package:yoloit/features/workspaces/bloc/workspace_cubit.dart';
 import 'package:yoloit/features/workspaces/bloc/workspace_state.dart';
 import 'package:yoloit/features/workspaces/ui/workspace_panel.dart';
-import 'package:yoloit/ui/widgets/split_view.dart';
+import 'package:yoloit/core/services/resource_monitor_service.dart';
+import 'package:yoloit/ui/widgets/activity_rail.dart';
+import 'package:yoloit/ui/widgets/panel_shell.dart';
+import 'package:yoloit/ui/widgets/panel_visibility.dart';
 
 class MainShell extends StatefulWidget {
   const MainShell({super.key});
@@ -28,10 +34,11 @@ class MainShell extends StatefulWidget {
 }
 
 class _MainShellState extends State<MainShell> with WindowListener {
-  final _splitController = HSplitViewController();
+  final _workspacePanelKey = GlobalKey<WorkspacePanelState>();
   final _terminalFocusNode = FocusNode();
-  bool _reviewVisible = true;
-  bool _terminalVisible = true;
+  PanelVisibility _workspaceVis = PanelVisibility.open;
+  PanelVisibility _agentsVis    = PanelVisibility.open;
+  PanelVisibility _fileTreeVis  = PanelVisibility.open;
   SessionSnapshot? _sessionSnapshot;
 
   @override
@@ -44,7 +51,6 @@ class _MainShellState extends State<MainShell> with WindowListener {
   @override
   void dispose() {
     windowManager.removeListener(this);
-    _splitController.dispose();
     _terminalFocusNode.dispose();
     super.dispose();
   }
@@ -53,8 +59,9 @@ class _MainShellState extends State<MainShell> with WindowListener {
     final snap = await SessionPrefs.load();
     if (!mounted) return;
     setState(() {
-      _reviewVisible   = snap.reviewVisible;
-      _terminalVisible = snap.terminalVisible;
+      _workspaceVis    = snap.workspaceVis;
+      _agentsVis       = snap.agentsVis;
+      _fileTreeVis     = snap.fileTreeVis;
       _sessionSnapshot = snap;
     });
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -73,9 +80,25 @@ class _MainShellState extends State<MainShell> with WindowListener {
     showFileSearch(
       context,
       onFileOpened: () {
-        if (!_reviewVisible) setState(() => _reviewVisible = true);
+        if (_fileTreeVis == PanelVisibility.closed) {
+          _setPanelVis('filetree', PanelVisibility.open);
+        }
       },
     );
+  }
+
+  void _setPanelVis(String panelId, PanelVisibility v) {
+    setState(() {
+      switch (panelId) {
+        case 'workspace':
+          _workspaceVis = v;
+        case 'agents':
+          _agentsVis = v;
+        case 'filetree':
+          _fileTreeVis = v;
+      }
+    });
+    SessionPrefs.savePanelVis(panelId, v);
   }
 
   void _previousTab() {
@@ -124,17 +147,29 @@ class _MainShellState extends State<MainShell> with WindowListener {
             onInvoke: (_) => _closeTab(),
           ),
           ToggleWorkspacePanelIntent: CallbackAction<ToggleWorkspacePanelIntent>(
-            onInvoke: (_) => _splitController.toggleLeft(),
+            onInvoke: (_) {
+              final next = _workspaceVis == PanelVisibility.open
+                  ? PanelVisibility.closed
+                  : PanelVisibility.open;
+              _setPanelVis('workspace', next);
+              return null;
+            },
           ),
           ToggleTerminalPanelIntent: CallbackAction<ToggleTerminalPanelIntent>(
             onInvoke: (_) {
-              setState(() => _terminalVisible = !_terminalVisible);
+              final next = _agentsVis == PanelVisibility.open
+                  ? PanelVisibility.closed
+                  : PanelVisibility.open;
+              _setPanelVis('agents', next);
               return null;
             },
           ),
           ToggleReviewPanelIntent: CallbackAction<ToggleReviewPanelIntent>(
             onInvoke: (_) {
-              setState(() => _reviewVisible = !_reviewVisible);
+              final next = _fileTreeVis == PanelVisibility.open
+                  ? PanelVisibility.closed
+                  : PanelVisibility.open;
+              _setPanelVis('filetree', next);
               return null;
             },
           ),
@@ -155,35 +190,39 @@ class _MainShellState extends State<MainShell> with WindowListener {
             body: Column(
               children: [
                 _TitleBar(
-                  splitController: _splitController,
                   onSettings: () => SettingsPage.show(context),
-                  reviewVisible: _reviewVisible,
-                  terminalVisible: _terminalVisible,
-                  onToggleReview: () {
-                    setState(() => _reviewVisible = !_reviewVisible);
-                    SessionPrefs.saveReviewVisible(_reviewVisible);
+                  workspaceVis: _workspaceVis,
+                  agentsVis: _agentsVis,
+                  fileTreeVis: _fileTreeVis,
+                  onToggleWorkspace: () {
+                    final next = _workspaceVis == PanelVisibility.open
+                        ? PanelVisibility.closed
+                        : PanelVisibility.open;
+                    _setPanelVis('workspace', next);
                   },
-                  onToggleTerminal: () {
-                    setState(() => _terminalVisible = !_terminalVisible);
-                    SessionPrefs.saveTerminalVisible(_terminalVisible);
+                  onToggleAgents: () {
+                    final next = _agentsVis == PanelVisibility.open
+                        ? PanelVisibility.closed
+                        : PanelVisibility.open;
+                    _setPanelVis('agents', next);
+                  },
+                  onToggleFileTree: () {
+                    final next = _fileTreeVis == PanelVisibility.open
+                        ? PanelVisibility.closed
+                        : PanelVisibility.open;
+                    _setPanelVis('filetree', next);
                   },
                   onSearch: _openFileSearch,
                 ),
                 Expanded(
                   child: _FourPaneLayout(
-                    splitController: _splitController,
+                    workspacePanelKey: _workspacePanelKey,
                     terminalFocusNode: _terminalFocusNode,
-                    reviewVisible: _reviewVisible,
-                    terminalVisible: _terminalVisible,
+                    workspaceVis: _workspaceVis,
+                    agentsVis: _agentsVis,
+                    fileTreeVis: _fileTreeVis,
                     initialSnapshot: _sessionSnapshot,
-                    onToggleReview: () {
-                      setState(() => _reviewVisible = !_reviewVisible);
-                      SessionPrefs.saveReviewVisible(_reviewVisible);
-                    },
-                    onToggleTerminal: () {
-                      setState(() => _terminalVisible = !_terminalVisible);
-                      SessionPrefs.saveTerminalVisible(_terminalVisible);
-                    },
+                    onSetPanelVis: _setPanelVis,
                   ),
                 ),
               ],
@@ -200,21 +239,21 @@ class _MainShellState extends State<MainShell> with WindowListener {
 /// FileEditor appears when a file is open.
 class _FourPaneLayout extends StatefulWidget {
   const _FourPaneLayout({
-    required this.splitController,
+    required this.workspacePanelKey,
     required this.terminalFocusNode,
-    required this.reviewVisible,
-    required this.terminalVisible,
-    required this.onToggleReview,
-    required this.onToggleTerminal,
+    required this.workspaceVis,
+    required this.agentsVis,
+    required this.fileTreeVis,
+    required this.onSetPanelVis,
     this.initialSnapshot,
   });
 
-  final HSplitViewController splitController;
+  final GlobalKey<WorkspacePanelState> workspacePanelKey;
   final FocusNode terminalFocusNode;
-  final bool reviewVisible;
-  final bool terminalVisible;
-  final VoidCallback onToggleReview;
-  final VoidCallback onToggleTerminal;
+  final PanelVisibility workspaceVis;
+  final PanelVisibility agentsVis;
+  final PanelVisibility fileTreeVis;
+  final void Function(String panelId, PanelVisibility v) onSetPanelVis;
   final SessionSnapshot? initialSnapshot;
 
   @override
@@ -237,7 +276,6 @@ class _FourPaneLayoutState extends State<_FourPaneLayout> {
   @override
   void initState() {
     super.initState();
-    widget.splitController.addListener(_rebuild);
     final s = widget.initialSnapshot;
     _workspaceWidth = s?.workspaceWidth ?? 260;
     _editorWidth    = s?.editorWidth    ?? 480;
@@ -249,20 +287,19 @@ class _FourPaneLayoutState extends State<_FourPaneLayout> {
 
   @override
   void dispose() {
-    widget.splitController.removeListener(_rebuild);
     super.dispose();
   }
-
-  void _rebuild() => setState(() {});
 
   @override
   Widget build(BuildContext context) {
     return BlocBuilder<FileEditorCubit, FileEditorState>(
       builder: (context, editorState) {
-        final showWorkspace = widget.splitController.leftVisible;
-        final showTerminal = widget.terminalVisible;
+        final showWorkspace = widget.workspaceVis == PanelVisibility.open;
+        final workspaceCollapsed = widget.workspaceVis == PanelVisibility.collapsed;
+        final showAgents = widget.agentsVis != PanelVisibility.closed;
         final showEditor = editorState.isVisible;
-        final showReview = widget.reviewVisible;
+        final showFileTree = widget.fileTreeVis == PanelVisibility.open;
+        final fileTreeCollapsed = widget.fileTreeVis == PanelVisibility.collapsed;
 
         return LayoutBuilder(
           builder: (context, constraints) {
@@ -271,6 +308,19 @@ class _FourPaneLayoutState extends State<_FourPaneLayout> {
 
             return Row(
               children: [
+                // ── Left ActivityRail (workspace collapsed) ─────────────────
+                if (workspaceCollapsed)
+                  ActivityRail(
+                    side: ActivityRailSide.left,
+                    items: [
+                      ActivityRailItem(
+                        iconWidget: SvgPicture.asset('assets/images/yoloit_mark.svg'),
+                        tooltip: 'Expand Workspaces',
+                        onTap: () => widget.onSetPanelVis('workspace', PanelVisibility.open),
+                      ),
+                    ],
+                  ),
+
                 // ── Workspace panel ──────────────────────────────────────────
                 if (showWorkspace) ...[
                   SizedBox(
@@ -281,7 +331,24 @@ class _FourPaneLayoutState extends State<_FourPaneLayout> {
                           top: BorderSide(color: Color(0xFF32327A), width: 2),
                         ),
                       ),
-                      child: const WorkspacePanel(),
+                      child: PanelShell(
+                        title: 'WORKSPACES',
+                        iconWidget: SvgPicture.asset(
+                          'assets/images/yoloit_mark.svg',
+                          colorFilter: const ColorFilter.mode(AppColors.textMuted, BlendMode.srcIn),
+                        ),
+                        actions: [
+                          PanelActionBtn(
+                            icon: Icons.add,
+                            tooltip: 'Add workspace',
+                            onTap: () => widget.workspacePanelKey.currentState?.addWorkspace(),
+                          ),
+                        ],
+                        onCollapse: () => widget.onSetPanelVis('workspace', PanelVisibility.collapsed),
+                        collapseIcon: Icons.keyboard_arrow_left,
+                        onClose: () => widget.onSetPanelVis('workspace', PanelVisibility.closed),
+                        child: WorkspacePanel(key: widget.workspacePanelKey),
+                      ),
                     ),
                   ),
                   _Divider(
@@ -292,63 +359,84 @@ class _FourPaneLayoutState extends State<_FourPaneLayout> {
                   ),
                 ],
 
-                // ── Terminal/Agents (toggleable, fills remaining when visible) ─
-                if (showTerminal)
+                // ── Terminal/Agents ──────────────────────────────────────────
+                if (showAgents)
                   _sizedOrExpanded(
                     width: null,
                     height: _agentsHeight,
                     child: Focus(
                       focusNode: widget.terminalFocusNode,
-                      child: _PaneWrapper(
-                        collapseTooltip: 'Collapse Agents',
-                        onCollapse: widget.onToggleTerminal,
-                        onVerticalDrag: (dy) {
-                          setState(() => _agentsHeight = ((_agentsHeight ?? totalHeight) + dy).clamp(_minHeight, totalHeight - 40));
-                          SessionPrefs.saveAgentsHeight(_agentsHeight);
-                        },
-                        child: const _BottomPanel(),
+                      child: Column(
+                        children: [
+                          Expanded(
+                            child: PanelShell(
+                              title: 'AGENTS',
+                              icon: Icons.terminal,
+                              onClose: () => widget.onSetPanelVis('agents', PanelVisibility.closed),
+                              child: const _AgentsContent(),
+                            ),
+                          ),
+                          _HorizontalDivider(onDrag: (dy) {
+                            setState(() => _agentsHeight = ((_agentsHeight ?? totalHeight) + dy).clamp(_minHeight, totalHeight - 40));
+                            SessionPrefs.saveAgentsHeight(_agentsHeight);
+                          }),
+                        ],
                       ),
                     ),
                   ),
 
                 // ── File Editor (when a file is open) ─────────────────────────
                 if (showEditor) ...[
-                  if (showTerminal)
+                  if (showAgents)
                     _Divider(
                       onDrag: (dx) {
                         setState(() => _editorWidth = (_editorWidth - dx).clamp(_minWidth, totalWidth / 2));
                         SessionPrefs.saveEditorWidth(_editorWidth);
                       },
                     ),
-                  if (showTerminal)
+                  if (showAgents)
                     SizedBox(
                       width: _editorWidth,
-                      child: _PaneWrapper(
-                        collapseTooltip: 'Close Editor',
-                        onCollapse: () => context.read<FileEditorCubit>().hidePanel(),
-                        onVerticalDrag: (dy) {
-                          setState(() => _editorHeight = ((_editorHeight ?? totalHeight) + dy).clamp(_minHeight, totalHeight - 40));
-                          SessionPrefs.saveEditorHeight(_editorHeight);
-                        },
-                        child: const FileEditorPanel(),
+                      child: Column(
+                        children: [
+                          Expanded(
+                            child: PanelShell(
+                              title: 'EDITOR',
+                              icon: Icons.code,
+                              onClose: () => context.read<FileEditorCubit>().hidePanel(),
+                              child: const FileEditorPanel(),
+                            ),
+                          ),
+                          _HorizontalDivider(onDrag: (dy) {
+                            setState(() => _editorHeight = ((_editorHeight ?? totalHeight) + dy).clamp(_minHeight, totalHeight - 40));
+                            SessionPrefs.saveEditorHeight(_editorHeight);
+                          }),
+                        ],
                       ),
                     )
                   else
                     Expanded(
-                      child: _PaneWrapper(
-                        collapseTooltip: 'Close Editor',
-                        onCollapse: () => context.read<FileEditorCubit>().hidePanel(),
-                        onVerticalDrag: (dy) {
-                          setState(() => _editorHeight = ((_editorHeight ?? totalHeight) + dy).clamp(_minHeight, totalHeight - 40));
-                          SessionPrefs.saveEditorHeight(_editorHeight);
-                        },
-                        child: const FileEditorPanel(),
+                      child: Column(
+                        children: [
+                          Expanded(
+                            child: PanelShell(
+                              title: 'EDITOR',
+                              icon: Icons.code,
+                              onClose: () => context.read<FileEditorCubit>().hidePanel(),
+                              child: const FileEditorPanel(),
+                            ),
+                          ),
+                          _HorizontalDivider(onDrag: (dy) {
+                            setState(() => _editorHeight = ((_editorHeight ?? totalHeight) + dy).clamp(_minHeight, totalHeight - 40));
+                            SessionPrefs.saveEditorHeight(_editorHeight);
+                          }),
+                        ],
                       ),
                     ),
                 ],
 
                 // ── Review / File Tree ─────────────────────────────────────────
-                if (showReview) ...[
+                if (showFileTree) ...[
                   _Divider(
                     onDrag: (dx) {
                       setState(() => _reviewWidth = (_reviewWidth - dx).clamp(_minWidth, totalWidth / 2));
@@ -357,20 +445,42 @@ class _FourPaneLayoutState extends State<_FourPaneLayout> {
                   ),
                   SizedBox(
                     width: _reviewWidth,
-                    child: _PaneWrapper(
-                      collapseTooltip: 'Collapse Tree',
-                      onCollapse: widget.onToggleReview,
-                      onVerticalDrag: (dy) {
-                        setState(() => _reviewHeight = ((_reviewHeight ?? totalHeight) + dy).clamp(_minHeight, totalHeight - 40));
-                        SessionPrefs.saveReviewHeight(_reviewHeight);
-                      },
-                      child: const ReviewPanel(),
+                    child: Column(
+                      children: [
+                        Expanded(
+                          child: PanelShell(
+                            title: 'FILE TREE',
+                            icon: Icons.account_tree,
+                            onCollapse: () => widget.onSetPanelVis('filetree', PanelVisibility.collapsed),
+                            collapseIcon: Icons.keyboard_arrow_right,
+                            onClose: () => widget.onSetPanelVis('filetree', PanelVisibility.closed),
+                            child: const ReviewPanel(),
+                          ),
+                        ),
+                        _HorizontalDivider(onDrag: (dy) {
+                          setState(() => _reviewHeight = ((_reviewHeight ?? totalHeight) + dy).clamp(_minHeight, totalHeight - 40));
+                          SessionPrefs.saveReviewHeight(_reviewHeight);
+                        }),
+                      ],
                     ),
                   ),
                 ],
 
+                // ── Right ActivityRail (file tree collapsed) ─────────────────
+                if (fileTreeCollapsed)
+                  ActivityRail(
+                    side: ActivityRailSide.right,
+                    items: [
+                      ActivityRailItem(
+                        icon: Icons.account_tree,
+                        tooltip: 'Expand File Tree',
+                        onTap: () => widget.onSetPanelVis('filetree', PanelVisibility.open),
+                      ),
+                    ],
+                  ),
+
                 // ── Fallback when only workspace (or nothing) is showing ───────
-                if (!showTerminal && !showEditor && !showReview)
+                if (!showAgents && !showEditor && !showFileTree && !fileTreeCollapsed)
                   const Expanded(child: SizedBox.shrink()),
               ],
             );
@@ -379,8 +489,6 @@ class _FourPaneLayoutState extends State<_FourPaneLayout> {
       },
     );
   }
-
-  // ignore: unused_element
   Widget _sizedOrExpanded({required double? width, required double? height, required Widget child}) {
     if (width != null) {
       return SizedBox(width: width, height: height, child: child);
@@ -389,14 +497,12 @@ class _FourPaneLayoutState extends State<_FourPaneLayout> {
   }
 }
 
-/// Bottom panel that hosts the Agents terminal.
-/// Listens to workspace changes and switches terminal sessions accordingly.
-class _BottomPanel extends StatelessWidget {
-  const _BottomPanel();
+/// Content of the Agents panel: listens to workspace changes and hosts TerminalPanel.
+class _AgentsContent extends StatelessWidget {
+  const _AgentsContent();
 
   @override
   Widget build(BuildContext context) {
-    final colors = context.appColors;
     return BlocListener<WorkspaceCubit, WorkspaceState>(
       listenWhen: (prev, curr) {
         if (curr is! WorkspaceLoaded) return false;
@@ -414,24 +520,12 @@ class _BottomPanel extends StatelessWidget {
         );
         context.read<TerminalCubit>().setActiveWorkspace(
           workspaceId: wsId,
-          workspacePath: ws.path,
+          workspacePath: ws.workspaceDir,
         );
+        context.read<RunCubit>().loadForWorkspace(ws.path);
+        context.read<ReviewCubit>().loadWorkspace(ws.paths);
       },
-      child: Column(
-        children: [
-          Container(
-            height: 28,
-            color: colors.surface,
-            child: const Row(
-              children: [
-                _BottomTabButton(label: 'Agents', icon: Icons.terminal, isActive: true),
-              ],
-            ),
-          ),
-          Container(height: 1, color: colors.divider),
-          const Expanded(child: TerminalPanel()),
-        ],
-      ),
+      child: const TerminalPanel(),
     );
   }
 }
@@ -550,113 +644,25 @@ class _HorizontalDividerState extends State<_HorizontalDivider> {
   }
 }
 
-/// Wraps a panel child with a top-right collapse button and an optional
-/// bottom vertical resize handle.
-class _PaneWrapper extends StatelessWidget {
-  const _PaneWrapper({
-    required this.child,
-    required this.onCollapse,
-    this.collapseTooltip = 'Collapse',
-    this.onVerticalDrag,
-  });
-
-  final Widget child;
-  final VoidCallback onCollapse;
-  final String collapseTooltip;
-  final ValueChanged<double>? onVerticalDrag;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.appColors;
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        border: Border(
-          // Prominent top strip — 2px, brighter than background — IntelliJ-like panel separator
-          top: BorderSide(color: const Color(0xFF32327A), width: 2),
-        ),
-      ),
-      child: Column(
-        children: [
-          Expanded(
-            child: Stack(
-              children: [
-                Positioned.fill(child: child),
-                // Collapse button — top-right corner
-                Positioned(
-                  top: 4,
-                  right: 4,
-                  child: Tooltip(
-                    message: collapseTooltip,
-                    child: Material(
-                      color: Colors.transparent,
-                      child: InkWell(
-                        borderRadius: BorderRadius.circular(4),
-                        onTap: onCollapse,
-                        child: Container(
-                          width: 20,
-                          height: 20,
-                          decoration: BoxDecoration(
-                            color: colors.surfaceElevated.withAlpha(200),
-                            borderRadius: BorderRadius.circular(4),
-                            border: Border.all(color: colors.border),
-                          ),
-                          child: const Icon(
-                            Icons.minimize,
-                            size: 14,
-                            color: AppColors.textMuted,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          if (onVerticalDrag != null)
-            _HorizontalDivider(onDrag: onVerticalDrag!),
-        ],
-      ),
-    );
-  }
-}
-
-class _TitleBar extends StatefulWidget {
+class _TitleBar extends StatelessWidget {
   const _TitleBar({
-    required this.splitController,
     required this.onSettings,
-    required this.reviewVisible,
-    required this.terminalVisible,
-    required this.onToggleReview,
-    required this.onToggleTerminal,
+    required this.workspaceVis,
+    required this.agentsVis,
+    required this.fileTreeVis,
+    required this.onToggleWorkspace,
+    required this.onToggleAgents,
+    required this.onToggleFileTree,
     required this.onSearch,
   });
-  final HSplitViewController splitController;
   final VoidCallback onSettings;
-  final bool reviewVisible;
-  final bool terminalVisible;
-  final VoidCallback onToggleReview;
-  final VoidCallback onToggleTerminal;
+  final PanelVisibility workspaceVis;
+  final PanelVisibility agentsVis;
+  final PanelVisibility fileTreeVis;
+  final VoidCallback onToggleWorkspace;
+  final VoidCallback onToggleAgents;
+  final VoidCallback onToggleFileTree;
   final VoidCallback onSearch;
-
-  @override
-  State<_TitleBar> createState() => _TitleBarState();
-}
-
-class _TitleBarState extends State<_TitleBar> {
-  @override
-  void initState() {
-    super.initState();
-    widget.splitController.addListener(_rebuild);
-  }
-
-  @override
-  void dispose() {
-    widget.splitController.removeListener(_rebuild);
-    super.dispose();
-  }
-
-  void _rebuild() => setState(() {});
 
   @override
   Widget build(BuildContext context) {
@@ -664,7 +670,7 @@ class _TitleBarState extends State<_TitleBar> {
     return GestureDetector(
       onPanStart: (_) => windowManager.startDragging(),
       child: Container(
-        height: 36,
+        height: 44,
         color: colors.surface,
         child: Row(
           children: [
@@ -674,23 +680,23 @@ class _TitleBarState extends State<_TitleBar> {
               icon: Icons.view_sidebar,
               tooltip: 'Toggle Workspaces (⌘\\)',
               semanticsLabel: 'Toggle left panel',
-              active: widget.splitController.leftVisible,
-              onTap: widget.splitController.toggleLeft,
+              active: workspaceVis == PanelVisibility.open,
+              onTap: onToggleWorkspace,
             ),
             const SizedBox(width: 4),
             _PanelToggleButton(
               icon: Icons.terminal,
               tooltip: 'Toggle Agents / Terminal (⌘T)',
               semanticsLabel: 'Toggle agents panel',
-              active: widget.terminalVisible,
-              onTap: widget.onToggleTerminal,
+              active: agentsVis == PanelVisibility.open,
+              onTap: onToggleAgents,
             ),
             const Spacer(),
             // Search button in center
             GestureDetector(
-              onTap: widget.onSearch,
+              onTap: onSearch,
               child: Container(
-                height: 22,
+                height: 26,
                 constraints: const BoxConstraints(minWidth: 160, maxWidth: 260),
                 decoration: BoxDecoration(
                   color: colors.background,
@@ -701,22 +707,25 @@ class _TitleBarState extends State<_TitleBar> {
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    const Icon(Icons.search, size: 12, color: AppColors.textMuted),
+                    const Icon(Icons.search, size: 13, color: AppColors.textMuted),
                     const SizedBox(width: 6),
                     const Text(
                       'Quick open…',
-                      style: TextStyle(color: AppColors.textMuted, fontSize: 11),
+                      style: TextStyle(color: AppColors.textMuted, fontSize: 13),
                     ),
                     const Spacer(),
                     Text(
-                      '⌘O / ⌘F',
-                      style: TextStyle(color: AppColors.textMuted.withAlpha(120), fontSize: 10),
+                      '⌘O',
+                      style: TextStyle(color: AppColors.textMuted.withAlpha(120), fontSize: 11),
                     ),
                   ],
                 ),
               ),
             ),
             const Spacer(),
+            // Resource monitor chip
+            const _ResourceChip(),
+            const SizedBox(width: 8),
             // File editor toggle
             BlocBuilder<FileEditorCubit, FileEditorState>(
               builder: (context, editorState) => _PanelToggleButton(
@@ -732,8 +741,8 @@ class _TitleBarState extends State<_TitleBar> {
               icon: Icons.rate_review,
               tooltip: 'Toggle File Tree (⌘⇧\\)',
               semanticsLabel: 'Toggle right panel',
-              active: widget.reviewVisible,
-              onTap: widget.onToggleReview,
+              active: fileTreeVis == PanelVisibility.open,
+              onTap: onToggleFileTree,
             ),
             const SizedBox(width: 4),
             _PanelToggleButton(
@@ -741,7 +750,7 @@ class _TitleBarState extends State<_TitleBar> {
               tooltip: 'Settings (⌘,)',
               semanticsLabel: 'Open settings',
               active: false,
-              onTap: widget.onSettings,
+              onTap: onSettings,
             ),
             const SizedBox(width: 12),
           ],
@@ -778,8 +787,8 @@ class _PanelToggleButton extends StatelessWidget {
         child: GestureDetector(
           onTap: onTap,
           child: Container(
-            width: 28,
-            height: 24,
+            width: 32,
+            height: 28,
             decoration: BoxDecoration(
               color: active
                   ? colors.primary.withAlpha(40)
@@ -788,12 +797,260 @@ class _PanelToggleButton extends StatelessWidget {
             ),
             child: Icon(
               icon,
-              size: 14,
+              size: 16,
               color: active ? colors.primary : AppColors.textMuted,
               semanticLabel: tooltip,
             ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+// ── Resource Monitor Chip ────────────────────────────────────────────────────
+
+class _ResourceChip extends StatefulWidget {
+  const _ResourceChip();
+
+  @override
+  State<_ResourceChip> createState() => _ResourceChipState();
+}
+
+class _ResourceChipState extends State<_ResourceChip> {
+  ResourceSnapshot _snap = ResourceMonitorService.instance.current;
+  late final _sub = ResourceMonitorService.instance.stream
+      .listen((s) => setState(() => _snap = s));
+
+  OverlayEntry? _overlay;
+
+  @override
+  void dispose() {
+    _sub.cancel();
+    _overlay?.remove();
+    super.dispose();
+  }
+
+  void _toggle(BuildContext context) {
+    if (_overlay != null) {
+      _overlay!.remove();
+      _overlay = null;
+      return;
+    }
+    final box = context.findRenderObject()! as RenderBox;
+    final offset = box.localToGlobal(Offset.zero);
+    _overlay = OverlayEntry(builder: (_) => _ResourcePanel(
+      snapshot: _snap,
+      position: Offset(offset.dx - 260 + box.size.width, offset.dy + box.size.height + 4),
+      onClose: () { _overlay?.remove(); _overlay = null; },
+    ));
+    Overlay.of(context).insert(_overlay!);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final mem = formatBytes(_snap.appMemoryBytes);
+    final cpu = _snap.appCpuPercent;
+    return GestureDetector(
+      onTap: () => _toggle(context),
+      child: Container(
+        height: 22,
+        padding: const EdgeInsets.symmetric(horizontal: 8),
+        decoration: BoxDecoration(
+          color: const Color(0xFF0E0E2A),
+          borderRadius: BorderRadius.circular(5),
+          border: Border.all(color: const Color(0xFF32327A)),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.memory, size: 11, color: Color(0xFF7C7CFF)),
+            const SizedBox(width: 4),
+            Text(
+              cpu > 0 ? '${cpu.toStringAsFixed(1)}%  $mem' : mem,
+              style: const TextStyle(
+                color: Color(0xFFB0B0D0),
+                fontSize: 10,
+                fontFamily: 'monospace',
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ResourcePanel extends StatefulWidget {
+  const _ResourcePanel({
+    required this.snapshot,
+    required this.position,
+    required this.onClose,
+  });
+  final ResourceSnapshot snapshot;
+  final Offset position;
+  final VoidCallback onClose;
+
+  @override
+  State<_ResourcePanel> createState() => _ResourcePanelState();
+}
+
+class _ResourcePanelState extends State<_ResourcePanel> {
+  late ResourceSnapshot _snap = widget.snapshot;
+  late final _sub = ResourceMonitorService.instance.stream
+      .listen((s) => setState(() => _snap = s));
+
+  @override
+  void dispose() {
+    _sub.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Stack(
+      children: [
+        // Tap-outside to close
+        Positioned.fill(
+          child: GestureDetector(
+            onTap: widget.onClose,
+            behavior: HitTestBehavior.translucent,
+          ),
+        ),
+        Positioned(
+          left: widget.position.dx,
+          top: widget.position.dy,
+          width: 280,
+          child: Material(
+            color: Colors.transparent,
+            child: Container(
+              decoration: BoxDecoration(
+                color: const Color(0xFF16163A),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: const Color(0xFF32327A)),
+                boxShadow: [BoxShadow(color: Colors.black.withAlpha(120), blurRadius: 16)],
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // Header
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(14, 12, 14, 8),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.monitor_heart_outlined, size: 13, color: Color(0xFF7C7CFF)),
+                        const SizedBox(width: 6),
+                        const Expanded(
+                          child: Text(
+                            'RESOURCE USAGE',
+                            style: TextStyle(
+                              color: Color(0xFFE0E0F0),
+                              fontSize: 10,
+                              fontWeight: FontWeight.w700,
+                              letterSpacing: 1,
+                            ),
+                          ),
+                        ),
+                        GestureDetector(
+                          onTap: widget.onClose,
+                          child: const Icon(Icons.close, size: 12, color: Color(0xFF6060A0)),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const Divider(height: 1, color: Color(0xFF32327A)),
+                  // Summary row
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                    child: Row(
+                      children: [
+                        _StatCell(label: 'CPU', value: '${_snap.appCpuPercent.toStringAsFixed(1)}%'),
+                        _StatCell(label: 'APP RAM', value: formatBytes(_snap.appMemoryBytes)),
+                        if (_snap.totalSystemMemoryBytes > 0)
+                          _StatCell(
+                            label: 'RAM %',
+                            value: '${(_snap.appMemoryBytes / _snap.totalSystemMemoryBytes * 100).toStringAsFixed(1)}%',
+                          ),
+                      ],
+                    ),
+                  ),
+                  if (_snap.agents.isNotEmpty) ...[
+                    const Divider(height: 1, color: Color(0xFF32327A)),
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(14, 8, 14, 4),
+                      child: const Text(
+                        'AGENTS & TOOLS',
+                        style: TextStyle(color: Color(0xFF6060A0), fontSize: 9, letterSpacing: 0.8),
+                      ),
+                    ),
+                    ..._snap.agents.map((a) => _ProcessRow(stat: a)),
+                  ],
+                  const SizedBox(height: 8),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _StatCell extends StatelessWidget {
+  const _StatCell({required this.label, required this.value});
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    return Expanded(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(label, style: const TextStyle(color: Color(0xFF6060A0), fontSize: 9, letterSpacing: 0.6)),
+          const SizedBox(height: 2),
+          Text(value, style: const TextStyle(color: Color(0xFFE0E0F0), fontSize: 13, fontWeight: FontWeight.w600)),
+        ],
+      ),
+    );
+  }
+}
+
+class _ProcessRow extends StatelessWidget {
+  const _ProcessRow({required this.stat});
+  final ProcessStat stat;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(14, 3, 14, 3),
+      child: Row(
+        children: [
+          const Icon(Icons.circle, size: 5, color: Color(0xFF7C7CFF)),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              stat.name,
+              style: const TextStyle(color: Color(0xFFB0B0D0), fontSize: 11),
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          const SizedBox(width: 8),
+          Text(
+            '${stat.cpuPercent.toStringAsFixed(1)}%',
+            style: const TextStyle(color: Color(0xFF8080B0), fontSize: 10, fontFamily: 'monospace'),
+          ),
+          const SizedBox(width: 8),
+          SizedBox(
+            width: 56,
+            child: Text(
+              formatBytes(stat.memoryBytes),
+              style: const TextStyle(color: Color(0xFF8080B0), fontSize: 10, fontFamily: 'monospace'),
+              textAlign: TextAlign.right,
+            ),
+          ),
+        ],
       ),
     );
   }

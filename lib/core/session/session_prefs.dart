@@ -1,4 +1,5 @@
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:yoloit/ui/widgets/panel_visibility.dart';
 
 /// Persists UI session state across app restarts:
 /// - Panel visibility / sizes
@@ -21,6 +22,12 @@ class SessionPrefs {
   static const _kActiveTerminalIdx  = 'session.activeTerminalIndex';
   static const _kActiveWorkspaceId  = 'session.activeWorkspaceId';
 
+  // Panel visibility
+  static const _kWorkspaceVis = 'panel.workspace.vis';
+  static const _kFileTreeVis  = 'panel.filetree.vis';
+  static const _kAgentsVis    = 'panel.agents.vis';
+  static const _kEditorVis    = 'panel.editor.vis';
+
   // ── Load ─────────────────────────────────────────────────────────────────
   static Future<SessionSnapshot> load() async {
     final p = await SharedPreferences.getInstance();
@@ -37,6 +44,10 @@ class SessionPrefs {
       terminalFontSize:   p.getDouble(_kTerminalFontSize) ?? 13.0,
       activeTerminalIdx:  p.getInt(_kActiveTerminalIdx)   ?? 0,
       activeWorkspaceId:  p.getString(_kActiveWorkspaceId),
+      workspaceVis: panelVisibilityFromPrefs(p.getString(_kWorkspaceVis)),
+      fileTreeVis:  panelVisibilityFromPrefs(p.getString(_kFileTreeVis)),
+      agentsVis:    panelVisibilityFromPrefs(p.getString(_kAgentsVis)),
+      editorVis:    panelVisibilityFromPrefs(p.getString(_kEditorVis)),
     );
   }
 
@@ -57,6 +68,17 @@ class SessionPrefs {
     v == null ? p.remove(_kActiveWorkspaceId) : p.setString(_kActiveWorkspaceId, v);
   }
 
+  static Future<void> savePanelVis(String panelId, PanelVisibility v) async {
+    final key = switch (panelId) {
+      'workspace' => _kWorkspaceVis,
+      'filetree'  => _kFileTreeVis,
+      'agents'    => _kAgentsVis,
+      'editor'    => _kEditorVis,
+      _ => 'panel.$panelId.vis',
+    };
+    (await _p()).setString(key, v.toPrefsString());
+  }
+
   static Future<SharedPreferences> _p() => SharedPreferences.getInstance();
 }
 
@@ -75,6 +97,10 @@ class SessionSnapshot {
     required this.terminalFontSize,
     required this.activeTerminalIdx,
     this.activeWorkspaceId,
+    this.workspaceVis = PanelVisibility.open,
+    this.fileTreeVis  = PanelVisibility.open,
+    this.agentsVis    = PanelVisibility.open,
+    this.editorVis    = PanelVisibility.open,
   });
 
   final bool reviewVisible;
@@ -89,4 +115,8 @@ class SessionSnapshot {
   final double terminalFontSize;
   final int activeTerminalIdx;
   final String? activeWorkspaceId;
+  final PanelVisibility workspaceVis;
+  final PanelVisibility fileTreeVis;
+  final PanelVisibility agentsVis;
+  final PanelVisibility editorVis;
 }

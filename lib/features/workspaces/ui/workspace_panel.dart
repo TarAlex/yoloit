@@ -6,7 +6,12 @@ import 'package:yoloit/core/theme/app_colors.dart';
 import 'package:yoloit/core/theme/app_theme.dart';
 import 'package:yoloit/core/theme/theme_manager.dart';
 import 'package:yoloit/features/review/bloc/review_cubit.dart';
+import 'package:yoloit/features/runs/bloc/run_cubit.dart';
+import 'package:yoloit/features/runs/bloc/run_state.dart';
+import 'package:yoloit/features/runs/models/run_session.dart';
 import 'package:yoloit/features/terminal/bloc/terminal_cubit.dart';
+import 'package:yoloit/features/terminal/bloc/terminal_state.dart';
+import 'package:yoloit/features/terminal/models/agent_session.dart';
 import 'package:yoloit/features/terminal/models/agent_type.dart';
 import 'package:yoloit/features/workspaces/bloc/workspace_cubit.dart';
 import 'package:yoloit/features/workspaces/bloc/workspace_state.dart';
@@ -19,11 +24,14 @@ class WorkspacePanel extends StatefulWidget {
   const WorkspacePanel({super.key});
 
   @override
-  State<WorkspacePanel> createState() => _WorkspacePanelState();
+  State<WorkspacePanel> createState() => WorkspacePanelState();
 }
 
-class _WorkspacePanelState extends State<WorkspacePanel> {
+class WorkspacePanelState extends State<WorkspacePanel> {
   bool _showThemePicker = false;
+
+  /// Called from MainShell via GlobalKey to trigger the add-workspace flow.
+  void addWorkspace() => _addWorkspace(context);
 
   @override
   Widget build(BuildContext context) {
@@ -33,7 +41,6 @@ class _WorkspacePanelState extends State<WorkspacePanel> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _buildLogo(context),
           Expanded(
             child: SingleChildScrollView(
               child: Column(
@@ -46,58 +53,6 @@ class _WorkspacePanelState extends State<WorkspacePanel> {
             ),
           ),
           _buildBottomSection(),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildLogo(BuildContext context) {
-    final colors = context.appColors;
-    return Container(
-      padding: EdgeInsets.fromLTRB(12, 16, 12, 12),
-      decoration: BoxDecoration(
-        border: Border(bottom: BorderSide(color: colors.border)),
-      ),
-      child: Row(
-        children: [
-          Container(
-            width: 34,
-            height: 34,
-            decoration: BoxDecoration(
-              color: colors.primary.withAlpha(30),
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: colors.primary.withAlpha(60)),
-            ),
-            padding: const EdgeInsets.all(4),
-            child: SvgPicture.asset('assets/images/yoloit_mark.svg'),
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: const [
-                Text(
-                  'yoloit',
-                  style: TextStyle(
-                    color: AppColors.textPrimary,
-                    fontSize: 15,
-                    fontWeight: FontWeight.w700,
-                    letterSpacing: 1.2,
-                  ),
-                ),
-                Text(
-                  'AI ORCHESTRATOR',
-                  style: TextStyle(
-                    color: AppColors.textMuted,
-                    fontSize: 8,
-                    fontWeight: FontWeight.w600,
-                    letterSpacing: 1.5,
-                  ),
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ],
-            ),
-          ),
         ],
       ),
     );
@@ -194,11 +149,14 @@ class _WorkspacePanelState extends State<WorkspacePanel> {
                   workspace: ws,
                   isActive: ws.id == activeId,
                   onTap: () => _selectWorkspace(context, ws),
-                  onRemove: () => context.read<WorkspaceCubit>().removeWorkspace(ws.id),
+                  onRemove: () => _confirmRemoveWorkspace(context, ws),
+                  onRename: () => _renameWorkspaceDialog(context, ws),
                   onSpawnAgent: (type) => _spawnAgent(context, ws, type),
                   onColorChange: (color) =>
                       context.read<WorkspaceCubit>().setWorkspaceColor(ws.id, color),
                   onSecretsOpen: () => _showSecretsDialog(context, ws),
+                  onAddPath: () => _addPathToWorkspace(context, ws.id),
+                  onRemovePath: (path) => _confirmRemovePath(context, ws.id, path),
                 ),
               ),
           ],
@@ -212,6 +170,7 @@ class _WorkspacePanelState extends State<WorkspacePanel> {
   Widget _buildBottomSection() {
     return Column(
       children: [
+        _ActiveSessionsPanel(),
         const Divider(height: 1),
         if (_showThemePicker) _buildThemePicker(),
         _SetupItem(
@@ -266,24 +225,125 @@ class _WorkspacePanelState extends State<WorkspacePanel> {
   }
 
   Future<void> _addWorkspace(BuildContext context) async {
+    // Step 1: ask for workspace name
+    final name = await _showNameDialog(context);
+    if (name == null || !context.mounted) return;
+
+    // Step 2: pick at least one folder
+    final folder = await FilePicker.platform.getDirectoryPath(
+      dialogTitle: 'Add Folder to "$name"',
+    );
+    if (folder == null || !context.mounted) return;
+
+    final cubit = context.read<WorkspaceCubit>();
+    await cubit.addWorkspace(folder, customName: name);
+
+    // Step 3 (optional): offer to add more folders
+    while (context.mounted) {
+      final addMore = await _showConfirmDialog(
+        context,
+        title: 'Add Another Folder?',
+        message: 'Do you want to add another folder to "$name"?',
+        confirmLabel: 'Add Folder',
+        isDestructive: false,
+      );
+      if (!addMore || !context.mounted) break;
+      final extra = await FilePicker.platform.getDirectoryPath(
+        dialogTitle: 'Add Folder to "$name"',
+      );
+      if (extra == null || !context.mounted) break;
+      // Find the newly created workspace by name to get its id
+      final state = context.read<WorkspaceCubit>().state;
+      if (state is WorkspaceLoaded) {
+        final ws = state.workspaces.where((w) => w.name == name).lastOrNull;
+        if (ws != null) await cubit.addPathToWorkspace(ws.id, extra);
+      }
+    }
+  }
+
+  Future<String?> _showNameDialog(BuildContext context) async {
+    final controller = TextEditingController();
+    final result = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF16163A),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(10),
+          side: const BorderSide(color: Color(0xFF32327A)),
+        ),
+        title: const Text(
+          'New Workspace',
+          style: TextStyle(color: Color(0xFFE0E0F0), fontSize: 14),
+        ),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          style: const TextStyle(color: Color(0xFFE0E0F0), fontSize: 13),
+          decoration: InputDecoration(
+            hintText: 'Workspace name',
+            hintStyle: const TextStyle(color: Color(0xFF6060A0), fontSize: 13),
+            filled: true,
+            fillColor: const Color(0xFF0E0E2A),
+            contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(6),
+              borderSide: const BorderSide(color: Color(0xFF32327A)),
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(6),
+              borderSide: const BorderSide(color: Color(0xFF32327A)),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(6),
+              borderSide: const BorderSide(color: Color(0xFF7C7CFF)),
+            ),
+          ),
+          onSubmitted: (v) {
+            final trimmed = v.trim();
+            if (trimmed.isNotEmpty) Navigator.of(ctx).pop(trimmed);
+          },
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(null),
+            child: const Text('Cancel', style: TextStyle(color: Color(0xFFB0B0D0), fontSize: 12)),
+          ),
+          TextButton(
+            onPressed: () {
+              final trimmed = controller.text.trim();
+              if (trimmed.isNotEmpty) Navigator.of(ctx).pop(trimmed);
+            },
+            child: const Text(
+              'Next →',
+              style: TextStyle(color: Color(0xFF7C7CFF), fontSize: 12, fontWeight: FontWeight.w600),
+            ),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    return result;
+  }
+
+  Future<void> _addPathToWorkspace(BuildContext context, String workspaceId) async {
     final result = await FilePicker.platform.getDirectoryPath(
-      dialogTitle: 'Open Workspace Folder',
+      dialogTitle: 'Add Folder to Workspace',
     );
     if (result != null && context.mounted) {
-      await context.read<WorkspaceCubit>().addWorkspace(result);
+      await context.read<WorkspaceCubit>().addPathToWorkspace(workspaceId, result);
     }
   }
 
   void _selectWorkspace(BuildContext context, Workspace ws) {
     context.read<WorkspaceCubit>().setActive(ws.id);
-    context.read<ReviewCubit>().loadWorkspace(ws.path);
+    context.read<ReviewCubit>().loadWorkspace(ws.paths);
   }
 
   void _spawnAgent(BuildContext context, Workspace ws, AgentType type) {
     context.read<WorkspaceCubit>().setActive(ws.id);
     context.read<TerminalCubit>().spawnSession(
           type: type,
-          workspacePath: ws.path,
+          workspacePath: ws.workspaceDir,
           workspaceId: ws.id,
         );
   }
@@ -294,7 +354,196 @@ class _WorkspacePanelState extends State<WorkspacePanel> {
       builder: (ctx) => _SecretsDialog(workspaceId: ws.id, workspaceName: ws.name),
     );
   }
+
+  Future<void> _renameWorkspaceDialog(BuildContext context, Workspace ws) async {
+    final controller = TextEditingController(text: ws.name);
+    controller.selection = TextSelection(baseOffset: 0, extentOffset: ws.name.length);
+    final result = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF16163A),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(10),
+          side: const BorderSide(color: Color(0xFF32327A)),
+        ),
+        title: const Text(
+          'Rename Workspace',
+          style: TextStyle(color: Color(0xFFE0E0F0), fontSize: 14),
+        ),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          style: const TextStyle(color: Color(0xFFE0E0F0), fontSize: 13),
+          decoration: InputDecoration(
+            hintText: 'Workspace name',
+            hintStyle: const TextStyle(color: Color(0xFF6060A0), fontSize: 13),
+            filled: true,
+            fillColor: const Color(0xFF0E0E2A),
+            contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(6),
+              borderSide: const BorderSide(color: Color(0xFF32327A)),
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(6),
+              borderSide: const BorderSide(color: Color(0xFF32327A)),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(6),
+              borderSide: const BorderSide(color: Color(0xFF7C7CFF)),
+            ),
+          ),
+          onSubmitted: (v) {
+            final trimmed = v.trim();
+            if (trimmed.isNotEmpty) Navigator.of(ctx).pop(trimmed);
+          },
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(null),
+            child: const Text('Cancel', style: TextStyle(color: Color(0xFFB0B0D0), fontSize: 12)),
+          ),
+          TextButton(
+            onPressed: () {
+              final trimmed = controller.text.trim();
+              if (trimmed.isNotEmpty) Navigator.of(ctx).pop(trimmed);
+            },
+            child: const Text(
+              'Rename',
+              style: TextStyle(color: Color(0xFF7C7CFF), fontSize: 12, fontWeight: FontWeight.w600),
+            ),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    if (result != null && result != ws.name && context.mounted) {
+      await context.read<WorkspaceCubit>().renameWorkspace(ws.id, result);
+    }
+  }
+
+  Future<void> _confirmRemoveWorkspace(BuildContext context, Workspace ws) async {
+    final confirmed = await _showConfirmDialog(
+      context,
+      title: 'Remove Workspace',
+      message: 'Remove "${ws.name}"? This will not delete your files.',
+      confirmLabel: 'Remove',
+      isDestructive: true,
+    );
+    if (confirmed && context.mounted) {
+      await context.read<WorkspaceCubit>().removeWorkspace(ws.id);
+    }
+  }
+
+  Future<void> _confirmRemovePath(BuildContext context, String workspaceId, String path) async {
+    final name = path.split('/').last;
+    final confirmed = await _showConfirmDialog(
+      context,
+      title: 'Remove Folder',
+      message: 'Remove "$name" from this workspace?',
+      confirmLabel: 'Remove',
+      isDestructive: true,
+    );
+    if (confirmed && context.mounted) {
+      await context.read<WorkspaceCubit>().removePathFromWorkspace(workspaceId, path);
+    }
+  }
+
+  Future<bool> _showConfirmDialog(
+    BuildContext context, {
+    required String title,
+    required String message,
+    required String confirmLabel,
+    bool isDestructive = false,
+  }) async {
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF16163A),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(10),
+          side: const BorderSide(color: Color(0xFF32327A)),
+        ),
+        title: Text(title, style: const TextStyle(color: Color(0xFFE0E0F0), fontSize: 14)),
+        content: Text(message, style: const TextStyle(color: Color(0xFFB0B0D0), fontSize: 12)),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Cancel', style: TextStyle(color: Color(0xFFB0B0D0), fontSize: 12)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: Text(
+              confirmLabel,
+              style: TextStyle(
+                color: isDestructive ? Colors.red.shade300 : const Color(0xFF7C7CFF),
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+    return result ?? false;
+  }
 }
+
+// ─── Path Chip ───────────────────────────────────────────────────────────────
+
+class _PathChip extends StatefulWidget {
+  const _PathChip({required this.path, this.onRemove});
+  final String path;
+  final VoidCallback? onRemove;
+
+  @override
+  State<_PathChip> createState() => _PathChipState();
+}
+
+class _PathChipState extends State<_PathChip> {
+  bool _hovering = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.appColors;
+    final name = widget.path.split('/').last;
+    return MouseRegion(
+      onEnter: (_) => setState(() => _hovering = true),
+      onExit: (_) => setState(() => _hovering = false),
+      child: Tooltip(
+        message: widget.path,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+          decoration: BoxDecoration(
+            color: colors.surfaceElevated,
+            borderRadius: BorderRadius.circular(4),
+            border: Border.all(color: colors.border),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.folder_outlined, size: 9, color: AppColors.textMuted),
+              const SizedBox(width: 3),
+              Text(
+                name,
+                style: const TextStyle(color: AppColors.textSecondary, fontSize: 9),
+              ),
+              if (_hovering && widget.onRemove != null) ...[
+                const SizedBox(width: 3),
+                GestureDetector(
+                  onTap: widget.onRemove,
+                  child: Icon(Icons.close, size: 9, color: Colors.red.shade300),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ─── Workspace Tile ───────────────────────────────────────────────────────────
 
 class _WorkspaceTile extends StatefulWidget {
   const _WorkspaceTile({
@@ -302,18 +551,24 @@ class _WorkspaceTile extends StatefulWidget {
     required this.isActive,
     required this.onTap,
     required this.onRemove,
+    required this.onRename,
     required this.onSpawnAgent,
     required this.onColorChange,
     required this.onSecretsOpen,
+    required this.onAddPath,
+    required this.onRemovePath,
   });
 
   final Workspace workspace;
   final bool isActive;
   final VoidCallback onTap;
   final VoidCallback onRemove;
+  final VoidCallback onRename;
   final void Function(AgentType) onSpawnAgent;
   final void Function(Color) onColorChange;
   final VoidCallback onSecretsOpen;
+  final VoidCallback onAddPath;
+  final void Function(String path) onRemovePath;
 
   @override
   State<_WorkspaceTile> createState() => _WorkspaceTileState();
@@ -321,7 +576,6 @@ class _WorkspaceTile extends StatefulWidget {
 
 class _WorkspaceTileState extends State<_WorkspaceTile> {
   bool _hovering = false;
-  bool _showAgentMenu = false;
   bool _showColorPicker = false;
 
   static const _palette = [
@@ -335,6 +589,90 @@ class _WorkspaceTileState extends State<_WorkspaceTile> {
     Color(0xFF6D28D9), // violet
   ];
 
+  void _showMenu(BuildContext context) {
+    final RenderBox button = context.findRenderObject()! as RenderBox;
+    final RenderBox overlay = Navigator.of(context).overlay!.context.findRenderObject()! as RenderBox;
+    final offset = button.localToGlobal(Offset(button.size.width, 0), ancestor: overlay);
+    showMenu<String>(
+      context: context,
+      position: RelativeRect.fromLTRB(
+        offset.dx - 160,
+        offset.dy,
+        offset.dx,
+        offset.dy + 200,
+      ),
+      color: const Color(0xFF16163A),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(8),
+        side: BorderSide(color: const Color(0xFF32327A)),
+      ),
+      items: [
+        for (final type in AgentType.values)
+          PopupMenuItem(
+            value: 'spawn_${type.name}',
+            height: 36,
+            child: Row(children: [
+              Text(type.iconLabel, style: const TextStyle(fontSize: 13)),
+              const SizedBox(width: 8),
+              Text('Start ${type.displayName}', style: const TextStyle(color: Color(0xFFB0B0D0), fontSize: 12)),
+            ]),
+          ),
+        const PopupMenuDivider(height: 1),
+        PopupMenuItem(
+          value: 'rename',
+          height: 36,
+          child: Row(children: [
+            const Icon(Icons.drive_file_rename_outline, size: 14, color: Color(0xFFB0B0D0)),
+            const SizedBox(width: 8),
+            const Text('Rename', style: TextStyle(color: Color(0xFFB0B0D0), fontSize: 12)),
+          ]),
+        ),
+        PopupMenuItem(
+          value: 'add_folder',
+          height: 36,
+          child: Row(children: [
+            const Icon(Icons.create_new_folder_outlined, size: 14, color: Color(0xFFB0B0D0)),
+            const SizedBox(width: 8),
+            const Text('Add Folder', style: TextStyle(color: Color(0xFFB0B0D0), fontSize: 12)),
+          ]),
+        ),
+        PopupMenuItem(
+          value: 'secrets',
+          height: 36,
+          child: Row(children: [
+            const Icon(Icons.key_outlined, size: 14, color: Color(0xFFB0B0D0)),
+            const SizedBox(width: 8),
+            const Text('Workspace Secrets', style: TextStyle(color: Color(0xFFB0B0D0), fontSize: 12)),
+          ]),
+        ),
+        PopupMenuItem(
+          value: 'remove',
+          height: 36,
+          child: Row(children: [
+            Icon(Icons.close, size: 14, color: Colors.red.shade300),
+            const SizedBox(width: 8),
+            Text('Remove', style: TextStyle(color: Colors.red.shade300, fontSize: 12)),
+          ]),
+        ),
+      ],
+    ).then((value) {
+      if (value == null) return;
+      if (value == 'rename') {
+        widget.onRename();
+      } else if (value == 'add_folder') {
+        widget.onAddPath();
+      } else if (value == 'secrets') {
+        widget.onSecretsOpen();
+      } else if (value == 'remove') {
+        widget.onRemove();
+      } else if (value.startsWith('spawn_')) {
+        final typeName = value.substring('spawn_'.length);
+        final type = AgentType.values.firstWhere((t) => t.name == typeName);
+        widget.onSpawnAgent(type);
+      }
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     final colors = context.appColors;
@@ -344,7 +682,6 @@ class _WorkspaceTileState extends State<_WorkspaceTile> {
       onEnter: (_) => setState(() => _hovering = true),
       onExit: (_) => setState(() {
         _hovering = false;
-        _showAgentMenu = false;
       }),
       child: Semantics(
         label: '${ws.name} workspace${widget.isActive ? ', active' : ''}',
@@ -416,28 +753,13 @@ class _WorkspaceTileState extends State<_WorkspaceTile> {
                           ),
                         ),
                       ),
-                    if (_hovering && !widget.isActive) ...[
-                      _SmallIconButton(
-                        icon: Icons.terminal_outlined,
-                        onTap: () => setState(() => _showAgentMenu = !_showAgentMenu),
-                        tooltip: 'Start agent',
-                      ),
-                      _SmallIconButton(
-                        icon: Icons.key_outlined,
-                        onTap: widget.onSecretsOpen,
-                        tooltip: 'Workspace secrets',
-                      ),
-                      _SmallIconButton(
-                        icon: Icons.close,
-                        onTap: widget.onRemove,
-                        tooltip: 'Remove',
-                      ),
-                    ],
-                    if (_hovering && widget.isActive)
-                      _SmallIconButton(
-                        icon: Icons.key_outlined,
-                        onTap: widget.onSecretsOpen,
-                        tooltip: 'Workspace secrets',
+                    if (_hovering)
+                      Builder(
+                        builder: (ctx) => _SmallIconButton(
+                          icon: Icons.more_horiz,
+                          onTap: () => _showMenu(ctx),
+                          tooltip: 'More actions',
+                        ),
                       ),
                   ],
                 ),
@@ -469,6 +791,20 @@ class _WorkspaceTileState extends State<_WorkspaceTile> {
                     }).toList(),
                   ),
                 ],
+                // Folder path chips — one per referenced folder
+                const SizedBox(height: 6),
+                Wrap(
+                  spacing: 4,
+                  runSpacing: 4,
+                  children: [
+                    ...ws.paths.map((path) => _PathChip(
+                          path: path,
+                          onRemove: ws.paths.length > 1
+                              ? () => widget.onRemovePath(path)
+                              : null,
+                        )),
+                  ],
+                ),
                 if (ws.gitBranch != null) ...[
                   const SizedBox(height: 4),
                   Row(
@@ -514,33 +850,6 @@ class _WorkspaceTileState extends State<_WorkspaceTile> {
                         style: TextStyle(color: AppColors.textMuted, fontSize: 10),
                       ),
                     ],
-                  ),
-                ],
-                if (_showAgentMenu) ...[
-                  const SizedBox(height: 6),
-                  Row(
-                    children: AgentType.values.map((type) {
-                      return GestureDetector(
-                        onTap: () => widget.onSpawnAgent(type),
-                        child: Container(
-                          margin: EdgeInsets.only(right: 4),
-                          padding: EdgeInsets.symmetric(horizontal: 6, vertical: 3),
-                          decoration: BoxDecoration(
-                            color: colors.primary.withAlpha(40),
-                            borderRadius: BorderRadius.circular(4),
-                            border: Border.all(color: colors.primary.withAlpha(80)),
-                          ),
-                          child: Text(
-                            type.displayName,
-                            style: TextStyle(
-                              color: colors.primaryLight,
-                              fontSize: 10,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ),
-                      );
-                    }).toList(),
                   ),
                 ],
               ],
@@ -864,6 +1173,241 @@ class _SecretTextField extends StatelessWidget {
         ),
       ),
       onChanged: onChanged,
+    );
+  }
+}
+
+// ─── Active Sessions Panel ────────────────────────────────────────────────────
+
+class _ActiveSessionsPanel extends StatefulWidget {
+  const _ActiveSessionsPanel();
+
+  @override
+  State<_ActiveSessionsPanel> createState() => _ActiveSessionsPanelState();
+}
+
+class _ActiveSessionsPanelState extends State<_ActiveSessionsPanel> {
+  bool _expanded = true;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.appColors;
+    return BlocBuilder<TerminalCubit, TerminalState>(
+      builder: (context, termState) {
+        final agentSessions = termState is TerminalLoaded
+            ? termState.allSessions
+            : <AgentSession>[];
+        return BlocBuilder<RunCubit, RunState>(
+          builder: (context, runState) {
+            final runSessions = runState.sessions;
+            final total = agentSessions.length + runSessions.length;
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Divider(height: 1),
+                GestureDetector(
+                  onTap: () => setState(() => _expanded = !_expanded),
+                  child: Container(
+                    padding: const EdgeInsets.fromLTRB(12, 8, 8, 8),
+                    child: Row(
+                      children: [
+                        Icon(Icons.terminal, size: 12, color: AppColors.textMuted),
+                        const SizedBox(width: 6),
+                        const Expanded(
+                          child: Text(
+                            'Active Sessions',
+                            style: TextStyle(
+                              color: AppColors.textMuted,
+                              fontSize: 10,
+                              fontWeight: FontWeight.w600,
+                              letterSpacing: 0.8,
+                            ),
+                          ),
+                        ),
+                        if (total > 0)
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 5, vertical: 1),
+                            decoration: BoxDecoration(
+                              color: colors.primary.withAlpha(40),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Text(
+                              '$total',
+                              style: TextStyle(
+                                color: colors.primaryLight,
+                                fontSize: 9,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ),
+                        const SizedBox(width: 4),
+                        Icon(
+                          _expanded ? Icons.expand_less : Icons.expand_more,
+                          size: 14,
+                          color: AppColors.textMuted,
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                if (_expanded) ...[
+                  ...agentSessions.map((s) => _AgentSessionRow(session: s)),
+                  ...runSessions.map((s) => _RunSessionRow(session: s)),
+                  if (total == 0)
+                    const Padding(
+                      padding: EdgeInsets.fromLTRB(12, 0, 12, 8),
+                      child: Text(
+                        'No active sessions',
+                        style: TextStyle(
+                            color: AppColors.textMuted, fontSize: 10),
+                      ),
+                    ),
+                ],
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+}
+
+// ─── Agent session row (terminal) ────────────────────────────────────────────
+
+class _AgentSessionRow extends StatefulWidget {
+  const _AgentSessionRow({required this.session});
+  final AgentSession session;
+
+  @override
+  State<_AgentSessionRow> createState() => _AgentSessionRowState();
+}
+
+class _AgentSessionRowState extends State<_AgentSessionRow> {
+  bool _hovering = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.appColors;
+    final s = widget.session;
+    final isLive = s.status == AgentStatus.live;
+    final dotColor = isLive ? AppColors.neonGreen : AppColors.textMuted;
+
+    return MouseRegion(
+      onEnter: (_) => setState(() => _hovering = true),
+      onExit: (_) => setState(() => _hovering = false),
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(12, 4, 8, 4),
+        color: _hovering ? colors.surfaceHighlight : Colors.transparent,
+        child: Row(
+          children: [
+            Container(
+              width: 6,
+              height: 6,
+              decoration:
+                  BoxDecoration(color: dotColor, shape: BoxShape.circle),
+            ),
+            const SizedBox(width: 6),
+            Text(s.type.iconLabel, style: const TextStyle(fontSize: 10)),
+            const SizedBox(width: 4),
+            Expanded(
+              child: Text(
+                s.workspacePath.split('/').last,
+                style: const TextStyle(
+                    color: AppColors.textSecondary, fontSize: 10),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            if (_hovering)
+              GestureDetector(
+                onTap: () =>
+                    context.read<TerminalCubit>().closeSession(s.id),
+                child: Tooltip(
+                  message: 'Kill session',
+                  child: Icon(Icons.close,
+                      size: 12, color: Colors.red.shade300),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ─── Run session row ─────────────────────────────────────────────────────────
+
+class _RunSessionRow extends StatefulWidget {
+  const _RunSessionRow({required this.session});
+  final RunSession session;
+
+  @override
+  State<_RunSessionRow> createState() => _RunSessionRowState();
+}
+
+class _RunSessionRowState extends State<_RunSessionRow> {
+  bool _hovering = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.appColors;
+    final s = widget.session;
+
+    final (dotColor, icon) = switch (s.status) {
+      RunStatus.running => (AppColors.neonGreen, Icons.play_arrow),
+      RunStatus.failed => (AppColors.neonRed, Icons.error_outline),
+      _ => (AppColors.textMuted, Icons.stop_circle_outlined),
+    };
+
+    return MouseRegion(
+      onEnter: (_) => setState(() => _hovering = true),
+      onExit: (_) => setState(() => _hovering = false),
+      child: GestureDetector(
+        onTap: () => context.read<RunCubit>().setActiveSession(s.id),
+        child: Container(
+          padding: const EdgeInsets.fromLTRB(12, 4, 8, 4),
+          color: _hovering ? colors.surfaceHighlight : Colors.transparent,
+          child: Row(
+            children: [
+              Container(
+                width: 6,
+                height: 6,
+                decoration:
+                    BoxDecoration(color: dotColor, shape: BoxShape.circle),
+              ),
+              const SizedBox(width: 6),
+              Icon(icon, size: 11, color: dotColor),
+              const SizedBox(width: 4),
+              Expanded(
+                child: Text(
+                  s.config.name,
+                  style: const TextStyle(
+                      color: AppColors.textSecondary, fontSize: 10),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              if (_hovering && s.status == RunStatus.running)
+                GestureDetector(
+                  onTap: () => context.read<RunCubit>().stopRun(s.id),
+                  child: Tooltip(
+                    message: 'Stop run',
+                    child: Icon(Icons.stop,
+                        size: 12, color: Colors.orange.shade300),
+                  ),
+                ),
+              if (_hovering && s.status != RunStatus.running)
+                GestureDetector(
+                  onTap: () => context.read<RunCubit>().removeSession(s.id),
+                  child: Tooltip(
+                    message: 'Remove',
+                    child: Icon(Icons.close,
+                        size: 12, color: Colors.red.shade300),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }
