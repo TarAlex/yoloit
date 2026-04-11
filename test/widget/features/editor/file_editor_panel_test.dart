@@ -312,7 +312,7 @@ void main() {
       await tester.pumpWidget(_buildEditor(state));
       await tester.pump();
 
-      expect(find.text('No changes'), findsAtLeastNWidgets(1));
+      expect(find.text('No diff available'), findsAtLeastNWidgets(1));
     });
   });
 

@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:path/path.dart' as p;
 import 'package:yoloit/features/editor/bloc/file_editor_state.dart';
 import 'package:yoloit/features/review/data/diff_service.dart';
 
@@ -108,14 +109,35 @@ class FileEditorCubit extends Cubit<FileEditorState> {
 
     try {
       final hunks = await DiffService.instance.getDiff(workspacePath, filePath);
-      _updateTab(
-        tabPath,
-        (_) => EditorTab(
-          filePath: tabPath,
-          workspacePath: workspacePath,
-          diffHunks: hunks,
-        ),
-      );
+      if (hunks.isNotEmpty) {
+        _updateTab(
+          tabPath,
+          (_) => EditorTab(
+            filePath: tabPath,
+            workspacePath: workspacePath,
+            diffHunks: hunks,
+          ),
+        );
+      } else {
+        // No git diff (untracked or binary) — try showing file content.
+        final absolutePath = p.join(workspacePath, filePath);
+        String? content;
+        try {
+          content = await File(absolutePath).readAsString();
+        } catch (_) {
+          // Binary or missing file — leave content null.
+        }
+        _updateTab(
+          tabPath,
+          (_) => EditorTab(
+            filePath: tabPath,
+            workspacePath: workspacePath,
+            diffHunks: content == null ? const [] : null,
+            content: content,
+            originalContent: content,
+          ),
+        );
+      }
     } catch (e) {
       _updateTab(tabPath, (t) => t.copyWith(isLoading: false, error: 'Cannot load diff: $e'));
     }

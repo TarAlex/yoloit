@@ -1216,8 +1216,28 @@ class _DiffBody extends StatelessWidget {
   Widget build(BuildContext context) {
     final hunks = tab.diffHunks!;
     if (hunks.isEmpty) {
-      return const Center(
-        child: Text('No changes', style: TextStyle(color: AppColors.textMuted)),
+      return Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.difference_outlined, size: 32, color: AppColors.textSecondary),
+            const SizedBox(height: 12),
+            const Text(
+              'No diff available',
+              style: TextStyle(
+                color: AppColors.textSecondary,
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              tab.filePath.replaceFirst('diff:', ''),
+              style: const TextStyle(color: AppColors.textMuted, fontSize: 11),
+              textAlign: TextAlign.center,
+            ),
+          ],
+        ),
       );
     }
     return ListView.builder(

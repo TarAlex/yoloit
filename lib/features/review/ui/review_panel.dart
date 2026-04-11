@@ -349,7 +349,10 @@ class _GitChangesSection extends StatelessWidget {
             icon: Icons.check_circle_outline,
             iconColor: AppColors.neonGreen,
           ),
-          ...staged.map((f) => _ChangedFileTile(file: f)),
+          ...staged.map((f) => _ChangedFileTile(
+                file: f,
+                workspacePath: state.fileTree.isNotEmpty ? state.fileTree.first.path : null,
+              )),
         ],
         if (unstaged.isNotEmpty) ...[
           _ChangesSectionHeader(
@@ -358,7 +361,10 @@ class _GitChangesSection extends StatelessWidget {
             icon: Icons.edit_outlined,
             iconColor: AppColors.neonOrange,
           ),
-          ...unstaged.map((f) => _ChangedFileTile(file: f)),
+          ...unstaged.map((f) => _ChangedFileTile(
+                file: f,
+                workspacePath: state.fileTree.isNotEmpty ? state.fileTree.first.path : null,
+              )),
         ],
       ],
     );
@@ -588,8 +594,10 @@ class _FileTreeNodeWidgetState extends State<_FileTreeNodeWidget> {
 }
 
 class _ChangedFileTile extends StatefulWidget {
-  const _ChangedFileTile({required this.file});
+  const _ChangedFileTile({required this.file, this.workspacePath});
   final FileChange file;
+  /// Workspace root path for git diff lookups. When null, falls back to WorkspaceCubit.
+  final String? workspacePath;
 
   @override
   State<_ChangedFileTile> createState() => _ChangedFileTileState();
@@ -621,18 +629,20 @@ class _ChangedFileTileState extends State<_ChangedFileTile> {
       onExit: (_) => setState(() => _hovering = false),
       child: GestureDetector(
         onTap: () {
-          final wsState = context.read<WorkspaceCubit>().state;
-          if (wsState is WorkspaceLoaded) {
-            final workspace = wsState.activeWorkspace;
-            if (workspace != null) {
-              try {
-                context.read<FileEditorCubit>().openDiff(
-                  widget.file.path,
-                  workspace.path,
-                );
-              } catch (_) {}
-            }
-          }
+          // Resolve workspace path: prefer explicit param, fall back to WorkspaceCubit.
+          final wsPath = widget.workspacePath ??
+              (() {
+                final wsState = context.read<WorkspaceCubit>().state;
+                if (wsState is WorkspaceLoaded) return wsState.activeWorkspace?.path;
+                return null;
+              })();
+          if (wsPath == null || wsPath.isEmpty) return;
+          try {
+            context.read<FileEditorCubit>().openDiff(
+              widget.file.path,
+              wsPath,
+            );
+          } catch (_) {}
         },
         child: AnimatedContainer(
           duration: Duration(milliseconds: 100),
