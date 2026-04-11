@@ -140,7 +140,7 @@ class ReviewCubit extends Cubit<ReviewState> {
         });
 
       return entities
-          .where((e) => !p.basename(e.path).startsWith('.'))
+          .where((e) => p.basename(e.path) != '.git')
           .map((e) {
             final isDir = e is Directory;
             return FileTreeNode(
@@ -169,7 +169,7 @@ class ReviewCubit extends Cubit<ReviewState> {
               return a.path.compareTo(b.path);
             });
           final children = entities
-              .where((e) => !p.basename(e.path).startsWith('.'))
+              .where((e) => p.basename(e.path) != '.git')
               .map((e) => FileTreeNode(
                     name: p.basename(e.path),
                     path: e.path,
