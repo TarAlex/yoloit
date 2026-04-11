@@ -97,6 +97,8 @@ class PtyService {
     final existing = Platform.environment['PATH'] ?? '/usr/bin:/bin';
     final extras = [
       if (home.isNotEmpty) '$home/.local/bin',
+      if (home.isNotEmpty) '$home/development/flutter/bin',
+      if (home.isNotEmpty) '$home/flutter/bin',
       '/opt/homebrew/bin',
       '/opt/homebrew/sbin',
       '/usr/local/bin',

@@ -23,6 +23,21 @@ class RunService {
     return "${dir.path}/${tmuxName(configId)}.log";
   }
 
+  /// Builds PATH with common GUI-app-missing tool dirs, including flutter.
+  static String _enrichedPath() {
+    final home = Platform.environment['HOME'] ?? '';
+    final existing = Platform.environment['PATH'] ?? '/usr/bin:/bin';
+    final extras = [
+      if (home.isNotEmpty) '$home/.local/bin',
+      if (home.isNotEmpty) '$home/development/flutter/bin',
+      if (home.isNotEmpty) '$home/flutter/bin',
+      '/opt/homebrew/bin',
+      '/opt/homebrew/sbin',
+      '/usr/local/bin',
+    ].join(':');
+    return '$extras:$existing';
+  }
+
   Future<void> start({
     required String sessionId,
     required String configId,
@@ -52,6 +67,7 @@ class RunService {
        "bash", "-c", bash],
       environment: {
         ...Platform.environment,
+        "PATH": _enrichedPath(),
         "YOLOIT_DIR": workingDir,
         "YOLOIT_LOG": log,
       },
