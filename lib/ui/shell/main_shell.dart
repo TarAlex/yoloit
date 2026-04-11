@@ -444,7 +444,7 @@ class _FourPaneLayoutState extends State<_FourPaneLayout> {
 
                 // File Editor
                 if (showEditor) ...[
-                  if (showAgents || agentsCollapsed)
+                  if (showAgents)
                     _Divider(
                       onDrag: (dx) {
                         setState(() => _editorWidth = (_editorWidth - dx)
@@ -452,7 +452,7 @@ class _FourPaneLayoutState extends State<_FourPaneLayout> {
                         SessionPrefs.saveEditorWidth(_editorWidth);
                       },
                     ),
-                  if (showAgents || agentsCollapsed)
+                  if (showAgents)
                     SizedBox(
                       width: _editorWidth,
                       child: Column(
