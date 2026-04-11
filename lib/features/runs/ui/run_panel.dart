@@ -442,28 +442,37 @@ class _ConfigItemState extends State<_ConfigItem> {
                 overflow: TextOverflow.ellipsis,
               ),
             ),
-            if (_hovering || widget.isRunning) ...[
-              if (widget.isRunning)
-                const _SmallIconButton(
-                  icon: Icons.fiber_manual_record,
-                  color: AppColors.neonGreen,
-                  tooltip: 'Running',
-                  onTap: null,
-                ),
-              _SmallIconButton(
+            // Always reserve space for buttons; show/hide via Opacity to
+            // prevent layout jump on hover.
+            Opacity(
+              opacity: widget.isRunning ? 1.0 : 0.0,
+              child: const _SmallIconButton(
+                icon: Icons.fiber_manual_record,
+                color: AppColors.neonGreen,
+                tooltip: 'Running',
+                onTap: null,
+              ),
+            ),
+            Opacity(
+              opacity: (_hovering || widget.isRunning) ? 1.0 : 0.0,
+              child: _SmallIconButton(
                 icon: Icons.play_arrow_rounded,
                 color: AppColors.neonGreen,
                 tooltip: 'Run',
-                onTap: widget.onRun,
+                onTap: (_hovering || widget.isRunning) ? widget.onRun : null,
               ),
-              _SmallIconButton(
+            ),
+            Opacity(
+              opacity: (_hovering || widget.isRunning) ? 1.0 : 0.0,
+              child: _SmallIconButton(
                 icon: Icons.more_vert,
                 color: AppColors.textMuted,
                 tooltip: 'Options',
-                onTap: () => _showMenu(context),
+                onTap: (_hovering || widget.isRunning)
+                    ? () => _showMenu(context)
+                    : null,
               ),
-            ] else
-              const SizedBox(width: 4),
+            ),
           ],
         ),
       ),
