@@ -5,10 +5,29 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:yoloit/core/theme/app_theme.dart';
 import 'package:yoloit/features/terminal/bloc/terminal_cubit.dart';
 import 'package:yoloit/features/terminal/bloc/terminal_state.dart';
+import 'package:yoloit/features/terminal/models/agent_session.dart';
+import 'package:yoloit/features/terminal/models/agent_type.dart';
 import 'package:yoloit/features/terminal/ui/terminal_panel.dart';
 import 'package:yoloit/features/workspaces/bloc/workspace_cubit.dart';
 import 'package:yoloit/features/workspaces/bloc/workspace_state.dart';
 import 'package:yoloit/features/workspaces/models/workspace.dart';
+
+/// Overrides [renameSession] so it updates state directly without needing
+/// [_allSessions] to be populated (which requires a real PTY session).
+class _FakeTerminalCubit extends TerminalCubit {
+  @override
+  void renameSession(String sessionId, String name) {
+    final current = state;
+    if (current is! TerminalLoaded) return;
+    final updated = current.sessions.map((s) {
+      if (s.id != sessionId) return s;
+      return name.trim().isEmpty
+          ? s.copyWith(clearCustomName: true)
+          : s.copyWith(customName: name.trim());
+    }).toList();
+    emit(current.copyWith(sessions: updated, allSessions: updated));
+  }
+}
 
 Widget _buildTerminalTest({
   required TerminalState terminalState,
@@ -80,6 +99,126 @@ void main() {
       await tester.pump();
 
       expect(find.text('Select a workspace from the left panel first'), findsOneWidget);
+    });
+
+    testWidgets('tab shows default agent name', (tester) async {
+      final session = AgentSession(
+        id: 'sess_1',
+        type: AgentType.copilot,
+        workspacePath: '/project',
+        workspaceId: 'ws_1',
+      );
+      await tester.pumpWidget(_buildTerminalTest(
+        terminalState: TerminalLoaded(sessions: [session], activeIndex: 0),
+      ));
+      await tester.pump();
+
+      expect(find.text('Copilot'), findsAtLeastNWidgets(1));
+    });
+
+    testWidgets('tab shows custom name when set via copyWith', (tester) async {
+      final session = AgentSession(
+        id: 'sess_1',
+        type: AgentType.copilot,
+        workspacePath: '/project',
+        workspaceId: 'ws_1',
+      ).copyWith(customName: 'story/MAPC-6809');
+      await tester.pumpWidget(_buildTerminalTest(
+        terminalState: TerminalLoaded(sessions: [session], activeIndex: 0),
+      ));
+      await tester.pump();
+
+      expect(find.text('story/MAPC-6809'), findsOneWidget);
+    });
+
+    testWidgets('double-tap on tab enters rename mode (shows TextField)', (tester) async {
+      final session = AgentSession(
+        id: 'sess_1',
+        type: AgentType.copilot,
+        workspacePath: '/project',
+        workspaceId: 'ws_1',
+      );
+      await tester.pumpWidget(_buildTerminalTest(
+        terminalState: TerminalLoaded(sessions: [session], activeIndex: 0),
+      ));
+      await tester.pump();
+
+      // Use GestureDetector's onDoubleTap — need to simulate a proper double-tap
+      await tester.tap(find.text('Copilot'));
+      await tester.pump(const Duration(milliseconds: 50));
+      await tester.tap(find.text('Copilot'));
+      // Drain the double-tap countdown timer (300ms)
+      await tester.pump(const Duration(milliseconds: 350));
+
+      // A TextField should appear in the tab
+      expect(find.byType(TextField), findsOneWidget);
+    });
+
+    testWidgets('entering name in rename field and submitting exits edit mode', (tester) async {
+      final session = AgentSession(
+        id: 'sess_1',
+        type: AgentType.copilot,
+        workspacePath: '/project',
+        workspaceId: 'ws_1',
+      );
+      await tester.pumpWidget(_buildTerminalTest(
+        terminalState: TerminalLoaded(sessions: [session], activeIndex: 0),
+      ));
+      await tester.pump();
+
+      // Double-tap to enter rename mode
+      await tester.tap(find.text('Copilot'));
+      await tester.pump(const Duration(milliseconds: 50));
+      await tester.tap(find.text('Copilot'));
+      await tester.pump(const Duration(milliseconds: 350));
+      expect(find.byType(TextField), findsOneWidget);
+
+      // Type new name and submit — edit mode should exit (TextField gone)
+      await tester.enterText(find.byType(TextField), 'my-feature');
+      await tester.testTextInput.receiveAction(TextInputAction.done);
+      await tester.pump();
+
+      expect(find.byType(TextField), findsNothing);
+    });
+
+    testWidgets('tab shows custom name after rename via cubit', (tester) async {
+      final session = AgentSession(
+        id: 'sess_1',
+        type: AgentType.copilot,
+        workspacePath: '/project',
+        workspaceId: 'ws_1',
+      );
+      final fakeCubit = _FakeTerminalCubit()
+        ..emit(TerminalLoaded(sessions: [session], activeIndex: 0));
+
+      await tester.pumpWidget(
+        MultiBlocProvider(
+          providers: [
+            BlocProvider<TerminalCubit>.value(value: fakeCubit),
+            BlocProvider<WorkspaceCubit>(create: (_) => WorkspaceCubit()),
+          ],
+          child: MaterialApp(
+            theme: AppThemePreset.neonPurple.theme,
+            home: const Scaffold(body: TerminalPanel()),
+          ),
+        ),
+      );
+      await tester.pump();
+
+      // Double-tap to enter rename mode
+      await tester.tap(find.text('Copilot'));
+      await tester.pump(const Duration(milliseconds: 50));
+      await tester.tap(find.text('Copilot'));
+      await tester.pump(const Duration(milliseconds: 350));
+      expect(find.byType(TextField), findsOneWidget);
+
+      // Enter new name and submit
+      await tester.enterText(find.byType(TextField), 'my-task');
+      await tester.testTextInput.receiveAction(TextInputAction.done);
+      await tester.pump();
+
+      // Fake cubit updates state — tab should now show the custom name
+      expect(find.text('my-task'), findsOneWidget);
     });
   });
 }
