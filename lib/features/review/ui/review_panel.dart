@@ -181,7 +181,7 @@ class _ReviewHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      height: 40,
+      height: 36,
       padding: EdgeInsets.symmetric(horizontal: 12),
       decoration: BoxDecoration(
         border: Border(bottom: BorderSide(color: const Color(0xFF32327A), width: 1)),

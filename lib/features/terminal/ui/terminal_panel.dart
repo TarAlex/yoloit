@@ -142,7 +142,7 @@ class _TerminalHeader extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = context.appColors;
     return Container(
-      height: 44,
+      height: 36,
       decoration: BoxDecoration(
         color: colors.surface,
         border: Border(bottom: BorderSide(color: const Color(0xFF32327A), width: 1)),
