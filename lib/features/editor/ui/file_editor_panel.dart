@@ -5,6 +5,7 @@ import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_code_editor/flutter_code_editor.dart';
+import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:highlight/highlight_core.dart' show Mode;
 import 'package:highlight/languages/bash.dart';
 import 'package:highlight/languages/cpp.dart';
@@ -43,6 +44,8 @@ class _FileEditorPanelState extends State<FileEditorPanel> {
   final Map<String, CodeController> _controllers = {};
   /// Tracks which content was last loaded into each controller (to avoid loops).
   final Map<String, String> _loadedContent = {};
+  /// File paths currently showing Markdown preview instead of raw code.
+  final Set<String> _previewPaths = {};
   double _scaleBase = 13.0;
   final _fontSizeNotifier = ValueNotifier<double>(13.0);
 
@@ -152,6 +155,18 @@ class _FileEditorPanelState extends State<FileEditorPanel> {
           child: Column(
             children: [
               _TabBar(state: state),
+              if (!activeTab.isDiff && !activeTab.isLoading && _isMarkdown(activeTab.filePath))
+                _MarkdownToggleBar(
+                  isPreview: _previewPaths.contains(activeTab.filePath),
+                  onToggle: () => setState(() {
+                    final path = activeTab.filePath;
+                    if (_previewPaths.contains(path)) {
+                      _previewPaths.remove(path);
+                    } else {
+                      _previewPaths.add(path);
+                    }
+                  }),
+                ),
               Expanded(
                 child: activeTab.isLoading
                     ? const Center(child: CircularProgressIndicator())
@@ -159,7 +174,9 @@ class _FileEditorPanelState extends State<FileEditorPanel> {
                         ? _ErrorView(message: activeTab.error!)
                         : activeTab.isDiff
                             ? _DiffBody(tab: activeTab)
-                            : _EditorBody(key: ValueKey(activeTab.filePath), tab: activeTab, codeController: controller!, fontSizeNotifier: _fontSizeNotifier),
+                            : _previewPaths.contains(activeTab.filePath)
+                                ? _MarkdownPreview(content: activeTab.content ?? '')
+                                : _EditorBody(key: ValueKey(activeTab.filePath), tab: activeTab, codeController: controller!, fontSizeNotifier: _fontSizeNotifier),
               ),
             ],
           ),
@@ -183,6 +200,190 @@ class _FileEditorPanelState extends State<FileEditorPanel> {
               style: TextStyle(color: AppColors.textMuted, fontSize: 13),
             ),
           ],
+        ),
+      ),
+    );
+  }
+  static bool _isMarkdown(String filePath) {
+    final ext = filePath.split('.').last.toLowerCase();
+    return ext == 'md' || ext == 'mdx' || ext == 'markdown';
+  }
+}
+
+// ── Markdown toggle bar ────────────────────────────────────────────────────
+
+class _MarkdownToggleBar extends StatelessWidget {
+  const _MarkdownToggleBar({required this.isPreview, required this.onToggle});
+  final bool isPreview;
+  final VoidCallback onToggle;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.appColors;
+    return Container(
+      height: 28,
+      padding: const EdgeInsets.symmetric(horizontal: 12),
+      decoration: BoxDecoration(
+        color: colors.surface,
+        border: Border(bottom: BorderSide(color: colors.border)),
+      ),
+      child: Row(
+        children: [
+          const Spacer(),
+          _ModeButton(
+            label: 'Code',
+            icon: Icons.code,
+            active: !isPreview,
+            onTap: isPreview ? onToggle : null,
+          ),
+          const SizedBox(width: 6),
+          _ModeButton(
+            label: 'Preview',
+            icon: Icons.visibility_outlined,
+            active: isPreview,
+            onTap: isPreview ? null : onToggle,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ModeButton extends StatelessWidget {
+  const _ModeButton({
+    required this.label,
+    required this.icon,
+    required this.active,
+    this.onTap,
+  });
+  final String label;
+  final IconData icon;
+  final bool active;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.appColors;
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+        decoration: BoxDecoration(
+          color: active ? colors.primary.withAlpha(40) : Colors.transparent,
+          borderRadius: BorderRadius.circular(4),
+          border: Border.all(
+            color: active ? colors.primary.withAlpha(100) : Colors.transparent,
+          ),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 11, color: active ? colors.primary : AppColors.textMuted),
+            const SizedBox(width: 4),
+            Text(
+              label,
+              style: TextStyle(
+                color: active ? colors.primary : AppColors.textMuted,
+                fontSize: 11,
+                fontWeight: active ? FontWeight.w600 : FontWeight.w400,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ── Markdown preview ───────────────────────────────────────────────────────
+
+class _MarkdownPreview extends StatelessWidget {
+  const _MarkdownPreview({required this.content});
+  final String content;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.appColors;
+    return Container(
+      color: colors.background,
+      child: Markdown(
+        data: content,
+        selectable: true,
+        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
+        styleSheet: MarkdownStyleSheet(
+          h1: const TextStyle(
+            color: AppColors.textPrimary,
+            fontSize: 28,
+            fontWeight: FontWeight.w700,
+            height: 1.4,
+          ),
+          h2: const TextStyle(
+            color: AppColors.textPrimary,
+            fontSize: 22,
+            fontWeight: FontWeight.w700,
+            height: 1.4,
+          ),
+          h3: const TextStyle(
+            color: AppColors.textPrimary,
+            fontSize: 18,
+            fontWeight: FontWeight.w600,
+            height: 1.4,
+          ),
+          h4: const TextStyle(
+            color: AppColors.textPrimary,
+            fontSize: 16,
+            fontWeight: FontWeight.w600,
+          ),
+          p: const TextStyle(
+            color: AppColors.textSecondary,
+            fontSize: 14,
+            height: 1.65,
+          ),
+          strong: const TextStyle(
+            color: AppColors.textPrimary,
+            fontWeight: FontWeight.w700,
+          ),
+          em: const TextStyle(
+            color: AppColors.textSecondary,
+            fontStyle: FontStyle.italic,
+          ),
+          code: TextStyle(
+            color: AppColors.neonGreen,
+            backgroundColor: AppColors.textMuted.withAlpha(30),
+            fontSize: 13,
+            fontFamily: 'monospace',
+          ),
+          codeblockDecoration: BoxDecoration(
+            color: const Color(0xFF0D0D1F),
+            borderRadius: BorderRadius.circular(6),
+            border: Border.all(color: AppColors.textMuted.withAlpha(40)),
+          ),
+          codeblockPadding: const EdgeInsets.all(14),
+          blockquoteDecoration: BoxDecoration(
+            border: Border(
+              left: BorderSide(color: colors.primary, width: 3),
+            ),
+          ),
+          blockquotePadding: const EdgeInsets.only(left: 12),
+          blockquote: const TextStyle(
+            color: AppColors.textMuted,
+            fontSize: 14,
+            fontStyle: FontStyle.italic,
+          ),
+          listBullet: const TextStyle(color: AppColors.textMuted, fontSize: 14),
+          tableHead: const TextStyle(
+            color: AppColors.textPrimary,
+            fontWeight: FontWeight.w600,
+            fontSize: 13,
+          ),
+          tableBody: const TextStyle(color: AppColors.textSecondary, fontSize: 13),
+          tableBorder: TableBorder.all(color: AppColors.textMuted.withAlpha(40)),
+          horizontalRuleDecoration: BoxDecoration(
+            border: Border(
+              top: BorderSide(color: AppColors.textMuted.withAlpha(60)),
+            ),
+          ),
+          a: TextStyle(color: colors.primary, decoration: TextDecoration.underline),
         ),
       ),
     );
