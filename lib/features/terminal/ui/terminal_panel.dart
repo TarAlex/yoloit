@@ -125,9 +125,14 @@ class _TerminalView extends StatelessWidget {
           _TerminalHeader(sessions: state.sessions, activeIndex: state.activeIndex),
           if (activeSession != null) _SessionInfoBar(session: activeSession),
           Expanded(
-            child: activeSession != null
-                ? _TerminalWidget(key: ValueKey(activeSession.id), session: activeSession)
-                : const SizedBox(),
+            child: state.sessions.isEmpty
+                ? const SizedBox()
+                : IndexedStack(
+                    index: state.activeIndex.clamp(0, state.sessions.length - 1),
+                    children: state.sessions
+                        .map((s) => _TerminalWidget(key: ValueKey(s.id), session: s))
+                        .toList(),
+                  ),
           ),
           _WorkspaceStatusBar(session: activeSession),
         ],
