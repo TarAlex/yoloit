@@ -78,100 +78,21 @@ class WorkspacePanelState extends State<WorkspacePanel> {
   Widget _buildWorkspacesList() {
     return BlocBuilder<WorkspaceCubit, WorkspaceState>(
       builder: (context, state) {
-        final colors = context.appColors;
         final workspaces = state is WorkspaceLoaded ? state.workspaces : <Workspace>[];
         final activeId = state is WorkspaceLoaded ? state.activeWorkspaceId : null;
-
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(12, 12, 8, 4),
-              child: Row(
-                children: [
-                  const Flexible(
-                    child: Text(
-                      'Workspaces / Repositories',
-                      style: TextStyle(
-                        color: AppColors.textMuted,
-                        fontSize: 10,
-                        fontWeight: FontWeight.w600,
-                        letterSpacing: 0.8,
-                      ),
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                  const Spacer(),
-                  _SmallIconButton(
-                    icon: Icons.add,
-                    onTap: () => _addWorkspace(context),
-                    tooltip: 'Add workspace',
-                  ),
-                ],
-              ),
-            ),
-            if (workspaces.isEmpty)
-              Padding(
-                padding: const EdgeInsets.all(12),
-                child: Semantics(
-                  label: 'Open a folder',
-                  button: true,
-                  child: GestureDetector(
-                    onTap: () => _addWorkspace(context),
-                    child: Container(
-                      padding: EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        border: Border.all(color: colors.border, style: BorderStyle.solid),
-                        borderRadius: BorderRadius.circular(6),
-                      ),
-                      child: const Row(
-                        children: [
-                          Icon(Icons.folder_open_outlined, size: 14,
-                              color: AppColors.textMuted, semanticLabel: 'folder'),
-                          SizedBox(width: 8),
-                          Flexible(
-                            child: Text(
-                              'Open a folder...',
-                              style: TextStyle(color: AppColors.textMuted, fontSize: 12),
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-              )
-            else
-              ...workspaces.map((ws) {
-                final isActive = ws.id == activeId;
-                final accentColor = ws.color ?? colors.primary;
-                final tile = _WorkspaceTile(
-                  workspace: ws,
-                  isActive: isActive,
-                  suppressDecoration: isActive,
-                  onTap: () => _selectWorkspace(context, ws),
-                  onRemove: () => _confirmRemoveWorkspace(context, ws),
-                  onRename: () => _renameWorkspaceDialog(context, ws),
-                  onSpawnAgent: (type) => _spawnAgent(context, ws, type),
-                  onColorChange: (color) =>
-                      context.read<WorkspaceCubit>().setWorkspaceColor(ws.id, color),
-                  onSecretsOpen: () => _showSecretsDialog(context, ws),
-                  onAddPath: () => _addPathToWorkspace(context, ws.id),
-                  onRemovePath: (path) => _confirmRemovePath(context, ws.id, path),
-                );
-
-                if (!isActive) return tile;
-
-                // Active workspace: tile + inline tree share one decorated container.
-                return _ActiveWorkspaceCard(
-                  key: ValueKey(ws.id),
-                  accentColor: accentColor,
-                  tile: tile,
-                  workspace: ws,
-                );
-              }).toList(),
-          ],
+        return _WorkspaceList(
+          workspaces: workspaces,
+          activeId: activeId,
+          onAdd: () => _addWorkspace(context),
+          onSelect: (ws) => _selectWorkspace(context, ws),
+          onRemove: (ws) => _confirmRemoveWorkspace(context, ws),
+          onRename: (ws) => _renameWorkspaceDialog(context, ws),
+          onSpawnAgent: (ws, type) => _spawnAgent(context, ws, type),
+          onColorChange: (ws, color) =>
+              context.read<WorkspaceCubit>().setWorkspaceColor(ws.id, color),
+          onSecretsOpen: (ws) => _showSecretsDialog(context, ws),
+          onAddPath: (ws) => _addPathToWorkspace(context, ws.id),
+          onRemovePath: (ws, path) => _confirmRemovePath(context, ws.id, path),
         );
       },
     );
@@ -564,7 +485,158 @@ class _PathChipState extends State<_PathChip> {
   }
 }
 
-// ─── Active Workspace Card (animated border + inline tree) ───────────────────
+// ─── Workspace list with sequential active-card transition ───────────────────
+
+class _WorkspaceList extends StatefulWidget {
+  const _WorkspaceList({
+    required this.workspaces,
+    required this.activeId,
+    required this.onAdd,
+    required this.onSelect,
+    required this.onRemove,
+    required this.onRename,
+    required this.onSpawnAgent,
+    required this.onColorChange,
+    required this.onSecretsOpen,
+    required this.onAddPath,
+    required this.onRemovePath,
+  });
+  final List<Workspace> workspaces;
+  final String? activeId;
+  final VoidCallback onAdd;
+  final void Function(Workspace) onSelect;
+  final void Function(Workspace) onRemove;
+  final void Function(Workspace) onRename;
+  final void Function(Workspace, AgentType) onSpawnAgent;
+  final void Function(Workspace, Color) onColorChange;
+  final void Function(Workspace) onSecretsOpen;
+  final void Function(Workspace) onAddPath;
+  final void Function(Workspace, String) onRemovePath;
+
+  @override
+  State<_WorkspaceList> createState() => _WorkspaceListState();
+}
+
+class _WorkspaceListState extends State<_WorkspaceList> {
+  /// The active ID currently DISPLAYED (may lag behind real activeId during transition).
+  String? _displayedActiveId;
+  bool _transitioning = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _displayedActiveId = widget.activeId;
+  }
+
+  @override
+  void didUpdateWidget(_WorkspaceList old) {
+    super.didUpdateWidget(old);
+    if (widget.activeId != old.activeId && !_transitioning) {
+      // Step 1: fade out old card (keep _displayedActiveId = old)
+      setState(() => _transitioning = true);
+      // Step 2: after fade-out delay, show new card
+      Future.delayed(const Duration(milliseconds: 220), () {
+        if (mounted) {
+          setState(() {
+            _displayedActiveId = widget.activeId;
+            _transitioning = false;
+          });
+        }
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.appColors;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(12, 12, 8, 4),
+          child: Row(
+            children: [
+              const Flexible(
+                child: Text(
+                  'Workspaces / Repositories',
+                  style: TextStyle(
+                    color: AppColors.textMuted,
+                    fontSize: 10,
+                    fontWeight: FontWeight.w600,
+                    letterSpacing: 0.8,
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              const Spacer(),
+              _SmallIconButton(
+                icon: Icons.add,
+                onTap: widget.onAdd,
+                tooltip: 'Add workspace',
+              ),
+            ],
+          ),
+        ),
+        if (widget.workspaces.isEmpty)
+          Padding(
+            padding: const EdgeInsets.all(12),
+            child: GestureDetector(
+              onTap: widget.onAdd,
+              child: Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  border: Border.all(color: colors.border),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: const Row(
+                  children: [
+                    Icon(Icons.folder_open_outlined, size: 14, color: AppColors.textMuted),
+                    SizedBox(width: 8),
+                    Flexible(
+                      child: Text(
+                        'Open a folder...',
+                        style: TextStyle(color: AppColors.textMuted, fontSize: 12),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          )
+        else
+          ...widget.workspaces.map((ws) {
+            final isActive = ws.id == _displayedActiveId;
+            final accentColor = ws.color ?? colors.primary;
+            final tile = _WorkspaceTile(
+              workspace: ws,
+              isActive: isActive,
+              suppressDecoration: isActive,
+              onTap: () => widget.onSelect(ws),
+              onRemove: () => widget.onRemove(ws),
+              onRename: () => widget.onRename(ws),
+              onSpawnAgent: (type) => widget.onSpawnAgent(ws, type),
+              onColorChange: (color) => widget.onColorChange(ws, color),
+              onSecretsOpen: () => widget.onSecretsOpen(ws),
+              onAddPath: () => widget.onAddPath(ws),
+              onRemovePath: (path) => widget.onRemovePath(ws, path),
+            );
+            if (!isActive) return tile;
+            return _ActiveWorkspaceCard(
+              key: ValueKey(ws.id),
+              accentColor: accentColor,
+              tile: tile,
+              workspace: ws,
+              // When transitioning, play fade-out instead of fade-in.
+              fadeOut: _transitioning,
+            );
+          }),
+      ],
+    );
+  }
+}
+
+
 
 class _ActiveWorkspaceCard extends StatefulWidget {
   const _ActiveWorkspaceCard({
@@ -572,10 +644,12 @@ class _ActiveWorkspaceCard extends StatefulWidget {
     required this.accentColor,
     required this.tile,
     required this.workspace,
+    this.fadeOut = false,
   });
   final Color accentColor;
   final Widget tile;
   final Workspace workspace;
+  final bool fadeOut;
 
   @override
   State<_ActiveWorkspaceCard> createState() => _ActiveWorkspaceCardState();
@@ -591,9 +665,19 @@ class _ActiveWorkspaceCardState extends State<_ActiveWorkspaceCard>
     super.initState();
     _ctrl = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 280),
+      duration: const Duration(milliseconds: 220),
     )..forward();
     _fade = CurvedAnimation(parent: _ctrl, curve: Curves.easeOut);
+  }
+
+  @override
+  void didUpdateWidget(_ActiveWorkspaceCard old) {
+    super.didUpdateWidget(old);
+    if (widget.fadeOut && !old.fadeOut) {
+      _ctrl.reverse();
+    } else if (!widget.fadeOut && old.fadeOut) {
+      _ctrl.forward();
+    }
   }
 
   @override
@@ -607,29 +691,26 @@ class _ActiveWorkspaceCardState extends State<_ActiveWorkspaceCard>
     final accent = widget.accentColor;
     return FadeTransition(
       opacity: _fade,
-      child: Container(
-        margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-        decoration: BoxDecoration(
-          color: accent.withAlpha(30),
-          borderRadius: BorderRadius.circular(6),
-          border: Border.all(color: accent.withAlpha(80)),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            widget.tile,
-            Divider(height: 1, thickness: 1, color: accent.withAlpha(50)),
-            // Slide + fade the tree in
-            ClipRect(
-              child: SlideTransition(
-                position: Tween<Offset>(
-                  begin: const Offset(0, -0.06),
-                  end: Offset.zero,
-                ).animate(_fade),
-                child: WorkspaceInlineTree(workspace: widget.workspace),
-              ),
-            ),
-          ],
+      child: SlideTransition(
+        position: Tween<Offset>(
+          begin: const Offset(0, -0.03),
+          end: Offset.zero,
+        ).animate(_fade),
+        child: Container(
+          margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+          decoration: BoxDecoration(
+            color: accent.withAlpha(30),
+            borderRadius: BorderRadius.circular(6),
+            border: Border.all(color: accent.withAlpha(80)),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              widget.tile,
+              Divider(height: 1, thickness: 1, color: accent.withAlpha(50)),
+              WorkspaceInlineTree(workspace: widget.workspace),
+            ],
+          ),
         ),
       ),
     );
