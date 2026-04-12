@@ -1,0 +1,105 @@
+import 'dart:convert';
+import 'dart:io';
+import 'package:path/path.dart' as p;
+import 'package:yoloit/features/terminal/models/agent_type.dart';
+
+class AgentConfig {
+  final String id;
+  final String displayName;
+  final String iconLabel;
+  final String launchCommand;
+  final bool visible;
+  final bool isBuiltIn;
+
+  const AgentConfig({
+    required this.id,
+    required this.displayName,
+    required this.iconLabel,
+    required this.launchCommand,
+    required this.visible,
+    required this.isBuiltIn,
+  });
+
+  AgentConfig copyWith({
+    String? displayName,
+    String? iconLabel,
+    String? launchCommand,
+    bool? visible,
+  }) =>
+      AgentConfig(
+        id: id,
+        displayName: displayName ?? this.displayName,
+        iconLabel: iconLabel ?? this.iconLabel,
+        launchCommand: launchCommand ?? this.launchCommand,
+        visible: visible ?? this.visible,
+        isBuiltIn: isBuiltIn,
+      );
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'displayName': displayName,
+        'iconLabel': iconLabel,
+        'launchCommand': launchCommand,
+        'visible': visible,
+        'isBuiltIn': isBuiltIn,
+      };
+
+  factory AgentConfig.fromJson(Map<String, dynamic> j) => AgentConfig(
+        id: j['id'] as String,
+        displayName: j['displayName'] as String,
+        iconLabel: j['iconLabel'] as String? ?? '◈',
+        launchCommand: j['launchCommand'] as String? ?? '',
+        visible: j['visible'] as bool? ?? true,
+        isBuiltIn: j['isBuiltIn'] as bool? ?? false,
+      );
+}
+
+class AgentConfigService {
+  AgentConfigService._();
+  static final instance = AgentConfigService._();
+
+  static List<AgentConfig> get _defaults => AgentType.values
+      .map(
+        (t) => AgentConfig(
+          id: t.name,
+          displayName: t.displayName,
+          iconLabel: t.iconLabel,
+          launchCommand: t.launchCommand,
+          visible: true,
+          isBuiltIn: true,
+        ),
+      )
+      .toList();
+
+  String get _configPath {
+    final home = Platform.environment['HOME'] ?? '/tmp';
+    return p.join(home, '.config', 'yoloit', 'agent_configs.json');
+  }
+
+  Future<List<AgentConfig>> load() async {
+    try {
+      final file = File(_configPath);
+      if (!await file.exists()) return _defaults;
+      final data = jsonDecode(await file.readAsString()) as List;
+      final saved = data
+          .map((e) => AgentConfig.fromJson(e as Map<String, dynamic>))
+          .toList();
+      // Merge: ensure all built-ins are present
+      final savedIds = saved.map((c) => c.id).toSet();
+      for (final d in _defaults) {
+        if (!savedIds.contains(d.id)) saved.add(d);
+      }
+      return saved;
+    } catch (_) {
+      return _defaults;
+    }
+  }
+
+  Future<void> save(List<AgentConfig> configs) async {
+    final file = File(_configPath);
+    await file.parent.create(recursive: true);
+    await file.writeAsString(
+      jsonEncode(configs.map((c) => c.toJson()).toList()),
+    );
+  }
+}

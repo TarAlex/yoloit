@@ -7,11 +7,20 @@ import 'package:yoloit/core/theme/app_color_scheme.dart';
 import 'package:yoloit/core/theme/app_colors.dart';
 import 'package:yoloit/core/theme/app_theme.dart';
 import 'package:yoloit/core/theme/theme_manager.dart';
+import 'package:yoloit/features/settings/data/agent_config_service.dart';
 import 'package:yoloit/features/terminal/data/logging_service.dart';
 import 'package:yoloit/features/terminal/data/tmux_service.dart';
 
-/// Settings overlay shown as a modal sheet.
-class SettingsPage extends StatelessWidget {
+const _kCategories = [
+  'Appearance',
+  'AI Agents',
+  'Sessions',
+  'Shortcuts',
+  'About',
+];
+
+/// Settings overlay shown as a modal dialog with sidebar navigation.
+class SettingsPage extends StatefulWidget {
   const SettingsPage({super.key});
 
   static Future<void> show(BuildContext context) {
@@ -20,17 +29,24 @@ class SettingsPage extends StatelessWidget {
       barrierColor: Colors.black.withAlpha(160),
       builder: (_) => const Dialog(
         backgroundColor: Colors.transparent,
-        insetPadding: EdgeInsets.symmetric(horizontal: 80, vertical: 60),
+        insetPadding: EdgeInsets.symmetric(horizontal: 60, vertical: 40),
         child: SettingsPage(),
       ),
     );
   }
 
   @override
+  State<SettingsPage> createState() => _SettingsPageState();
+}
+
+class _SettingsPageState extends State<SettingsPage> {
+  int _selectedCategory = 0;
+
+  @override
   Widget build(BuildContext context) {
     final colors = context.appColors;
     return Container(
-      constraints: BoxConstraints(maxWidth: 600, maxHeight: 720),
+      constraints: const BoxConstraints(maxWidth: 760, maxHeight: 680),
       decoration: BoxDecoration(
         color: colors.surface,
         borderRadius: BorderRadius.circular(12),
@@ -49,28 +65,13 @@ class SettingsPage extends StatelessWidget {
           _buildHeader(context),
           Divider(height: 1, color: colors.border),
           Expanded(
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.all(24),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const _SectionHeader(title: 'Appearance'),
-                  const SizedBox(height: 12),
-                  _ThemeSelector(),
-                  const SizedBox(height: 28),
-                  const _SectionHeader(title: 'Sessions'),
-                  const SizedBox(height: 12),
-                  _SessionSettings(),
-                  const SizedBox(height: 28),
-                  const _SectionHeader(title: 'Keyboard Shortcuts'),
-                  const SizedBox(height: 12),
-                  _ShortcutsTable(),
-                  const SizedBox(height: 28),
-                  const _SectionHeader(title: 'About'),
-                  const SizedBox(height: 12),
-                  _AboutSection(),
-                ],
-              ),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                _buildSidebar(context),
+                VerticalDivider(width: 1, color: colors.border),
+                Expanded(child: _buildContent()),
+              ],
             ),
           ),
         ],
@@ -103,6 +104,91 @@ class SettingsPage extends StatelessWidget {
       ),
     );
   }
+
+  Widget _buildSidebar(BuildContext context) {
+    final colors = context.appColors;
+    return SizedBox(
+      width: 140,
+      child: ListView.builder(
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        itemCount: _kCategories.length,
+        itemBuilder: (context, index) {
+          final isActive = index == _selectedCategory;
+          return InkWell(
+            onTap: () => setState(() => _selectedCategory = index),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 11),
+              decoration: BoxDecoration(
+                border: Border(
+                  left: BorderSide(
+                    color: isActive ? colors.primary : Colors.transparent,
+                    width: 2,
+                  ),
+                ),
+              ),
+              child: Text(
+                _kCategories[index],
+                style: TextStyle(
+                  color: isActive ? colors.primary : AppColors.textSecondary,
+                  fontSize: 13,
+                  fontWeight:
+                      isActive ? FontWeight.w600 : FontWeight.normal,
+                ),
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildContent() {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(24),
+      child: switch (_selectedCategory) {
+        0 => Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const _SectionHeader(title: 'Appearance'),
+              const SizedBox(height: 12),
+              _ThemeSelector(),
+            ],
+          ),
+        1 => Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const _SectionHeader(title: 'AI Agents'),
+              const SizedBox(height: 12),
+              _AgentSettingsSection(),
+            ],
+          ),
+        2 => Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const _SectionHeader(title: 'Sessions'),
+              const SizedBox(height: 12),
+              _SessionSettings(),
+            ],
+          ),
+        3 => Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const _SectionHeader(title: 'Keyboard Shortcuts'),
+              const SizedBox(height: 12),
+              _ShortcutsTable(),
+            ],
+          ),
+        _ => Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const _SectionHeader(title: 'About'),
+              const SizedBox(height: 12),
+              _AboutSection(),
+            ],
+          ),
+      },
+    );
+  }
 }
 
 class _SectionHeader extends StatelessWidget {
@@ -119,6 +205,294 @@ class _SectionHeader extends StatelessWidget {
         fontSize: 12,
         fontWeight: FontWeight.w700,
         letterSpacing: 1,
+      ),
+    );
+  }
+}
+
+// ─── AI Agents Settings ───────────────────────────────────────────────────────
+
+class _AgentSettingsSection extends StatefulWidget {
+  @override
+  State<_AgentSettingsSection> createState() => _AgentSettingsSectionState();
+}
+
+class _AgentSettingsSectionState extends State<_AgentSettingsSection> {
+  final _service = AgentConfigService.instance;
+  List<AgentConfig>? _configs;
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadConfigs();
+  }
+
+  Future<void> _loadConfigs() async {
+    final configs = await _service.load();
+    if (mounted) setState(() { _configs = configs; _loading = false; });
+  }
+
+  Future<void> _saveConfigs() async {
+    if (_configs != null) await _service.save(_configs!);
+  }
+
+  void _updateConfig(int index, AgentConfig updated) {
+    setState(() => _configs![index] = updated);
+    _saveConfigs();
+  }
+
+  void _deleteConfig(int index) {
+    setState(() => _configs!.removeAt(index));
+    _saveConfigs();
+  }
+
+  void _addCustomAgent() {
+    final newConfig = AgentConfig(
+      id: 'custom_${DateTime.now().millisecondsSinceEpoch}',
+      displayName: 'Custom Agent',
+      iconLabel: '◈',
+      launchCommand: '',
+      visible: true,
+      isBuiltIn: false,
+    );
+    setState(() => _configs!.add(newConfig));
+    _saveConfigs();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_loading) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    final colors = context.appColors;
+    final configs = _configs!;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: colors.border),
+          ),
+          child: Column(
+            children: configs.indexed.map(((int, AgentConfig) e) {
+              final (index, config) = e;
+              final isLast = index == configs.length - 1;
+              return Column(
+                children: [
+                  _AgentRow(
+                    config: config,
+                    onChanged: (updated) => _updateConfig(index, updated),
+                    onDelete: config.isBuiltIn
+                        ? null
+                        : () => _deleteConfig(index),
+                  ),
+                  if (!isLast) Divider(height: 1, color: colors.border),
+                ],
+              );
+            }).toList(),
+          ),
+        ),
+        const SizedBox(height: 12),
+        TextButton.icon(
+          onPressed: _addCustomAgent,
+          icon: const Icon(Icons.add, size: 16),
+          label: const Text('Add Custom Agent'),
+          style: TextButton.styleFrom(
+            foregroundColor: colors.primary,
+            textStyle: const TextStyle(fontSize: 13),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _AgentRow extends StatefulWidget {
+  const _AgentRow({
+    required this.config,
+    required this.onChanged,
+    required this.onDelete,
+  });
+
+  final AgentConfig config;
+  final ValueChanged<AgentConfig> onChanged;
+  final VoidCallback? onDelete;
+
+  @override
+  State<_AgentRow> createState() => _AgentRowState();
+}
+
+class _AgentRowState extends State<_AgentRow> {
+  late TextEditingController _nameCtrl;
+  late TextEditingController _iconCtrl;
+  late TextEditingController _cmdCtrl;
+
+  @override
+  void initState() {
+    super.initState();
+    _nameCtrl = TextEditingController(text: widget.config.displayName);
+    _iconCtrl = TextEditingController(text: widget.config.iconLabel);
+    _cmdCtrl = TextEditingController(text: widget.config.launchCommand);
+  }
+
+  @override
+  void didUpdateWidget(_AgentRow old) {
+    super.didUpdateWidget(old);
+    if (old.config.id != widget.config.id) {
+      _nameCtrl.text = widget.config.displayName;
+      _iconCtrl.text = widget.config.iconLabel;
+      _cmdCtrl.text = widget.config.launchCommand;
+    }
+  }
+
+  @override
+  void dispose() {
+    _nameCtrl.dispose();
+    _iconCtrl.dispose();
+    _cmdCtrl.dispose();
+    super.dispose();
+  }
+
+  void _emit() {
+    widget.onChanged(widget.config.copyWith(
+      displayName: _nameCtrl.text,
+      iconLabel: _iconCtrl.text,
+      launchCommand: _cmdCtrl.text,
+    ));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.appColors;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          // Visibility toggle
+          Switch(
+            value: widget.config.visible,
+            onChanged: (v) =>
+                widget.onChanged(widget.config.copyWith(visible: v)),
+            activeColor: colors.primary,
+          ),
+          const SizedBox(width: 8),
+          // Icon label
+          SizedBox(
+            width: 48,
+            child: TextField(
+              controller: _iconCtrl,
+              readOnly: widget.config.isBuiltIn,
+              onChanged: (_) => _emit(),
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: AppColors.textPrimary,
+                fontSize: 16,
+                fontFamily: 'monospace',
+              ),
+              decoration: InputDecoration(
+                isDense: true,
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 6,
+                  vertical: 6,
+                ),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(6),
+                  borderSide: BorderSide(color: colors.border),
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(6),
+                  borderSide: BorderSide(color: colors.border),
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          // Name
+          SizedBox(
+            width: 100,
+            child: TextField(
+              controller: _nameCtrl,
+              onChanged: (_) => _emit(),
+              style: const TextStyle(
+                color: AppColors.textPrimary,
+                fontSize: 13,
+              ),
+              decoration: InputDecoration(
+                isDense: true,
+                hintText: 'Name',
+                hintStyle: const TextStyle(
+                  color: AppColors.textMuted,
+                  fontSize: 13,
+                ),
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 8,
+                  vertical: 6,
+                ),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(6),
+                  borderSide: BorderSide(color: colors.border),
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(6),
+                  borderSide: BorderSide(color: colors.border),
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          // Launch command
+          Expanded(
+            child: TextField(
+              controller: _cmdCtrl,
+              onChanged: (_) => _emit(),
+              style: const TextStyle(
+                color: AppColors.textPrimary,
+                fontSize: 12,
+                fontFamily: 'monospace',
+              ),
+              decoration: InputDecoration(
+                isDense: true,
+                hintText: 'launch command (empty = plain shell)',
+                hintStyle: const TextStyle(
+                  color: AppColors.textMuted,
+                  fontSize: 12,
+                ),
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 8,
+                  vertical: 6,
+                ),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(6),
+                  borderSide: BorderSide(color: colors.border),
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(6),
+                  borderSide: BorderSide(color: colors.border),
+                ),
+              ),
+            ),
+          ),
+          // Delete button (custom only)
+          if (widget.onDelete != null) ...[
+            const SizedBox(width: 8),
+            IconButton(
+              icon: const Icon(
+                Icons.delete_outline,
+                size: 18,
+                color: AppColors.textMuted,
+              ),
+              onPressed: widget.onDelete,
+              tooltip: 'Delete agent',
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+            ),
+          ] else
+            const SizedBox(width: 36),
+        ],
       ),
     );
   }
