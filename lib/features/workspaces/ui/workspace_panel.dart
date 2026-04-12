@@ -456,26 +456,19 @@ class _PathChipState extends State<_PathChip> {
             children: [
               Icon(Icons.folder_outlined, size: 9, color: AppColors.textMuted),
               const SizedBox(width: 3),
-              Text(
-                name,
-                style: const TextStyle(color: AppColors.textSecondary, fontSize: 9),
+              Flexible(
+                child: Text(
+                  name,
+                  style: const TextStyle(color: AppColors.textSecondary, fontSize: 9),
+                  overflow: TextOverflow.ellipsis,
+                ),
               ),
               if (_hovering && widget.onRemove != null) ...[
                 const SizedBox(width: 3),
-                AnimatedOpacity(
-                  opacity: _hovering ? 1.0 : 0.0,
-                  duration: const Duration(milliseconds: 150),
-                  child: IgnorePointer(
-                    ignoring: !_hovering,
-                    child: GestureDetector(
-                      onTap: widget.onRemove,
-                      child: Icon(Icons.close, size: 9, color: Colors.red.shade300),
-                    ),
-                  ),
+                GestureDetector(
+                  onTap: widget.onRemove,
+                  child: Icon(Icons.close, size: 9, color: Colors.red.shade300),
                 ),
-              ] else if (widget.onRemove != null) ...[
-                const SizedBox(width: 3),
-                const SizedBox(width: 9),
               ],
             ],
           ),
