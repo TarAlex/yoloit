@@ -304,8 +304,22 @@ class SetupCheckService {
           return;
         }
 
+        // Resolve the executable through bash so our extended PATH is used
+        final resolvedExec = await () async {
+          try {
+            final r = await Process.run(
+              '/bin/bash', ['-c', 'which "${action.executable}" 2>/dev/null'],
+              environment: _env,
+            );
+            final out = (r.stdout as String).trim();
+            return (r.exitCode == 0 && out.isNotEmpty) ? out : action.executable;
+          } catch (_) {
+            return action.executable;
+          }
+        }();
+
         final process = await Process.start(
-          action.executable,
+          resolvedExec,
           action.args,
           environment: _env,
         );
@@ -370,13 +384,32 @@ class SetupCheckService {
   }) async {
     final env = _env;
 
+    /// Find the absolute path of [cmd] by running `bash -c 'which cmd'` with
+    /// our extended PATH. Using bash instead of the bare `which` binary ensures
+    /// the PATH variable we inject is actually honoured by the shell search.
+    Future<String?> findPath(String cmd) async {
+      try {
+        final r = await Process.run(
+          '/bin/bash', ['-c', 'which "$cmd" 2>/dev/null'],
+          environment: env,
+        ).timeout(const Duration(seconds: 5));
+        final out = (r.stdout as String).trim();
+        return (r.exitCode == 0 && out.isNotEmpty) ? out : null;
+      } catch (_) {
+        return null;
+      }
+    }
+
     Future<DependencyStatus?> tryCommand(String cmd, List<String> verArgs) async {
       try {
-        final whichResult = await Process.run('which', [cmd], environment: env);
-        if (whichResult.exitCode != 0) return null;
+        final resolvedPath = await findPath(cmd);
+        if (resolvedPath == null) return null;
 
-        final versionResult = await Process.run(cmd, verArgs, environment: env)
-            .timeout(const Duration(seconds: 5));
+        // Run the resolved absolute path so we don't depend on PATH again
+        final versionResult = await Process.run(
+          resolvedPath, verArgs, environment: env,
+        ).timeout(const Duration(seconds: 5));
+
         final versionOutput =
             (versionResult.stdout as String).trim().isNotEmpty
                 ? (versionResult.stdout as String).trim().split('\n').first
