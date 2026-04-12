@@ -30,6 +30,7 @@ class PanelShell extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = context.appColors;
     return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         _PanelHeader(
           title: title,
