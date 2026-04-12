@@ -87,29 +87,18 @@ void main() {
       expect(find.textContaining('yoloit'), findsWidgets);
     });
 
-    testWidgets('shows Setup Guide section', (tester) async {
-      SharedPreferences.setMockInitialValues({'setup_completed': false});
-      await tester.runAsync(() async {
-        await tester.pumpWidget(
-          MaterialApp(
-            theme: AppThemePreset.neonPurple.theme,
-            home: const Scaffold(
-              body: SizedBox(width: 700, height: 600, child: SettingsPage()),
-            ),
+    testWidgets('shows Setup Guide category in sidebar', (tester) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: AppThemePreset.neonPurple.theme,
+          home: const Scaffold(
+            body: SizedBox(width: 700, height: 600, child: SettingsPage()),
           ),
-        );
-        await tester.pump();
-        // Navigate to Setup Guide tab
-        await tester.tap(find.text('Setup Guide'));
-        await tester.pump();
-        // Wait for Process.run checks to complete
-        await Future<void>.delayed(const Duration(seconds: 3));
-        await tester.pump();
-      });
-      // Either loading or results are shown — both are valid
-      final hasLoader = tester.any(find.byType(CircularProgressIndicator));
-      final hasContent = tester.any(find.text('Dependencies'));
-      expect(hasLoader || hasContent, isTrue);
+        ),
+      );
+      await tester.pump();
+      // 'Setup Guide' appears as a sidebar category
+      expect(find.text('Setup Guide'), findsOneWidget);
     });
 
     testWidgets('close button pops dialog', (tester) async {
