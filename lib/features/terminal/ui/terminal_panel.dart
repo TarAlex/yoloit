@@ -109,30 +109,65 @@ class _EmptyTerminal extends StatelessWidget {
   }
 }
 
-class _TerminalView extends StatelessWidget {
+class _TerminalView extends StatefulWidget {
   const _TerminalView({required this.state});
   final TerminalLoaded state;
 
   @override
+  State<_TerminalView> createState() => _TerminalViewState();
+}
+
+class _TerminalViewState extends State<_TerminalView> {
+  // Persists scroll position across session switches without keeping all
+  // TerminalView widgets alive simultaneously (memory-efficient).
+  final Map<String, ScrollController> _scrollControllers = {};
+
+  ScrollController _controllerFor(String sessionId) {
+    return _scrollControllers.putIfAbsent(
+      sessionId,
+      // Start pinned to the bottom so new sessions don't jump.
+      () => ScrollController(initialScrollOffset: double.maxFinite),
+    );
+  }
+
+  @override
+  void didUpdateWidget(_TerminalView old) {
+    super.didUpdateWidget(old);
+    // Clean up controllers for sessions that no longer exist.
+    final activeIds = widget.state.sessions.map((s) => s.id).toSet();
+    final stale = _scrollControllers.keys.where((k) => !activeIds.contains(k)).toList();
+    for (final id in stale) {
+      _scrollControllers.remove(id)?.dispose();
+    }
+  }
+
+  @override
+  void dispose() {
+    for (final c in _scrollControllers.values) {
+      c.dispose();
+    }
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     final colors = context.appColors;
-    final activeSession = state.activeSession;
+    final activeSession = widget.state.activeSession;
 
     return Container(
       color: colors.terminalBackground,
       child: Column(
         children: [
-          _TerminalHeader(sessions: state.sessions, activeIndex: state.activeIndex),
+          _TerminalHeader(sessions: widget.state.sessions, activeIndex: widget.state.activeIndex),
           if (activeSession != null) _SessionInfoBar(session: activeSession),
           Expanded(
-            child: state.sessions.isEmpty
-                ? const SizedBox()
-                : IndexedStack(
-                    index: state.activeIndex.clamp(0, state.sessions.length - 1),
-                    children: state.sessions
-                        .map((s) => _TerminalWidget(key: ValueKey(s.id), session: s))
-                        .toList(),
-                  ),
+            child: activeSession != null
+                ? _TerminalWidget(
+                    key: ValueKey(activeSession.id),
+                    session: activeSession,
+                    scrollController: _controllerFor(activeSession.id),
+                  )
+                : const SizedBox(),
           ),
           _WorkspaceStatusBar(session: activeSession),
         ],
@@ -454,8 +489,9 @@ class _SessionInfoBar extends StatelessWidget {
 }
 
 class _TerminalWidget extends StatefulWidget {
-  const _TerminalWidget({super.key, required this.session});
+  const _TerminalWidget({super.key, required this.session, required this.scrollController});
   final AgentSession session;
+  final ScrollController scrollController;
 
   @override
   State<_TerminalWidget> createState() => _TerminalWidgetState();
@@ -727,6 +763,7 @@ class _TerminalWidgetState extends State<_TerminalWidget> {
             child: TerminalView(
               widget.session.terminal,
               controller: _controller,
+              scrollController: widget.scrollController,
               focusNode: _focusNode,
               autofocus: true,
               onKeyEvent: _onTerminalKeyEvent,
