@@ -190,7 +190,8 @@ class _RepoTree extends StatelessWidget {
           padding: const EdgeInsets.fromLTRB(16, 2, 8, 2),
           child: Row(
             children: [
-              const Text('📁 ', style: TextStyle(fontSize: 11)),
+              Icon(Icons.folder_open, size: 14, color: AppColors.neonBlue.withAlpha(180)),
+              const SizedBox(width: 6),
               Expanded(
                 child: Text(
                   repoName,
