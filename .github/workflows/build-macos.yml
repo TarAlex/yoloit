@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Release version (e.g. v0.0.1)'
-        required: true
-        default: 'v0.0.1'
+        description: 'Release version (e.g. v0.0.2) or "auto" to increment patch'
+        required: false
+        default: 'auto'
       create_release:
         description: 'Create GitHub Release'
         required: false
@@ -59,13 +59,35 @@ jobs:
       # ── Version ─────────────────────────────────────────────────────────────
       - name: Derive build version
         id: version
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          VERSION="${{ github.event.inputs.version }}"
-          # Strip leading 'v' for pubspec build number usage
-          VERSION_CLEAN="${VERSION#v}"
+          INPUT="${{ github.event.inputs.version }}"
+          if [ -z "$INPUT" ] || [ "$INPUT" = "auto" ]; then
+            # Find latest release tag and increment patch version
+            LATEST=$(gh release list --limit 10 --json tagName \
+              --jq '[.[] | select(.tagName | test("^v[0-9]+\\.[0-9]+\\.[0-9]+$"))] | first | .tagName' 2>/dev/null || echo "")
+            if [ -z "$LATEST" ]; then
+              TAG="v0.0.1"
+              echo "No previous release found — starting at $TAG"
+            else
+              # Parse vMAJOR.MINOR.PATCH and increment PATCH
+              MAJOR=$(echo "$LATEST" | sed 's/v\([0-9]*\)\.\([0-9]*\)\.\([0-9]*\)/\1/')
+              MINOR=$(echo "$LATEST" | sed 's/v\([0-9]*\)\.\([0-9]*\)\.\([0-9]*\)/\2/')
+              PATCH=$(echo "$LATEST" | sed 's/v\([0-9]*\)\.\([0-9]*\)\.\([0-9]*\)/\3/')
+              PATCH=$((PATCH + 1))
+              TAG="v${MAJOR}.${MINOR}.${PATCH}"
+              echo "Previous release: $LATEST → auto-increment to $TAG"
+            fi
+          else
+            TAG="$INPUT"
+            # Ensure it starts with 'v'
+            [[ "$TAG" != v* ]] && TAG="v$TAG"
+            echo "Using manual version: $TAG"
+          fi
+          VERSION_CLEAN="${TAG#v}"
           echo "version=$VERSION_CLEAN" >> $GITHUB_OUTPUT
-          echo "tag=$VERSION" >> $GITHUB_OUTPUT
-          echo "Build version: $VERSION_CLEAN (tag: $VERSION)"
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
 
       # ── Code signing (optional) ──────────────────────────────────────────────
       # These secrets are optional. If not set, app is built unsigned (development only).
