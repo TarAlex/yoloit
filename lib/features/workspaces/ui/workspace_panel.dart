@@ -535,7 +535,7 @@ class _WorkspaceListState extends State<_WorkspaceList> {
       // Step 1: fade out old card (keep _displayedActiveId = old)
       setState(() => _transitioning = true);
       // Step 2: after fade-out delay, show new card
-      Future.delayed(const Duration(milliseconds: 220), () {
+      Future.delayed(const Duration(milliseconds: 420), () {
         if (mounted) {
           setState(() {
             _displayedActiveId = widget.activeId;
@@ -658,16 +658,28 @@ class _ActiveWorkspaceCard extends StatefulWidget {
 class _ActiveWorkspaceCardState extends State<_ActiveWorkspaceCard>
     with SingleTickerProviderStateMixin {
   late final AnimationController _ctrl;
-  late final Animation<double> _fade;
+  // Border/background: animates during [0.0, 0.5] of the controller.
+  // On forward: fades in first. On reverse: fades out last.
+  late final Animation<double> _borderAnim;
+  // Tree height: animates during [0.5, 1.0] of the controller.
+  // On forward: expands second. On reverse: collapses first.
+  late final Animation<double> _treeAnim;
 
   @override
   void initState() {
     super.initState();
     _ctrl = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 220),
+      duration: const Duration(milliseconds: 420),
     )..forward();
-    _fade = CurvedAnimation(parent: _ctrl, curve: Curves.easeOut);
+    _borderAnim = CurvedAnimation(
+      parent: _ctrl,
+      curve: const Interval(0.0, 0.5, curve: Curves.easeOut),
+    );
+    _treeAnim = CurvedAnimation(
+      parent: _ctrl,
+      curve: const Interval(0.5, 1.0, curve: Curves.easeInOut),
+    );
   }
 
   @override
@@ -690,27 +702,33 @@ class _ActiveWorkspaceCardState extends State<_ActiveWorkspaceCard>
   Widget build(BuildContext context) {
     final accent = widget.accentColor;
     return FadeTransition(
-      opacity: _fade,
-      child: SlideTransition(
-        position: Tween<Offset>(
-          begin: const Offset(0, -0.03),
-          end: Offset.zero,
-        ).animate(_fade),
-        child: Container(
-          margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-          decoration: BoxDecoration(
-            color: accent.withAlpha(30),
-            borderRadius: BorderRadius.circular(6),
-            border: Border.all(color: accent.withAlpha(80)),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              widget.tile,
-              Divider(height: 1, thickness: 1, color: accent.withAlpha(50)),
-              WorkspaceInlineTree(workspace: widget.workspace),
-            ],
-          ),
+      opacity: _borderAnim,
+      child: Container(
+        margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+        decoration: BoxDecoration(
+          color: accent.withAlpha(30),
+          borderRadius: BorderRadius.circular(6),
+          border: Border.all(color: accent.withAlpha(80)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            widget.tile,
+            // Tree collapses first on exit, expands second on enter.
+            ClipRect(
+              child: SizeTransition(
+                sizeFactor: _treeAnim,
+                axisAlignment: -1,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Divider(height: 1, thickness: 1, color: accent.withAlpha(50)),
+                    WorkspaceInlineTree(workspace: widget.workspace),
+                  ],
+                ),
+              ),
+            ),
+          ],
         ),
       ),
     );
