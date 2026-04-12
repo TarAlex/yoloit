@@ -171,7 +171,7 @@ class _NewAgentSessionDialogState extends State<NewAgentSessionDialog> {
       if (path != null) contexts[repoPath] = path;
     }
 
-    cubit.spawnSession(
+    await cubit.spawnSession(
       type: _agentType,
       workspacePath: widget.workspace.workspaceDir,
       workspaceId: widget.workspace.id,
