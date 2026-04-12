@@ -157,13 +157,26 @@ jobs:
               "$APP_PATH"
           fi
 
-          # Create DMG using hdiutil
+          # Create a staging folder with app + Applications symlink (drag-to-install DMG)
+          DMG_STAGING="dmg-staging"
+          rm -rf "$DMG_STAGING"
+          mkdir "$DMG_STAGING"
+          cp -R "$APP_PATH" "$DMG_STAGING/"
+          ln -s /Applications "$DMG_STAGING/Applications"
+
+          # Create a writable DMG first, then convert to compressed read-only
+          TMP_DMG="tmp-yoloit.dmg"
           hdiutil create \
-            -volname "yoloit" \
-            -srcfolder "$APP_PATH" \
+            -volname "yoloit $VERSION" \
+            -srcfolder "$DMG_STAGING" \
             -ov \
-            -format UDZO \
-            "$DMG_NAME"
+            -format UDRW \
+            "$TMP_DMG"
+
+          # Convert to compressed final DMG
+          hdiutil convert "$TMP_DMG" -format UDZO -o "$DMG_NAME"
+          rm -f "$TMP_DMG"
+          rm -rf "$DMG_STAGING"
 
           echo "dmg_name=$DMG_NAME" >> $GITHUB_OUTPUT
 
@@ -209,19 +222,16 @@ jobs:
         run: |
           SIGN_NOTE=""
           if [ "$SIGNED" = "false" ]; then
-            SIGN_NOTE=" ⚠️ **Unsigned build** — for development/testing only"
+            SIGN_NOTE=" (unsigned build)"
           fi
+
+          printf 'macOS build %s run #${{ github.run_number }}%s\n\n## Installation\nDownload the DMG, open it and drag yoloit.app to Applications.\n' \
+            "$RELEASE_TAG" "$SIGN_NOTE" > release-notes.md
 
           gh release delete "$RELEASE_TAG" --yes 2>/dev/null || true
           gh release create "$RELEASE_TAG" \
             --title "yoloit macOS $RELEASE_TAG" \
-            --notes "macOS build $RELEASE_TAG (run #${{ github.run_number }})${SIGN_NOTE}
-
-## Installation
-1. Download the DMG
-2. Open DMG and drag yoloit.app to Applications
-$([ "$SIGNED" = "false" ] && echo "3. Right-click → Open (first launch, unsigned build)")
-" \
+            --notes-file release-notes.md \
             --prerelease \
             "$DMG_NAME"
 
