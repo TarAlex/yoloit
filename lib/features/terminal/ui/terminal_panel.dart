@@ -137,10 +137,12 @@ class _TerminalViewState extends State<_TerminalView> {
                 : IndexedStack(
                     index: activeIndex,
                     children: sessions.asMap().entries.map((e) {
-                      return _TerminalWidget(
-                        key: ValueKey(e.value.id),
-                        session: e.value,
-                        isActive: e.key == activeIndex,
+                      return RepaintBoundary(
+                        child: _TerminalWidget(
+                          key: ValueKey(e.value.id),
+                          session: e.value,
+                          isActive: e.key == activeIndex,
+                        ),
                       );
                     }).toList(),
                   ),
@@ -510,9 +512,7 @@ class _TerminalWidgetState extends State<_TerminalWidget> {
   }
 
   void _requestFocusAfterFrame() {
-    // endOfFrame is more reliable than addPostFrameCallback on macOS desktop
-    // because it waits for the full render pipeline to settle.
-    WidgetsBinding.instance.endOfFrame.then((_) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _focusNode.requestFocus();
     });
   }
@@ -742,7 +742,7 @@ class _TerminalWidgetState extends State<_TerminalWidget> {
               widget.session.terminal,
               controller: _controller,
               focusNode: _focusNode,
-              autofocus: true,
+              autofocus: widget.isActive,
               onKeyEvent: _onTerminalKeyEvent,
               textStyle: TerminalStyle(fontSize: _fontSize),
               theme: TerminalTheme(
