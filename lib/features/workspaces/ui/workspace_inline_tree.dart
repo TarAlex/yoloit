@@ -471,15 +471,12 @@ class _SessionRowState extends State<_SessionRow> {
                 overflow: TextOverflow.ellipsis,
               ),
             ),
-            AnimatedOpacity(
-              opacity: _hovered ? 1.0 : 0.0,
-              duration: const Duration(milliseconds: 150),
-              child: GestureDetector(
+            if (_hovered)
+              GestureDetector(
                 onTap: () =>
                     context.read<TerminalCubit>().closeSession(widget.session.id),
                 child: const Icon(Icons.close, size: 12, color: AppColors.textMuted),
               ),
-            ),
           ],
         ),
       ),

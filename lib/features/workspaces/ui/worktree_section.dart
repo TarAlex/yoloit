@@ -345,20 +345,14 @@ class _WorktreeTileState extends State<_WorktreeTile> {
                 ],
               ),
             ),
-            AnimatedOpacity(
-              opacity: _hovering ? 1.0 : 0.0,
-              duration: const Duration(milliseconds: 150),
-              child: IgnorePointer(
-                ignoring: !_hovering || widget.onRemove == null,
-                child: GestureDetector(
-                  onTap: widget.onRemove,
-                  child: Padding(
-                    padding: const EdgeInsets.all(4),
-                    child: Icon(Icons.close, size: 11, color: AppColors.textMuted),
-                  ),
+            if (_hovering && widget.onRemove != null)
+              GestureDetector(
+                onTap: widget.onRemove,
+                child: Padding(
+                  padding: const EdgeInsets.all(4),
+                  child: Icon(Icons.close, size: 11, color: AppColors.textMuted),
                 ),
               ),
-            ),
           ],
         ),
       ),
