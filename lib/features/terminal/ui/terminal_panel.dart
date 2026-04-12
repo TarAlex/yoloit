@@ -125,8 +125,8 @@ class _TerminalViewState extends State<_TerminalView> {
   ScrollController _controllerFor(String sessionId) {
     return _scrollControllers.putIfAbsent(
       sessionId,
-      // Start pinned to the bottom so new sessions don't jump.
-      () => ScrollController(initialScrollOffset: double.maxFinite),
+      // TerminalView autoscrolls to bottom on output by default.
+      () => ScrollController(),
     );
   }
 
