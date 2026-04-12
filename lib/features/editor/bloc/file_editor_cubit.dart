@@ -149,6 +149,24 @@ class FileEditorCubit extends Cubit<FileEditorState> {
   void showPanel() => emit(state.copyWith(isVisible: true));
   void hidePanel() => emit(state.copyWith(isVisible: false));
 
+  /// Re-reads the active file from disk if it has no unsaved changes.
+  /// Called when the app regains focus (external editor may have changed the file).
+  Future<void> reloadActiveIfUnchanged() async {
+    final tab = state.activeTab;
+    if (tab == null || tab.isDiff || tab.isLoading || tab.error != null) return;
+    if (_isImagePath(tab.filePath)) return;
+    if (tab.isDirty) return; // user has unsaved changes — don't overwrite
+
+    try {
+      final onDisk = await File(tab.filePath).readAsString();
+      if (onDisk != tab.content) {
+        _updateTab(tab.filePath, (t) => t.copyWith(content: onDisk, originalContent: onDisk));
+      }
+    } catch (_) {
+      // File deleted or unreadable — ignore silently.
+    }
+  }
+
   /// Opens a diff view for [filePath] (relative to [workspacePath]) in a new tab.
   Future<void> openDiff(String filePath, String workspacePath) async {
     final tabPath = 'diff:$filePath';
@@ -210,6 +228,13 @@ class FileEditorCubit extends Cubit<FileEditorState> {
 
   Future<void> _writeToDisk(String filePath, String content) async {
     try {
+      // Safety guard: never overwrite a non-empty file with empty content.
+      // This can happen if a controller is synced with null content accidentally.
+      if (content.isEmpty) {
+        final tab = state.tabs.firstWhere((t) => t.filePath == filePath,
+            orElse: () => EditorTab(filePath: filePath));
+        if (tab.originalContent?.isNotEmpty ?? false) return;
+      }
       await File(filePath).writeAsString(content);
       _updateTab(filePath, (t) => t.copyWith(originalContent: content));
     } catch (_) {

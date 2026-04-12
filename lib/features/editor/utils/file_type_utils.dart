@@ -135,6 +135,7 @@ class FileTypeUtils {
       'json' => 'json',
       'yaml' || 'yml' => 'yaml',
       'xml' => 'xml',
+      'svg' => 'xml',
       'sql' => 'sql',
       'md' || 'markdown' => 'markdown',
       _ => null,

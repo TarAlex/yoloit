@@ -39,12 +39,15 @@ class FileEditorPanel extends StatefulWidget {
   State<FileEditorPanel> createState() => _FileEditorPanelState();
 }
 
-class _FileEditorPanelState extends State<FileEditorPanel> {
+class _FileEditorPanelState extends State<FileEditorPanel>
+    with WidgetsBindingObserver {
   /// One CodeController per open file path.
   final Map<String, CodeController> _controllers = {};
   /// Tracks which content was last loaded into each controller (to avoid loops).
   final Map<String, String> _loadedContent = {};
-  /// File paths currently showing Markdown preview instead of raw code.
+  /// True when we're programmatically updating a controller (suppress auto-save).
+  bool _suppressControllerUpdates = false;
+  /// File paths currently showing Markdown/SVG preview instead of raw code.
   final Set<String> _previewPaths = {};
   double _scaleBase = 13.0;
   final _fontSizeNotifier = ValueNotifier<double>(13.0);
@@ -56,6 +59,7 @@ class _FileEditorPanelState extends State<FileEditorPanel> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     SessionPrefs.load().then((snap) {
       if (mounted) _fontSizeNotifier.value = snap.editorFontSize;
     });
@@ -63,11 +67,20 @@ class _FileEditorPanelState extends State<FileEditorPanel> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     for (final c in _controllers.values) {
       c.dispose();
     }
     _fontSizeNotifier.dispose();
     super.dispose();
+  }
+
+  /// Reload active file from disk when app regains focus (external edits).
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && mounted) {
+      context.read<FileEditorCubit>().reloadActiveIfUnchanged();
+    }
   }
 
   static Mode? _modeFor(String path) {
@@ -104,6 +117,7 @@ class _FileEditorPanelState extends State<FileEditorPanel> {
       _controllers[tab.filePath] = ctrl;
       _loadedContent[tab.filePath] = tab.content ?? '';
       ctrl.addListener(() {
+        if (_suppressControllerUpdates) return;
         final text = ctrl.text;
         final cubit = context.read<FileEditorCubit>();
         final currentTab = cubit.state.activeTab;
@@ -112,11 +126,13 @@ class _FileEditorPanelState extends State<FileEditorPanel> {
         }
       });
     } else {
-      // Sync content if it was updated externally (e.g. initial load finished).
-      final incoming = tab.content ?? '';
-      if (_loadedContent[tab.filePath] != incoming) {
+      // Sync content if it was updated externally — but ONLY with real content.
+      final incoming = tab.content;
+      if (incoming != null && _loadedContent[tab.filePath] != incoming) {
+        _suppressControllerUpdates = true;
         _loadedContent[tab.filePath] = incoming;
         _controllers[tab.filePath]!.text = incoming;
+        _suppressControllerUpdates = false;
       }
     }
     return _controllers[tab.filePath]!;
@@ -141,10 +157,9 @@ class _FileEditorPanelState extends State<FileEditorPanel> {
         if (!state.isOpen) return _emptyState(context);
 
         final activeTab = state.activeTab!;
+        // Only create controller when content is available (not during loading).
         CodeController? controller;
-        if (!activeTab.isDiff && !_isImage(activeTab.filePath) && activeTab.content != null) {
-          controller = _controllerFor(activeTab, context);
-        } else if (!activeTab.isDiff && !_isImage(activeTab.filePath)) {
+        if (!activeTab.isDiff && !_isImage(activeTab.filePath) && !activeTab.isLoading) {
           controller = _controllerFor(activeTab, context);
         }
 
