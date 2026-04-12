@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_pty/flutter_pty.dart';
 import 'package:yoloit/core/session/session_prefs.dart';
+import 'package:yoloit/features/settings/data/agent_config_service.dart';
 import 'package:yoloit/features/terminal/bloc/terminal_state.dart';
 import 'package:yoloit/features/terminal/data/logging_service.dart';
 import 'package:yoloit/features/terminal/data/pty_service.dart';
@@ -77,9 +78,10 @@ class TerminalCubit extends Cubit<TerminalState> {
         );
       }
     } else {
-      // No saved sessions → spawn a default plain terminal for this workspace.
+      // No saved sessions → spawn the user-configured default agent.
+      final defaultType = AgentConfigService.instance.defaultAgentType;
       await spawnSession(
-        type: AgentType.terminal,
+        type: defaultType,
         workspacePath: workspacePath,
         workspaceId: workspaceId,
       );
@@ -154,9 +156,10 @@ class TerminalCubit extends Cubit<TerminalState> {
 
     // Auto-run agent command (skip for plain terminal and when restoring tmux session).
     final isRestore = savedSessionId != null;
-    if (type.launchCommand.isNotEmpty && !(isRestore && _tmux.isActive)) {
+    final effectiveCommand = AgentConfigService.instance.effectiveLaunchCommand(type);
+    if (effectiveCommand.isNotEmpty && !(isRestore && _tmux.isActive)) {
       await Future<void>.delayed(const Duration(milliseconds: 400));
-      _ptyService.write(sessionId, '${type.launchCommand}\n');
+      _ptyService.write(sessionId, '$effectiveCommand\n');
     }
   }
 

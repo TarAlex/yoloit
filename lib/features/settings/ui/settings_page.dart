@@ -221,6 +221,7 @@ class _AgentSettingsSectionState extends State<_AgentSettingsSection> {
   final _service = AgentConfigService.instance;
   List<AgentConfig>? _configs;
   bool _loading = true;
+  String? _defaultAgentId;
 
   @override
   void initState() {
@@ -230,7 +231,11 @@ class _AgentSettingsSectionState extends State<_AgentSettingsSection> {
 
   Future<void> _loadConfigs() async {
     final configs = await _service.load();
-    if (mounted) setState(() { _configs = configs; _loading = false; });
+    if (mounted) setState(() {
+      _configs = configs;
+      _defaultAgentId = _service.defaultAgentId;
+      _loading = false;
+    });
   }
 
   Future<void> _saveConfigs() async {
@@ -245,6 +250,11 @@ class _AgentSettingsSectionState extends State<_AgentSettingsSection> {
   void _deleteConfig(int index) {
     setState(() => _configs!.removeAt(index));
     _saveConfigs();
+  }
+
+  Future<void> _setDefault(String? id) async {
+    setState(() => _defaultAgentId = id);
+    await _service.setDefaultAgentId(id);
   }
 
   void _addCustomAgent() {
@@ -271,6 +281,13 @@ class _AgentSettingsSectionState extends State<_AgentSettingsSection> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        Padding(
+          padding: const EdgeInsets.only(bottom: 8),
+          child: Text(
+            'Star (★) an agent to make it open automatically for new workspaces.',
+            style: TextStyle(color: AppColors.textMuted, fontSize: 11),
+          ),
+        ),
         Container(
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(8),
@@ -280,14 +297,15 @@ class _AgentSettingsSectionState extends State<_AgentSettingsSection> {
             children: configs.indexed.map(((int, AgentConfig) e) {
               final (index, config) = e;
               final isLast = index == configs.length - 1;
+              final isDefault = config.id == _defaultAgentId;
               return Column(
                 children: [
                   _AgentRow(
                     config: config,
+                    isDefault: isDefault,
                     onChanged: (updated) => _updateConfig(index, updated),
-                    onDelete: config.isBuiltIn
-                        ? null
-                        : () => _deleteConfig(index),
+                    onDelete: config.isBuiltIn ? null : () => _deleteConfig(index),
+                    onSetDefault: () => _setDefault(isDefault ? null : config.id),
                   ),
                   if (!isLast) Divider(height: 1, color: colors.border),
                 ],

@@ -1,4 +1,7 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:yoloit/core/theme/app_color_scheme.dart';
 import 'package:yoloit/core/theme/app_colors.dart';
@@ -485,6 +488,120 @@ class _FileTreeNodeWidget extends StatefulWidget {
 
 class _FileTreeNodeWidgetState extends State<_FileTreeNodeWidget> {
   bool _hovering = false;
+  bool _renaming = false;
+  late TextEditingController _renameCtrl;
+  final _renameFocus = FocusNode();
+
+  @override
+  void initState() {
+    super.initState();
+    _renameCtrl = TextEditingController();
+    _renameFocus.addListener(() {
+      if (!_renameFocus.hasFocus && _renaming) _commitRename();
+    });
+  }
+
+  @override
+  void dispose() {
+    _renameCtrl.dispose();
+    _renameFocus.dispose();
+    super.dispose();
+  }
+
+  void _startRename() {
+    _renameCtrl.text = widget.node.name;
+    setState(() => _renaming = true);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _renameFocus.requestFocus();
+      _renameCtrl.selection = TextSelection(
+        baseOffset: 0,
+        extentOffset: _renameCtrl.text.lastIndexOf('.') > 0
+            ? _renameCtrl.text.lastIndexOf('.')
+            : _renameCtrl.text.length,
+      );
+    });
+  }
+
+  void _commitRename() {
+    if (!_renaming) return;
+    final newName = _renameCtrl.text.trim();
+    setState(() => _renaming = false);
+    if (newName.isEmpty || newName == widget.node.name) return;
+    final oldPath = widget.node.path;
+    final parent = oldPath.substring(0, oldPath.lastIndexOf('/'));
+    final newPath = '$parent/$newName';
+    try {
+      File(oldPath).renameSync(newPath);
+      context.read<ReviewCubit>().refresh();
+      // If the renamed file was open in editor, reopen at new path.
+      try {
+        context.read<FileEditorCubit>().openFile(newPath);
+      } catch (_) {}
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Rename failed: $e'), duration: const Duration(seconds: 3)),
+      );
+    }
+  }
+
+  void _showContextMenu(BuildContext context, Offset position) async {
+    final node = widget.node;
+    final result = await showMenu<String>(
+      context: context,
+      position: RelativeRect.fromLTRB(position.dx, position.dy, position.dx + 1, position.dy + 1),
+      items: [
+        PopupMenuItem(
+          value: 'copy_path',
+          height: 32,
+          child: Row(children: [
+            Icon(Icons.copy_outlined, size: 14, color: AppColors.textMuted),
+            const SizedBox(width: 8),
+            const Text('Copy path', style: TextStyle(fontSize: 13)),
+          ]),
+        ),
+        PopupMenuItem(
+          value: 'copy_name',
+          height: 32,
+          child: Row(children: [
+            Icon(Icons.text_snippet_outlined, size: 14, color: AppColors.textMuted),
+            const SizedBox(width: 8),
+            const Text('Copy filename', style: TextStyle(fontSize: 13)),
+          ]),
+        ),
+        if (!node.isDirectory) ...[
+          const PopupMenuDivider(height: 1),
+          PopupMenuItem(
+            value: 'rename',
+            height: 32,
+            child: Row(children: [
+              Icon(Icons.drive_file_rename_outline, size: 14, color: AppColors.textMuted),
+              const SizedBox(width: 8),
+              const Text('Rename', style: TextStyle(fontSize: 13)),
+            ]),
+          ),
+        ],
+      ],
+    );
+    if (!mounted) return;
+    switch (result) {
+      case 'copy_path':
+        await Clipboard.setData(ClipboardData(text: node.path));
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Path copied'), duration: Duration(seconds: 1), behavior: SnackBarBehavior.floating),
+          );
+        }
+      case 'copy_name':
+        await Clipboard.setData(ClipboardData(text: node.name));
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Filename copied'), duration: Duration(seconds: 1), behavior: SnackBarBehavior.floating),
+          );
+        }
+      case 'rename':
+        _startRename();
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -500,19 +617,17 @@ class _FileTreeNodeWidgetState extends State<_FileTreeNodeWidget> {
           onExit: (_) => setState(() => _hovering = false),
           cursor: SystemMouseCursors.click,
           child: GestureDetector(
-            onTap: () {
+            onTap: _renaming ? null : () {
               if (node.isDirectory) {
                 context.read<ReviewCubit>().toggleNode(node.path);
               } else {
                 context.read<ReviewCubit>().selectFile(node.path);
-                // Open file in editor panel
                 try {
                   context.read<FileEditorCubit>().openFile(node.path);
-                } catch (_) {
-                  // FileEditorCubit not in scope — ignore
-                }
+                } catch (_) {}
               }
             },
+            onSecondaryTapDown: (d) => _showContextMenu(context, d.globalPosition),
             child: AnimatedContainer(
               duration: const Duration(milliseconds: 100),
               padding: EdgeInsets.only(
@@ -554,19 +669,41 @@ class _FileTreeNodeWidgetState extends State<_FileTreeNodeWidget> {
                   }),
                   const SizedBox(width: 5),
                   Expanded(
-                    child: Text(
-                      node.name,
-                      style: TextStyle(
-                        color: node.isModified
-                            ? AppColors.neonOrange
-                            : isSelected
-                                ? AppColors.textPrimary
-                                : AppColors.textSecondary,
-                        fontSize: 12,
-                        fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
-                      ),
-                      overflow: TextOverflow.ellipsis,
-                    ),
+                    child: _renaming
+                        ? TextField(
+                            controller: _renameCtrl,
+                            focusNode: _renameFocus,
+                            style: const TextStyle(
+                              color: AppColors.textPrimary,
+                              fontSize: 12,
+                            ),
+                            decoration: InputDecoration(
+                              isDense: true,
+                              contentPadding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(3),
+                                borderSide: BorderSide(color: colors.primary, width: 1),
+                              ),
+                              focusedBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(3),
+                                borderSide: BorderSide(color: colors.primary, width: 1.5),
+                              ),
+                            ),
+                            onSubmitted: (_) => _commitRename(),
+                          )
+                        : Text(
+                            node.name,
+                            style: TextStyle(
+                              color: node.isModified
+                                  ? AppColors.neonOrange
+                                  : isSelected
+                                      ? AppColors.textPrimary
+                                      : AppColors.textSecondary,
+                              fontSize: 12,
+                              fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
+                            ),
+                            overflow: TextOverflow.ellipsis,
+                          ),
                   ),
                   if (node.isModified)
                     Container(

@@ -58,6 +58,10 @@ class AgentConfigService {
   AgentConfigService._();
   static final instance = AgentConfigService._();
 
+  // In-memory cache so cubit can read without async on every spawn.
+  List<AgentConfig> _cached = [];
+  String? _defaultAgentId;
+
   static List<AgentConfig> get _defaults => AgentType.values
       .map(
         (t) => AgentConfig(
@@ -76,30 +80,79 @@ class AgentConfigService {
     return p.join(home, '.config', 'yoloit', 'agent_configs.json');
   }
 
+  String get _prefsPath {
+    final home = Platform.environment['HOME'] ?? '/tmp';
+    return p.join(home, '.config', 'yoloit', 'agent_prefs.json');
+  }
+
   Future<List<AgentConfig>> load() async {
     try {
       final file = File(_configPath);
-      if (!await file.exists()) return _defaults;
-      final data = jsonDecode(await file.readAsString()) as List;
-      final saved = data
-          .map((e) => AgentConfig.fromJson(e as Map<String, dynamic>))
-          .toList();
-      // Merge: ensure all built-ins are present
-      final savedIds = saved.map((c) => c.id).toSet();
-      for (final d in _defaults) {
-        if (!savedIds.contains(d.id)) saved.add(d);
+      if (!await file.exists()) {
+        _cached = _defaults;
+      } else {
+        final data = jsonDecode(await file.readAsString()) as List;
+        final saved = data
+            .map((e) => AgentConfig.fromJson(e as Map<String, dynamic>))
+            .toList();
+        // Merge: ensure all built-ins are present
+        final savedIds = saved.map((c) => c.id).toSet();
+        for (final d in _defaults) {
+          if (!savedIds.contains(d.id)) saved.add(d);
+        }
+        _cached = saved;
       }
-      return saved;
     } catch (_) {
-      return _defaults;
+      _cached = _defaults;
     }
+
+    try {
+      final prefsFile = File(_prefsPath);
+      if (await prefsFile.exists()) {
+        final prefs = jsonDecode(await prefsFile.readAsString()) as Map<String, dynamic>;
+        _defaultAgentId = prefs['defaultAgentId'] as String?;
+      }
+    } catch (_) {}
+
+    return _cached;
   }
 
   Future<void> save(List<AgentConfig> configs) async {
+    _cached = configs;
     final file = File(_configPath);
     await file.parent.create(recursive: true);
     await file.writeAsString(
       jsonEncode(configs.map((c) => c.toJson()).toList()),
     );
+  }
+
+  Future<void> setDefaultAgentId(String? id) async {
+    _defaultAgentId = id;
+    final prefsFile = File(_prefsPath);
+    await prefsFile.parent.create(recursive: true);
+    await prefsFile.writeAsString(jsonEncode({'defaultAgentId': id}));
+  }
+
+  String? get defaultAgentId => _defaultAgentId;
+
+  /// Returns the AgentType for the configured default, falling back to terminal.
+  AgentType get defaultAgentType {
+    if (_defaultAgentId == null) return AgentType.terminal;
+    try {
+      return AgentType.values.firstWhere((t) => t.name == _defaultAgentId);
+    } catch (_) {
+      return AgentType.terminal;
+    }
+  }
+
+  /// Returns the effective launch command for a given AgentType,
+  /// using the user-configured override if available.
+  String effectiveLaunchCommand(AgentType type) {
+    try {
+      final config = _cached.firstWhere((c) => c.id == type.name);
+      return config.launchCommand;
+    } catch (_) {
+      return type.launchCommand;
+    }
   }
 }
