@@ -149,6 +149,10 @@ jobs:
           APP_PATH="build/macos/Build/Products/Release/yoloit.app"
           DMG_NAME="yoloit-macos-$VERSION.dmg"
 
+          # Clean up any leftover files from previous runs
+          rm -f "$DMG_NAME" tmp-yoloit.dmg
+          rm -rf dmg-staging
+
           echo "Packaging: $APP_PATH → $DMG_NAME"
 
           if [ "$SIGNED" = "true" ] && [ -n "$MACOS_CERTIFICATE_ID" ]; then
