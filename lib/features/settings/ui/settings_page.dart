@@ -1061,7 +1061,7 @@ class _AboutSectionState extends State<_AboutSection> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Text('yoloit — AI Orchestrator',
+                        const Text('YoLoIT — AI Orchestrator',
                             style: TextStyle(color: AppColors.textPrimary, fontSize: 14, fontWeight: FontWeight.w600)),
                         const SizedBox(height: 4),
                         Row(

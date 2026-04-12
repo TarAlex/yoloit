@@ -49,7 +49,7 @@ class LoggingService {
     final safeId = sessionId.replaceAll(RegExp(r'[^a-zA-Z0-9_-]'), '_');
     final file = File('${dir.path}/${stamp}_$safeId.log');
     final sink = file.openWrite(mode: FileMode.append);
-    sink.writeln('# yoloit session log — $label — $stamp');
+    sink.writeln('# YoLoIT session log — $label — $stamp');
     sink.writeln('# ─────────────────────────────────────');
     _sinks[sessionId] = sink;
   }

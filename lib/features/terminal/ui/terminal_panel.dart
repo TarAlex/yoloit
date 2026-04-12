@@ -440,7 +440,7 @@ class _SessionInfoBar extends StatelessWidget {
       child: Row(
         children: [
           Text(
-            'yoloit > ',
+            'YoLoIT > ',
             style: TextStyle(
               color: colors.primaryLight,
               fontSize: 11,

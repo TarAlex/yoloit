@@ -89,7 +89,7 @@ class TmuxService {
     if (!await file.exists()) {
       await file.parent.create(recursive: true);
       await file.writeAsString([
-        '# yoloit tmux config — auto-generated, do not edit manually',
+        '# YoLoIT tmux config — auto-generated, do not edit manually',
         'set -g status off',          // hide the green status bar
         'set -g mouse on',            // enable mouse scroll
         'set -g history-limit 50000', // large scrollback

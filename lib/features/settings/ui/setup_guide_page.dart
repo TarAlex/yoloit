@@ -179,7 +179,7 @@ class _Header extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('Welcome to yoloit 👋',
+                Text('Welcome to YoLoIT 👋',
                     style: TextStyle(color: AppColors.textPrimary, fontSize: 16, fontWeight: FontWeight.w600)),
                 Text('Check dependencies and configure AI agents',
                     style: TextStyle(color: AppColors.textMuted, fontSize: 11)),

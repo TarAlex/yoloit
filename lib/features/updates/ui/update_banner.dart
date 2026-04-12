@@ -27,7 +27,7 @@ class UpdateBanner extends StatelessWidget {
             const SizedBox(width: 8),
             Expanded(
               child: Text(
-                'yoloit ${info.tagName} is available',
+                'YoLoIT ${info.tagName} is available',
                 style: const TextStyle(
                   color: Colors.white,
                   fontSize: 11,

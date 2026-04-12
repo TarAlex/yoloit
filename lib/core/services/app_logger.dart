@@ -86,7 +86,7 @@ class AppLogger {
     _openFile().then((f) {
       _sink = f.openWrite(mode: FileMode.append);
       _writeLine('');
-      _writeLine('══════ yoloit started ${DateTime.now().toIso8601String()} ══════');
+      _writeLine('══════ YoLoIT started ${DateTime.now().toIso8601String()} ══════');
     }).catchError((e) {
       // Ignore — file logging unavailable (e.g. permission issue)
     });

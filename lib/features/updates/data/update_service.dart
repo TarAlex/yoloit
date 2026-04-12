@@ -94,7 +94,7 @@ class UpdateService {
       final req = await client.getUrl(Uri.parse(_apiUrl));
       req.headers
         ..set(HttpHeaders.acceptHeader, 'application/vnd.github+json')
-        ..set(HttpHeaders.userAgentHeader, 'yoloit-app/$currentVersion');
+        ..set(HttpHeaders.userAgentHeader, 'YoLoIT/$currentVersion');
 
       final resp = await req.close().timeout(const Duration(seconds: 10));
       if (resp.statusCode != 200) return null;
