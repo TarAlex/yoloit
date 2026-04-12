@@ -131,12 +131,17 @@ jobs:
           fi
 
       # ── Build ────────────────────────────────────────────────────────────────
-      - name: Build macOS release
+      - name: Build macOS release (universal)
         env:
           BUILD_NUMBER: ${{ github.run_number }}
         run: |
-          flutter build macos --release \
+          # Build universal binary (arm64 + x86_64) via Xcode ARCHS override
+          FLUTTER_XCODE_ARCHS="arm64 x86_64" flutter build macos --release \
             --build-number=$BUILD_NUMBER
+          # Verify architectures in the produced binary
+          MAIN_BIN=$(find build/macos/Build/Products/Release/yoloit.app -name "yoloit" -type f | head -1)
+          echo "Architectures in binary:"
+          lipo -info "$MAIN_BIN" || file "$MAIN_BIN"
 
       # ── Package as DMG ───────────────────────────────────────────────────────
       - name: Package as DMG
@@ -147,13 +152,22 @@ jobs:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
           APP_PATH="build/macos/Build/Products/Release/yoloit.app"
-          DMG_NAME="yoloit-macos-$VERSION.dmg"
+
+          # Detect whether we have a universal binary
+          MAIN_BIN=$(find "$APP_PATH" -name "yoloit" -type f | head -1)
+          if lipo -info "$MAIN_BIN" 2>/dev/null | grep -q "arm64.*x86_64\|x86_64.*arm64"; then
+            ARCH_LABEL="universal"
+          else
+            ARCH_LABEL=$(lipo -info "$MAIN_BIN" 2>/dev/null | awk -F': ' '{print $NF}' | tr -d ' ' || uname -m)
+          fi
+
+          DMG_NAME="yoloit-macos-${ARCH_LABEL}-${VERSION}.dmg"
 
           # Clean up any leftover files from previous runs
-          rm -f "$DMG_NAME" tmp-yoloit.dmg
+          rm -f yoloit-macos-*.dmg tmp-yoloit.dmg
           rm -rf dmg-staging
 
-          echo "Packaging: $APP_PATH → $DMG_NAME"
+          echo "Packaging: $APP_PATH → $DMG_NAME (arch: $ARCH_LABEL)"
 
           if [ "$SIGNED" = "true" ] && [ -n "$MACOS_CERTIFICATE_ID" ]; then
             echo "Signing .app bundle..."
@@ -184,6 +198,7 @@ jobs:
           rm -f "$TMP_DMG"
           rm -rf "$DMG_STAGING"
 
+          echo "arch_label=$ARCH_LABEL" >> $GITHUB_OUTPUT
           echo "dmg_name=$DMG_NAME" >> $GITHUB_OUTPUT
 
       # ── Notarize (optional) ──────────────────────────────────────────────────
@@ -224,6 +239,7 @@ jobs:
           VERSION: ${{ steps.version.outputs.version }}
           RELEASE_TAG: ${{ steps.version.outputs.tag }}
           DMG_NAME: ${{ steps.package.outputs.dmg_name }}
+          ARCH_LABEL: ${{ steps.package.outputs.arch_label }}
           SIGNED: ${{ steps.signing.outputs.signed }}
         run: |
           SIGN_NOTE=""
@@ -231,8 +247,8 @@ jobs:
             SIGN_NOTE=" (unsigned build)"
           fi
 
-          printf 'macOS build %s run #${{ github.run_number }}%s\n\n## Installation\nDownload the DMG, open it and drag yoloit.app to Applications.\n' \
-            "$RELEASE_TAG" "$SIGN_NOTE" > release-notes.md
+          printf 'macOS build %s run #${{ github.run_number }}%s\n\nArchitecture: **%s**\n\n## Installation\nDownload the DMG, open it and drag yoloit.app to Applications.\n' \
+            "$RELEASE_TAG" "$SIGN_NOTE" "$ARCH_LABEL" > release-notes.md
 
           gh release delete "$RELEASE_TAG" --yes 2>/dev/null || true
           gh release create "$RELEASE_TAG" \
