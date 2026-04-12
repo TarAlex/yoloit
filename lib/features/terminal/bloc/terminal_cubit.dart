@@ -44,6 +44,7 @@ class TerminalCubit extends Cubit<TerminalState> {
     await Future.wait([
       _logging.init(),
       _tmux.init(),
+      AgentConfigService.instance.load(), // pre-load agent configs + default
     ]);
     _emitLoaded([], 0);
   }
@@ -158,7 +159,7 @@ class TerminalCubit extends Cubit<TerminalState> {
     final isRestore = savedSessionId != null;
     final effectiveCommand = AgentConfigService.instance.effectiveLaunchCommand(type);
     if (effectiveCommand.isNotEmpty && !(isRestore && _tmux.isActive)) {
-      await Future<void>.delayed(const Duration(milliseconds: 400));
+      await Future<void>.delayed(const Duration(milliseconds: 1200));
       _ptyService.write(sessionId, '$effectiveCommand\n');
     }
   }
