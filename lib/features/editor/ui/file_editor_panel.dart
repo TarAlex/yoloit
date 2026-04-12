@@ -536,7 +536,7 @@ class _ImagePreview extends StatelessWidget {
                 child: isSvg
                     ? SvgPicture.file(
                         File(filePath),
-                        placeholderBuilder: (_) => const CircularProgressIndicator(),
+                        fit: BoxFit.contain,
                       )
                     : Image.file(
                         File(filePath),

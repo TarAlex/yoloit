@@ -91,13 +91,16 @@ class _PanelHeader extends StatelessWidget {
             const SizedBox(width: 6),
           ],
           // Title
-          Text(
-            title,
-            style: const TextStyle(
-              color: AppColors.textMuted,
-              fontSize: 10,
-              fontWeight: FontWeight.w600,
-              letterSpacing: 0.8,
+          Flexible(
+            child: Text(
+              title,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                color: AppColors.textMuted,
+                fontSize: 10,
+                fontWeight: FontWeight.w600,
+                letterSpacing: 0.8,
+              ),
             ),
           ),
           const Spacer(),
