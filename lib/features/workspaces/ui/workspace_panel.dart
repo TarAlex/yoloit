@@ -164,21 +164,11 @@ class WorkspacePanelState extends State<WorkspacePanel> {
                 if (!isActive) return tile;
 
                 // Active workspace: tile + inline tree share one decorated container.
-                return Container(
-                  margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                  decoration: BoxDecoration(
-                    color: accentColor.withAlpha(30),
-                    borderRadius: BorderRadius.circular(6),
-                    border: Border.all(color: accentColor.withAlpha(80)),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      tile,
-                      Divider(height: 1, thickness: 1, color: accentColor.withAlpha(50)),
-                      WorkspaceInlineTree(workspace: ws),
-                    ],
-                  ),
+                return _ActiveWorkspaceCard(
+                  key: ValueKey(ws.id),
+                  accentColor: accentColor,
+                  tile: tile,
+                  workspace: ws,
                 );
               }).toList(),
           ],
@@ -205,7 +195,6 @@ class WorkspacePanelState extends State<WorkspacePanel> {
             color: AppColors.textMuted,
           ),
         ),
-        _SetupItem(icon: Icons.settings_outlined, label: 'Settings', onTap: () {}),
         const SizedBox(height: 8),
       ],
     );
@@ -569,6 +558,78 @@ class _PathChipState extends State<_PathChip> {
               ],
             ],
           ),
+        ),
+      ),
+    );
+  }
+}
+
+// ─── Active Workspace Card (animated border + inline tree) ───────────────────
+
+class _ActiveWorkspaceCard extends StatefulWidget {
+  const _ActiveWorkspaceCard({
+    super.key,
+    required this.accentColor,
+    required this.tile,
+    required this.workspace,
+  });
+  final Color accentColor;
+  final Widget tile;
+  final dynamic workspace;
+
+  @override
+  State<_ActiveWorkspaceCard> createState() => _ActiveWorkspaceCardState();
+}
+
+class _ActiveWorkspaceCardState extends State<_ActiveWorkspaceCard>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _ctrl;
+  late final Animation<double> _fade;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 280),
+    )..forward();
+    _fade = CurvedAnimation(parent: _ctrl, curve: Curves.easeOut);
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final accent = widget.accentColor;
+    return FadeTransition(
+      opacity: _fade,
+      child: Container(
+        margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+        decoration: BoxDecoration(
+          color: accent.withAlpha(30),
+          borderRadius: BorderRadius.circular(6),
+          border: Border.all(color: accent.withAlpha(80)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            widget.tile,
+            Divider(height: 1, thickness: 1, color: accent.withAlpha(50)),
+            // Slide + fade the tree in
+            ClipRect(
+              child: SlideTransition(
+                position: Tween<Offset>(
+                  begin: const Offset(0, -0.06),
+                  end: Offset.zero,
+                ).animate(_fade),
+                child: WorkspaceInlineTree(workspace: widget.workspace),
+              ),
+            ),
+          ],
         ),
       ),
     );
