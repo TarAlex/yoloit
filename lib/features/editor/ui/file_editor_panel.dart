@@ -16,7 +16,6 @@ import 'package:highlight/languages/java.dart';
 import 'package:highlight/languages/javascript.dart';
 import 'package:highlight/languages/json.dart';
 import 'package:highlight/languages/kotlin.dart';
-import 'package:highlight/languages/markdown.dart';
 import 'package:highlight/languages/python.dart';
 import 'package:highlight/languages/rust.dart';
 import 'package:highlight/languages/sql.dart';
@@ -48,6 +47,10 @@ class _FileEditorPanelState extends State<FileEditorPanel> {
   final Set<String> _previewPaths = {};
   double _scaleBase = 13.0;
   final _fontSizeNotifier = ValueNotifier<double>(13.0);
+  /// True after first frame renders for the current file (prevents toggle bar
+  /// from appearing before CodeField has painted its content).
+  bool _editorReady = false;
+  String? _lastRenderedPath;
 
   @override
   void initState() {
@@ -84,7 +87,7 @@ class _FileEditorPanelState extends State<FileEditorPanel> {
       'yaml' => yaml,
       'xml' => xml,
       'sql' => sql,
-      'markdown' => markdown,
+      'markdown' => null, // markdown has preview mode — skip slow syntax parsing
       'swift' => swift,
       _ => null,
     };
@@ -144,6 +147,21 @@ class _FileEditorPanelState extends State<FileEditorPanel> {
           controller = _controllerFor(activeTab, context);
         }
 
+        // Wait one frame after switching files before showing the toggle bar —
+        // this lets CodeField finish its initial paint before the overlay appears.
+        if (activeTab.filePath != _lastRenderedPath) {
+          _lastRenderedPath = activeTab.filePath;
+          _editorReady = false;
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) setState(() => _editorReady = true);
+          });
+        }
+
+        final toggleVisible = _editorReady &&
+            !activeTab.isDiff &&
+            !activeTab.isLoading &&
+            _isMarkdown(activeTab.filePath);
+
         return GestureDetector(
           onScaleStart: (d) => _scaleBase = _fontSizeNotifier.value,
           onScaleUpdate: (d) {
@@ -174,7 +192,7 @@ class _FileEditorPanelState extends State<FileEditorPanel> {
                     Positioned(
                       top: 0, left: 0, right: 0,
                       child: _AnimatedToggleBar(
-                        visible: !activeTab.isDiff && !activeTab.isLoading && _isMarkdown(activeTab.filePath),
+                        visible: toggleVisible,
                         child: _MarkdownToggleBar(
                           isPreview: _previewPaths.contains(activeTab.filePath),
                           onToggle: () => setState(() {
