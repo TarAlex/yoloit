@@ -438,8 +438,9 @@ class _SessionRowState extends State<_SessionRow> {
     return MouseRegion(
       onEnter: (_) => setState(() => _hovered = true),
       onExit: (_) => setState(() => _hovered = false),
-      child: Container(
-        color: _hovered ? colors.surfaceHighlight : null,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
+        color: _hovered ? colors.surfaceHighlight : colors.background.withAlpha(0),
         padding: const EdgeInsets.fromLTRB(28, 1, 8, 1),
         child: Row(
           children: [
@@ -471,8 +472,9 @@ class _SessionRowState extends State<_SessionRow> {
                 overflow: TextOverflow.ellipsis,
               ),
             ),
-            Opacity(
+            AnimatedOpacity(
               opacity: _hovered ? 1.0 : 0.0,
+              duration: const Duration(milliseconds: 150),
               child: GestureDetector(
                 onTap: () =>
                     context.read<TerminalCubit>().closeSession(widget.session.id),
