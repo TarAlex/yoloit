@@ -29,6 +29,13 @@ class FileEditorCubit extends Cubit<FileEditorState> {
       return;
     }
 
+    // Image files don't need content loaded — handled as visual preview.
+    if (_isImagePath(absolutePath)) {
+      final newTabs = [...state.tabs, EditorTab(filePath: absolutePath)];
+      emit(state.copyWith(tabs: newTabs, activeIndex: newTabs.length - 1, isVisible: true));
+      return;
+    }
+
     final placeholder = EditorTab(filePath: absolutePath, isLoading: true);
     final newTabs = [...state.tabs, placeholder];
     final newIndex = newTabs.length - 1;
@@ -168,5 +175,10 @@ class FileEditorCubit extends Cubit<FileEditorState> {
     final newTabs = List<EditorTab>.from(state.tabs);
     newTabs[idx] = updater(newTabs[idx]);
     emit(state.copyWith(tabs: newTabs));
+  }
+
+  static bool _isImagePath(String path) {
+    final ext = path.split('.').last.toLowerCase();
+    return const {'png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'ico', 'svg'}.contains(ext);
   }
 }

@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_code_editor/flutter_code_editor.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 import 'package:highlight/highlight_core.dart' show Mode;
 import 'package:highlight/languages/bash.dart';
 import 'package:highlight/languages/cpp.dart';
@@ -141,9 +142,9 @@ class _FileEditorPanelState extends State<FileEditorPanel> {
 
         final activeTab = state.activeTab!;
         CodeController? controller;
-        if (!activeTab.isDiff && activeTab.content != null) {
+        if (!activeTab.isDiff && !_isImage(activeTab.filePath) && activeTab.content != null) {
           controller = _controllerFor(activeTab, context);
-        } else if (!activeTab.isDiff) {
+        } else if (!activeTab.isDiff && !_isImage(activeTab.filePath)) {
           controller = _controllerFor(activeTab, context);
         }
 
@@ -184,9 +185,11 @@ class _FileEditorPanelState extends State<FileEditorPanel> {
                               ? _ErrorView(message: activeTab.error!)
                               : activeTab.isDiff
                                   ? _DiffBody(tab: activeTab)
-                                  : _previewPaths.contains(activeTab.filePath)
-                                      ? _MarkdownPreview(content: activeTab.content ?? '')
-                                      : _EditorBody(key: ValueKey(activeTab.filePath), tab: activeTab, codeController: controller!, fontSizeNotifier: _fontSizeNotifier),
+                                  : _isImage(activeTab.filePath)
+                                      ? _ImagePreview(filePath: activeTab.filePath)
+                                      : _previewPaths.contains(activeTab.filePath)
+                                          ? _MarkdownPreview(content: activeTab.content ?? '')
+                                          : _EditorBody(key: ValueKey(activeTab.filePath), tab: activeTab, codeController: controller!, fontSizeNotifier: _fontSizeNotifier),
                     ),
                     // Toggle bar: floats at top, fades in/out without affecting layout
                     Positioned(
@@ -238,6 +241,11 @@ class _FileEditorPanelState extends State<FileEditorPanel> {
   static bool _isMarkdown(String filePath) {
     final ext = filePath.split('.').last.toLowerCase();
     return ext == 'md' || ext == 'mdx' || ext == 'markdown';
+  }
+
+  static bool _isImage(String filePath) {
+    final ext = filePath.split('.').last.toLowerCase();
+    return const {'png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'ico', 'svg'}.contains(ext);
   }
 }
 
@@ -475,6 +483,74 @@ class _MarkdownPreview extends StatelessWidget {
           ),
           a: TextStyle(color: colors.primary, decoration: TextDecoration.underline),
         ),
+      ),
+    );
+  }
+}
+
+// ── Image / SVG preview ────────────────────────────────────────────────────
+
+class _ImagePreview extends StatelessWidget {
+  const _ImagePreview({required this.filePath});
+  final String filePath;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.appColors;
+    final ext = filePath.split('.').last.toLowerCase();
+    final isSvg = ext == 'svg';
+    final fileName = filePath.split('/').last;
+
+    return Container(
+      color: colors.background,
+      child: Column(
+        children: [
+          Container(
+            height: 32,
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            decoration: BoxDecoration(
+              color: colors.surface,
+              border: Border(bottom: BorderSide(color: colors.border)),
+            ),
+            child: Row(
+              children: [
+                Icon(Icons.image_outlined, size: 14, color: AppColors.textMuted),
+                const SizedBox(width: 6),
+                Text(
+                  fileName,
+                  style: const TextStyle(color: AppColors.textMuted, fontSize: 12),
+                ),
+                const SizedBox(width: 6),
+                Text(
+                  ext.toUpperCase(),
+                  style: const TextStyle(color: AppColors.textMuted, fontSize: 11),
+                ),
+              ],
+            ),
+          ),
+          Expanded(
+            child: InteractiveViewer(
+              minScale: 0.1,
+              maxScale: 10,
+              child: Center(
+                child: isSvg
+                    ? SvgPicture.file(
+                        File(filePath),
+                        placeholderBuilder: (_) => const CircularProgressIndicator(),
+                      )
+                    : Image.file(
+                        File(filePath),
+                        errorBuilder: (_, error, __) => Center(
+                          child: Text(
+                            'Cannot load image',
+                            style: const TextStyle(color: AppColors.textMuted),
+                          ),
+                        ),
+                      ),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
