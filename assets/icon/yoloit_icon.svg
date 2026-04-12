@@ -1,0 +1,53 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <!-- Background -->
+  <rect width="1024" height="1024" fill="#0C0C0F"/>
+
+  <!--
+    YoLoIT logo
+    Edit font-size, x, y to adjust positions.
+    font-family can be changed to any installed font.
+    Big letters: Y, L
+    Small letters: o (bottom-left), o (top-right), IT (bottom-right)
+  -->
+
+  <!-- Big Y -->
+  <text
+    x="200" y="660"
+    font-family="Helvetica Neue, Helvetica, Arial, sans-serif"
+    font-weight="300"
+    font-size="580"
+    fill="#FFFFFF">Y</text>
+
+  <!-- Big L -->
+  <text
+    x="490" y="660"
+    font-family="Helvetica Neue, Helvetica, Arial, sans-serif"
+    font-weight="300"
+    font-size="580"
+    fill="#FFFFFF">L</text>
+
+  <!-- Small o — bottom-left (part of "Yo") -->
+  <text
+    x="88" y="730"
+    font-family="Helvetica Neue, Helvetica, Arial, sans-serif"
+    font-weight="400"
+    font-size="160"
+    fill="#FFFFFF">o</text>
+
+  <!-- Small o — top-right (part of "Lo") -->
+  <text
+    x="800" y="310"
+    font-family="Helvetica Neue, Helvetica, Arial, sans-serif"
+    font-weight="400"
+    font-size="160"
+    fill="#FFFFFF">o</text>
+
+  <!-- IT — bottom-right -->
+  <text
+    x="800" y="730"
+    font-family="Helvetica Neue, Helvetica, Arial, sans-serif"
+    font-weight="400"
+    font-size="160"
+    fill="#FFFFFF">IT</text>
+
+</svg>
