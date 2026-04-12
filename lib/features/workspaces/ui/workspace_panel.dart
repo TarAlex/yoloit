@@ -575,7 +575,7 @@ class _ActiveWorkspaceCard extends StatefulWidget {
   });
   final Color accentColor;
   final Widget tile;
-  final dynamic workspace;
+  final Workspace workspace;
 
   @override
   State<_ActiveWorkspaceCard> createState() => _ActiveWorkspaceCardState();
