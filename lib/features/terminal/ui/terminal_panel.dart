@@ -270,7 +270,7 @@ class _AgentTabState extends State<_AgentTab> {
           height: 32,
           child: Row(
             children: [
-              Icon(Icons.drive_file_rename_outline, size: 14, color: context.appColors.textSecondary),
+              Icon(Icons.drive_file_rename_outline, size: 14, color: AppColors.textMuted),
               const SizedBox(width: 8),
               const Text('Rename', style: TextStyle(fontSize: 13)),
             ],
@@ -281,7 +281,7 @@ class _AgentTabState extends State<_AgentTab> {
           height: 32,
           child: Row(
             children: [
-              Icon(Icons.close, size: 14, color: context.appColors.textSecondary),
+              Icon(Icons.close, size: 14, color: AppColors.textMuted),
               const SizedBox(width: 8),
               const Text('Close', style: TextStyle(fontSize: 13)),
             ],

@@ -644,13 +644,16 @@ class _ConsoleState extends State<_Console> {
                         overflow: TextOverflow.ellipsis,
                       ),
                     ),
-                    if (session.startedAt != null)
+                    if (session.startedAt != null) ...[
+                      const SizedBox(width: 6),
                       Text(
                         _formatTime(session.startedAt!),
                         style: const TextStyle(
                             color: AppColors.textMuted, fontSize: 10),
+                        overflow: TextOverflow.ellipsis,
                       ),
-                    const SizedBox(width: 8),
+                    ],
+                    const SizedBox(width: 6),
                     Tooltip(
                       message: 'Copy all (⌘A)',
                       child: InkWell(
