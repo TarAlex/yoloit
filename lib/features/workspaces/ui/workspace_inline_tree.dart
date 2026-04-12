@@ -315,21 +315,19 @@ class _AddBranchField extends StatelessWidget {
             child: TextField(
               controller: controller,
               autofocus: true,
-              style: const TextStyle(color: AppColors.textPrimary, fontSize: 11),
+              style: TextStyle(color: colors.primary, fontSize: 11),
               decoration: InputDecoration(
-                hintText: 'branch name',
+                hintText: 'branch-name',
                 hintStyle: const TextStyle(color: AppColors.textMuted, fontSize: 11),
                 isDense: true,
-                contentPadding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
-                filled: true,
-                fillColor: colors.surfaceHighlight,
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(4),
-                  borderSide: BorderSide(color: colors.border),
+                contentPadding: const EdgeInsets.symmetric(horizontal: 0, vertical: 2),
+                filled: false,
+                border: InputBorder.none,
+                enabledBorder: UnderlineInputBorder(
+                  borderSide: BorderSide(color: colors.border, width: 1),
                 ),
-                focusedBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(4),
-                  borderSide: BorderSide(color: colors.primary),
+                focusedBorder: UnderlineInputBorder(
+                  borderSide: BorderSide(color: colors.primary, width: 1),
                 ),
               ),
               onSubmitted: (v) {
@@ -342,7 +340,7 @@ class _AddBranchField extends StatelessWidget {
           const SizedBox(width: 4),
           GestureDetector(
             onTap: onCancel,
-            child: const Icon(Icons.close, size: 12, color: AppColors.textMuted),
+            child: const Icon(Icons.close, size: 11, color: AppColors.textMuted),
           ),
         ],
       ),

@@ -371,15 +371,11 @@ class _NewAgentSessionDialogState extends State<NewAgentSessionDialog> {
 }
 
 // ---------------------------------------------------------------------------
-// _BranchPickerField
+// _BranchPickerField — uses OverlayPortal so the dropdown floats above layout
 // ---------------------------------------------------------------------------
 
-/// A searchable branch picker.
-///
-/// - Shows a TextField with the current branch.
-/// - On focus, expands a filtered list below.
-/// - If typed text doesn't match any branch exactly, shows a "Create …" row.
-/// - Selecting a row collapses the list and calls [onBranchSelected].
+/// A searchable branch picker that shows a floating dropdown (via OverlayPortal)
+/// so the parent dialog never resizes when the list opens.
 class _BranchPickerField extends StatefulWidget {
   const _BranchPickerField({
     required this.currentBranch,
@@ -400,10 +396,13 @@ class _BranchPickerField extends StatefulWidget {
 }
 
 class _BranchPickerFieldState extends State<_BranchPickerField> {
+  final _layerLink = LayerLink();
+  final _overlayController = OverlayPortalController();
   late final TextEditingController _ctrl;
   final FocusNode _focusNode = FocusNode();
-  bool _open = false;
   String _query = '';
+
+  bool get _open => _overlayController.isShowing;
 
   @override
   void initState() {
@@ -423,31 +422,27 @@ class _BranchPickerFieldState extends State<_BranchPickerField> {
   void _onFocusChange() {
     if (_focusNode.hasFocus) {
       setState(() {
-        _open = true;
         _query = '';
         _ctrl.selection =
             TextSelection(baseOffset: 0, extentOffset: _ctrl.text.length);
       });
+      _overlayController.show();
     }
   }
 
   void _select(String branch, {bool isNew = false}) {
     _ctrl.text = branch;
     _focusNode.unfocus();
-    setState(() {
-      _open = false;
-      _query = '';
-    });
+    _overlayController.hide();
+    setState(() => _query = '');
     widget.onBranchSelected(branch, isNew);
   }
 
   void _close() {
     _ctrl.text = widget.currentBranch;
     _focusNode.unfocus();
-    setState(() {
-      _open = false;
-      _query = '';
-    });
+    _overlayController.hide();
+    setState(() => _query = '');
   }
 
   List<String> get _filtered {
@@ -473,14 +468,13 @@ class _BranchPickerFieldState extends State<_BranchPickerField> {
   @override
   Widget build(BuildContext context) {
     final colors = widget.colors;
-    final filtered = _filtered;
-    final showCreate = _query.isNotEmpty && !_exactMatch;
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        // ── Text field ──────────────────────────────────────────────────────
-        TextField(
+    return CompositedTransformTarget(
+      link: _layerLink,
+      child: OverlayPortal(
+        controller: _overlayController,
+        overlayChildBuilder: (_) => _buildOverlay(colors),
+        child: TextField(
           controller: _ctrl,
           focusNode: _focusNode,
           style: const TextStyle(color: AppColors.textPrimary, fontSize: 12),
@@ -491,11 +485,7 @@ class _BranchPickerFieldState extends State<_BranchPickerField> {
               _close();
               return;
             }
-            if (_exactMatch) {
-              _select(q);
-            } else {
-              _select(q, isNew: true);
-            }
+            _exactMatch ? _select(q) : _select(q, isNew: true);
           },
           decoration: InputDecoration(
             hintText: 'Search or create branch…',
@@ -503,94 +493,129 @@ class _BranchPickerFieldState extends State<_BranchPickerField> {
                 const TextStyle(color: AppColors.textMuted, fontSize: 12),
             isDense: true,
             contentPadding:
-                const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
             filled: true,
             fillColor: colors.surfaceHighlight,
             prefixIcon: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 8),
-              child: Icon(Icons.call_split, size: 13, color: colors.primary),
+              padding: const EdgeInsets.symmetric(horizontal: 10),
+              child:
+                  Icon(Icons.call_split, size: 13, color: colors.primary),
             ),
             prefixIconConstraints: const BoxConstraints(minWidth: 0),
             suffixIcon: _open
                 ? GestureDetector(
                     onTap: _close,
-                    child: const Icon(Icons.close,
-                        size: 14, color: AppColors.textMuted),
+                    child: const Padding(
+                      padding: EdgeInsets.symmetric(horizontal: 10),
+                      child: Icon(Icons.close,
+                          size: 14, color: AppColors.textMuted),
+                    ),
                   )
-                : const Icon(Icons.unfold_more,
-                    size: 14, color: AppColors.textMuted),
+                : const Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 10),
+                    child: Icon(Icons.unfold_more,
+                        size: 14, color: AppColors.textMuted),
+                  ),
+            suffixIconConstraints: const BoxConstraints(minWidth: 0),
             border: OutlineInputBorder(
-              borderRadius:
-                  _open ? const BorderRadius.vertical(top: Radius.circular(6)) : BorderRadius.circular(6),
+              borderRadius: BorderRadius.circular(6),
               borderSide: BorderSide(color: colors.border),
             ),
             enabledBorder: OutlineInputBorder(
-              borderRadius:
-                  _open ? const BorderRadius.vertical(top: Radius.circular(6)) : BorderRadius.circular(6),
+              borderRadius: BorderRadius.circular(6),
               borderSide: BorderSide(color: colors.border),
             ),
             focusedBorder: OutlineInputBorder(
-              borderRadius:
-                  _open ? const BorderRadius.vertical(top: Radius.circular(6)) : BorderRadius.circular(6),
+              borderRadius: BorderRadius.circular(6),
               borderSide: BorderSide(color: colors.primary),
             ),
           ),
         ),
-        // ── Dropdown list ────────────────────────────────────────────────────
-        if (_open)
-          Container(
-            constraints: const BoxConstraints(maxHeight: 200),
-            decoration: BoxDecoration(
-              color: colors.surfaceHighlight,
-              borderRadius:
-                  const BorderRadius.vertical(bottom: Radius.circular(6)),
-              border: Border(
-                left: BorderSide(color: colors.primary),
-                right: BorderSide(color: colors.primary),
-                bottom: BorderSide(color: colors.primary),
+      ),
+    );
+  }
+
+  Widget _buildOverlay(AppColorScheme colors) {
+    final filtered = _filtered;
+    final showCreate = _query.isNotEmpty && !_exactMatch;
+
+    return Positioned.fill(
+      child: GestureDetector(
+        // tap outside to close
+        behavior: HitTestBehavior.translucent,
+        onTap: _close,
+        child: CompositedTransformFollower(
+          link: _layerLink,
+          showWhenUnlinked: false,
+          targetAnchor: Alignment.bottomLeft,
+          followerAnchor: Alignment.topLeft,
+          child: Align(
+            alignment: Alignment.topLeft,
+            child: GestureDetector(
+              // prevent the tap-outside closing when clicking inside the list
+              onTap: () {},
+              child: Material(
+                color: Colors.transparent,
+                child: Container(
+                  constraints: const BoxConstraints(maxHeight: 220),
+                  decoration: BoxDecoration(
+                    color: colors.surfaceHighlight,
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(color: colors.primary),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withAlpha(60),
+                        blurRadius: 8,
+                        offset: const Offset(0, 4),
+                      ),
+                    ],
+                  ),
+                  child: ListView(
+                    shrinkWrap: true,
+                    padding: const EdgeInsets.symmetric(vertical: 4),
+                    children: [
+                      if (filtered.isEmpty && !showCreate)
+                        const Padding(
+                          padding: EdgeInsets.symmetric(
+                              horizontal: 12, vertical: 10),
+                          child: Text(
+                            'No branches found',
+                            style: TextStyle(
+                                color: AppColors.textMuted, fontSize: 11),
+                          ),
+                        ),
+                      ...filtered.map((branch) {
+                        final isActive =
+                            widget.checkedOutBranches.contains(branch);
+                        return _BranchRow(
+                          branch: branch,
+                          isActive: isActive,
+                          isCurrent: branch == widget.currentBranch,
+                          colors: colors,
+                          onTap: () => _select(branch),
+                        );
+                      }),
+                      if (showCreate) ...[
+                        if (filtered.isNotEmpty)
+                          Divider(
+                              height: 1,
+                              color: colors.border,
+                              indent: 12,
+                              endIndent: 12),
+                        _CreateRow(
+                          branchName: _query,
+                          colors: colors,
+                          onTap: () => _select(_query, isNew: true),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
               ),
             ),
-            child: ListView(
-              shrinkWrap: true,
-              padding: const EdgeInsets.symmetric(vertical: 4),
-              children: [
-                if (filtered.isEmpty && !showCreate)
-                  const Padding(
-                    padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                    child: Text(
-                      'No branches found',
-                      style: TextStyle(
-                          color: AppColors.textMuted, fontSize: 11),
-                    ),
-                  ),
-                ...filtered.map((branch) {
-                  final isActive =
-                      widget.checkedOutBranches.contains(branch);
-                  return _BranchRow(
-                    branch: branch,
-                    isActive: isActive,
-                    isCurrent: branch == widget.currentBranch,
-                    colors: colors,
-                    onTap: () => _select(branch),
-                  );
-                }),
-                if (showCreate) ...[
-                  if (filtered.isNotEmpty)
-                    Divider(
-                        height: 1,
-                        color: colors.border,
-                        indent: 12,
-                        endIndent: 12),
-                  _CreateRow(
-                    branchName: _query,
-                    colors: colors,
-                    onTap: () => _select(_query, isNew: true),
-                  ),
-                ],
-              ],
-            ),
           ),
-      ],
+        ),
+      ),
     );
   }
 }
