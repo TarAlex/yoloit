@@ -90,16 +90,21 @@ class _MainShellState extends State<MainShell> with WindowListener {
 
   Future<void> _autoCheckForUpdate() async {
     if (!mounted) return;
+
+    // Never auto-check in dev builds (debug/profile mode)
+    if (UpdateService.isDevBuild) return;
+
     final autoEnabled = await SessionPrefs.isAutoUpdateCheckEnabled();
     if (!autoEnabled) return;
 
-    // Throttle: max once per day
+    // Throttle: at most once per 24 hours
     final lastMs = await SessionPrefs.getLastUpdateCheckMs();
     if (lastMs != null) {
       final elapsed = DateTime.now().millisecondsSinceEpoch - lastMs;
       if (elapsed < const Duration(hours: 24).inMilliseconds) return;
     }
 
+    // force: false → UpdateService will also check isDevBuild (double guard)
     final info = await UpdateService.checkForUpdate();
     if (mounted && info != null) {
       setState(() => _pendingUpdate = info);

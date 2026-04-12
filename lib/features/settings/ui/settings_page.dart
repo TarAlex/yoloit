@@ -1029,7 +1029,7 @@ class _AboutSectionState extends State<_AboutSection> {
 
   Future<void> _checkNow() async {
     setState(() { _checking = true; _upToDateMsg = null; _updateInfo = null; });
-    final info = await UpdateService.checkForUpdate();
+    final info = await UpdateService.checkForUpdate(force: true);
     if (!mounted) return;
     setState(() {
       _checking = false;
@@ -1057,15 +1057,32 @@ class _AboutSectionState extends State<_AboutSection> {
             children: [
               Row(
                 children: [
-                  const Expanded(
+                  Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text('yoloit — AI Orchestrator',
+                        const Text('yoloit — AI Orchestrator',
                             style: TextStyle(color: AppColors.textPrimary, fontSize: 14, fontWeight: FontWeight.w600)),
-                        SizedBox(height: 2),
-                        Text('v${UpdateService.currentVersion}',
-                            style: TextStyle(color: AppColors.textMuted, fontSize: 11)),
+                        const SizedBox(height: 4),
+                        Row(
+                          children: [
+                            Text('v${UpdateService.currentVersion}',
+                                style: const TextStyle(color: AppColors.textMuted, fontSize: 11)),
+                            if (UpdateService.isDevBuild) ...[
+                              const SizedBox(width: 6),
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                                decoration: BoxDecoration(
+                                  color: AppColors.neonOrange.withAlpha(30),
+                                  borderRadius: BorderRadius.circular(3),
+                                  border: Border.all(color: AppColors.neonOrange.withAlpha(80)),
+                                ),
+                                child: const Text('DEV',
+                                    style: TextStyle(color: AppColors.neonOrange, fontSize: 8, fontWeight: FontWeight.w700, letterSpacing: 0.5)),
+                              ),
+                            ],
+                          ],
+                        ),
                       ],
                     ),
                   ),
@@ -1117,7 +1134,7 @@ class _AboutSectionState extends State<_AboutSection> {
                 ],
               ),
               const SizedBox(height: 4),
-              const Text('Checks GitHub releases once per day when enabled.',
+              const Text('Checks GitHub releases once per day in release builds.',
                   style: TextStyle(color: AppColors.textMuted, fontSize: 10)),
 
               const SizedBox(height: 16),

@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:yoloit/core/session/session_prefs.dart';
 
 // ── UpdateInfo ────────────────────────────────────────────────────────────────
@@ -44,12 +45,21 @@ class UpdateService {
   static const _apiUrl =
       'https://api.github.com/repos/$_owner/$_repo/releases/latest';
 
+  /// True when running in debug/profile mode (flutter run, DevTools, IDE).
+  /// Release builds produced by `flutter build macos --release` return false.
+  static bool get isDevBuild => kDebugMode || kProfileMode;
+
   // ── Public API ─────────────────────────────────────────────────────────────
 
   /// Checks GitHub for a newer release.
   /// Returns [UpdateInfo] when an update is available, null otherwise.
   /// Also updates the last-check timestamp in prefs.
-  static Future<UpdateInfo?> checkForUpdate() async {
+  ///
+  /// Pass [force] = true to skip the dev-build guard (e.g. "Check Now" button).
+  static Future<UpdateInfo?> checkForUpdate({bool force = false}) async {
+    // Never auto-check in dev builds — only allow manual force-check
+    if (!force && isDevBuild) return null;
+
     try {
       final info = await _fetchLatestRelease();
       await SessionPrefs.saveLastUpdateCheckMs(
