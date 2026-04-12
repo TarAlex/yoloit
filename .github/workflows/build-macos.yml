@@ -1,11 +1,12 @@
 name: Build macOS Release
 
 on:
-  push:
-    tags:
-      - 'v*.*.*'          # Triggered by version tags: v1.0.0, v1.2.3-beta, etc.
   workflow_dispatch:
     inputs:
+      version:
+        description: 'Release version (e.g. v0.0.1)'
+        required: true
+        default: 'v0.0.1'
       create_release:
         description: 'Create GitHub Release'
         required: false
@@ -59,15 +60,12 @@ jobs:
       - name: Derive build version
         id: version
         run: |
-          # Use git tag if available, otherwise use run number
-          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
-            VERSION="${GITHUB_REF#refs/tags/v}"
-          else
-            BASE_VERSION=$(grep '^version:' pubspec.yaml | sed 's/version: //' | cut -d'+' -f1)
-            VERSION="${BASE_VERSION}+${{ github.run_number }}"
-          fi
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
-          echo "Build version: $VERSION"
+          VERSION="${{ github.event.inputs.version }}"
+          # Strip leading 'v' for pubspec build number usage
+          VERSION_CLEAN="${VERSION#v}"
+          echo "version=$VERSION_CLEAN" >> $GITHUB_OUTPUT
+          echo "tag=$VERSION" >> $GITHUB_OUTPUT
+          echo "Build version: $VERSION_CLEAN (tag: $VERSION)"
 
       # ── Code signing (optional) ──────────────────────────────────────────────
       # These secrets are optional. If not set, app is built unsigned (development only).
@@ -179,18 +177,14 @@ jobs:
 
       # ── GitHub Release ───────────────────────────────────────────────────────
       - name: Create GitHub Release
-        if: startsWith(github.ref, 'refs/tags/v') || github.event.inputs.create_release == 'true'
+        if: github.event.inputs.create_release == 'true'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ steps.version.outputs.version }}
+          RELEASE_TAG: ${{ steps.version.outputs.tag }}
           DMG_NAME: ${{ steps.package.outputs.dmg_name }}
           SIGNED: ${{ steps.signing.outputs.signed }}
         run: |
-          RELEASE_TAG="${GITHUB_REF#refs/tags/}"
-          if [[ "$GITHUB_REF" != refs/tags/* ]]; then
-            RELEASE_TAG="build-${{ github.run_number }}"
-          fi
-
           SIGN_NOTE=""
           if [ "$SIGNED" = "false" ]; then
             SIGN_NOTE=" ⚠️ **Unsigned build** — for development/testing only"
@@ -198,15 +192,15 @@ jobs:
 
           gh release delete "$RELEASE_TAG" --yes 2>/dev/null || true
           gh release create "$RELEASE_TAG" \
-            --title "yoloit macOS $VERSION" \
-            --notes "macOS build $VERSION (run #${{ github.run_number }})${SIGN_NOTE}
+            --title "yoloit macOS $RELEASE_TAG" \
+            --notes "macOS build $RELEASE_TAG (run #${{ github.run_number }})${SIGN_NOTE}
 
 ## Installation
 1. Download the DMG
 2. Open DMG and drag yoloit.app to Applications
 $([ "$SIGNED" = "false" ] && echo "3. Right-click → Open (first launch, unsigned build)")
 " \
-            $([[ "$GITHUB_REF" != refs/tags/v* ]] && echo "--prerelease") \
+            --prerelease \
             "$DMG_NAME"
 
       # ── Cleanup ──────────────────────────────────────────────────────────────
