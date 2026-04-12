@@ -275,27 +275,26 @@ class _AgentTabState extends State<_AgentTab> {
       child: GestureDetector(
         onTap: _editing ? null : widget.onTap,
         onDoubleTap: _editing ? null : _startEditing,
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 100),
-          margin: const EdgeInsets.symmetric(horizontal: 2, vertical: 6),
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10),
           decoration: BoxDecoration(
-            color: widget.isActive
-                ? colors.tabActiveBg
-                : _hovering
-                    ? colors.surfaceHighlight
-                    : Colors.transparent,
-            borderRadius: BorderRadius.circular(6),
-            border: widget.isActive
-                ? Border.all(color: colors.primary.withAlpha(80))
-                : null,
+            color: widget.isActive ? colors.background : Colors.transparent,
+            border: Border(
+              bottom: BorderSide(
+                color: widget.isActive ? colors.primary : Colors.transparent,
+                width: 2,
+              ),
+            ),
           ),
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
               Text(
                 session.type.iconLabel,
-                style: TextStyle(fontSize: 12, color: colors.primaryLight),
+                style: TextStyle(
+                  fontSize: 12,
+                  color: widget.isActive ? colors.primaryLight : AppColors.textMuted,
+                ),
               ),
               const SizedBox(width: 5),
               if (_editing)
@@ -330,48 +329,36 @@ class _AgentTabState extends State<_AgentTab> {
                 Text(
                   session.displayName,
                   style: TextStyle(
-                    color: widget.isActive ? AppColors.textPrimary : AppColors.textSecondary,
+                    color: widget.isActive ? colors.primaryLight : AppColors.textSecondary,
                     fontSize: 12,
-                    fontWeight: widget.isActive ? FontWeight.w600 : FontWeight.w400,
+                    fontWeight: widget.isActive ? FontWeight.w600 : FontWeight.normal,
                   ),
                 ),
               const SizedBox(width: 5),
+              // Compact status dot
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                width: 6,
+                height: 6,
                 decoration: BoxDecoration(
-                  color: statusColor.withAlpha(30),
-                  borderRadius: BorderRadius.circular(3),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Container(
-                      width: 4,
-                      height: 4,
-                      decoration: BoxDecoration(
-                        color: statusColor,
-                        shape: BoxShape.circle,
-                      ),
-                    ),
-                    const SizedBox(width: 3),
-                    Text(
-                      isLive ? 'Live' : 'Idle',
-                      style: TextStyle(
-                        color: statusColor,
-                        fontSize: 9,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ],
+                  color: statusColor,
+                  shape: BoxShape.circle,
                 ),
               ),
               if (!_editing) ...[
                 const SizedBox(width: 4),
-                Opacity(
-                  opacity: _hovering ? 1.0 : 0.0,
-                  child: GestureDetector(
-                    onTap: _hovering ? widget.onClose : null,
-                    child: const Icon(Icons.close, size: 10, color: AppColors.textMuted),
+                SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: Opacity(
+                    opacity: _hovering || widget.isActive ? 1.0 : 0.0,
+                    child: GestureDetector(
+                      onTap: widget.onClose,
+                      child: Icon(
+                        Icons.close,
+                        size: 12,
+                        color: _hovering ? AppColors.textPrimary : AppColors.textMuted,
+                      ),
+                    ),
                   ),
                 ),
               ],
@@ -738,22 +725,27 @@ class _TerminalWidgetState extends State<_TerminalWidget> {
   }
 }
 
-class _AddSessionButton extends StatelessWidget {
+class _AddSessionButton extends StatefulWidget {
   const _AddSessionButton({required this.workspace});
-
   final Workspace workspace;
 
+  @override
+  State<_AddSessionButton> createState() => _AddSessionButtonState();
+}
+
+class _AddSessionButtonState extends State<_AddSessionButton> {
+  bool _hovering = false;
+
   Future<void> _showDialog(BuildContext context) async {
-    // Load worktrees for all repos in the workspace
     final worktrees = <String, List<WorktreeEntry>>{};
-    for (final repoPath in workspace.paths) {
+    for (final repoPath in widget.workspace.paths) {
       worktrees[repoPath] =
           await WorktreeService.instance.listWorktrees(repoPath);
     }
     if (!context.mounted) return;
     showNewAgentSessionDialog(
       context,
-      workspace: workspace,
+      workspace: widget.workspace,
       worktrees: worktrees,
     );
   }
@@ -763,19 +755,25 @@ class _AddSessionButton extends StatelessWidget {
     final colors = context.appColors;
     return Tooltip(
       message: 'New agent session',
-      child: GestureDetector(
-        onTap: () => _showDialog(context),
-        child: MouseRegion(
-          cursor: SystemMouseCursors.click,
-          child: Container(
-            width: 28,
-            height: 28,
+      child: MouseRegion(
+        onEnter: (_) => setState(() => _hovering = true),
+        onExit: (_) => setState(() => _hovering = false),
+        cursor: SystemMouseCursors.click,
+        child: GestureDetector(
+          onTap: () => _showDialog(context),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 100),
+            width: 20,
+            height: 20,
             decoration: BoxDecoration(
-              color: colors.primary.withAlpha(40),
-              borderRadius: BorderRadius.circular(6),
-              border: Border.all(color: colors.primary.withAlpha(80)),
+              color: _hovering ? colors.surfaceElevated : Colors.transparent,
+              borderRadius: BorderRadius.circular(3),
             ),
-            child: Icon(Icons.add, size: 16, color: colors.primaryLight),
+            child: Icon(
+              Icons.add,
+              size: 14,
+              color: _hovering ? AppColors.textPrimary : AppColors.textMuted,
+            ),
           ),
         ),
       ),
