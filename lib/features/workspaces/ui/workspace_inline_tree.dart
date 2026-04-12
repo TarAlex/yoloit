@@ -471,12 +471,14 @@ class _SessionRowState extends State<_SessionRow> {
                 overflow: TextOverflow.ellipsis,
               ),
             ),
-            if (_hovered)
-              GestureDetector(
+            Opacity(
+              opacity: _hovered ? 1.0 : 0.0,
+              child: GestureDetector(
                 onTap: () =>
                     context.read<TerminalCubit>().closeSession(widget.session.id),
                 child: const Icon(Icons.close, size: 12, color: AppColors.textMuted),
               ),
+            ),
           ],
         ),
       ),
