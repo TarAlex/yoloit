@@ -983,20 +983,15 @@ class _WorkspaceTileState extends State<_WorkspaceTile> {
                         ),
                       ),
                     ),
-                    AnimatedOpacity(
-                      opacity: _hovering ? 1.0 : 0.0,
-                      duration: const Duration(milliseconds: 150),
-                      child: IgnorePointer(
-                        ignoring: !_hovering,
-                        child: Builder(
-                          builder: (ctx) => _SmallIconButton(
-                            icon: Icons.more_horiz,
-                            onTap: () => _showMenu(ctx),
-                            tooltip: 'More actions',
-                          ),
+                    // ⋯ menu — only occupies layout space when hovered to prevent overflow
+                    if (_hovering)
+                      Builder(
+                        builder: (ctx) => _SmallIconButton(
+                          icon: Icons.more_horiz,
+                          onTap: () => _showMenu(ctx),
+                          tooltip: 'More actions',
                         ),
                       ),
-                    ),
                   ],
                 ),
                 // Color picker row
