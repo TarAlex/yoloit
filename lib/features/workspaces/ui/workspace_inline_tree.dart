@@ -548,9 +548,27 @@ class _NewAgentSessionDialog extends StatefulWidget {
 }
 
 class _NewAgentSessionDialogState extends State<_NewAgentSessionDialog> {
+  static const _kCreateNew = '__create_new__';
+  static const _kBranchPrefix = '__branch__:';
+
   AgentType _agentType = AgentType.copilot;
   late Map<String, String> _selectedPaths;
   final _nameController = TextEditingController();
+
+  /// repoPath → all local branches (from `git branch --list`)
+  Map<String, List<String>> _allBranches = {};
+
+  /// repoPath → whether the "new branch" text field is currently visible
+  final Map<String, bool> _showingNewBranch = {};
+
+  /// repoPath → controller for new-branch name input
+  final Map<String, TextEditingController> _newBranchCtrls = {};
+
+  /// repoPath → inline error message
+  final Map<String, String?> _errors = {};
+
+  /// repoPath → busy (creating worktree)
+  final Map<String, bool> _busy = {};
 
   @override
   void initState() {
@@ -559,12 +577,98 @@ class _NewAgentSessionDialogState extends State<_NewAgentSessionDialog> {
       for (final entry in widget.worktrees.entries)
         if (entry.value.isNotEmpty) entry.key: entry.value.first.path,
     };
+    _loadBranches();
+  }
+
+  Future<void> _loadBranches() async {
+    final results = <String, List<String>>{};
+    for (final repoPath in widget.worktrees.keys) {
+      results[repoPath] = await WorktreeService.instance.listBranches(repoPath);
+    }
+    if (mounted) setState(() => _allBranches = results);
   }
 
   @override
   void dispose() {
     _nameController.dispose();
+    for (final c in _newBranchCtrls.values) {
+      c.dispose();
+    }
     super.dispose();
+  }
+
+  /// Branches that are already checked out as worktrees for [repoPath].
+  Set<String> _checkedOutBranches(String repoPath) {
+    return widget.worktrees[repoPath]
+            ?.map((wt) => wt.branch)
+            .whereType<String>()
+            .toSet() ??
+        {};
+  }
+
+  /// Creates a worktree for an existing [branch] in [repoPath], selects it.
+  Future<void> _checkoutBranch(String repoPath, String branch) async {
+    setState(() {
+      _busy[repoPath] = true;
+      _errors[repoPath] = null;
+    });
+    final worktreePath = p.join(
+      p.dirname(repoPath),
+      '${p.basename(repoPath)}__${branch.replaceAll('/', '-')}',
+    );
+    final err = await WorktreeService.instance.addWorktree(
+      repoPath,
+      worktreePath,
+      branch,
+    );
+    if (!mounted) return;
+    if (err != null) {
+      setState(() {
+        _busy[repoPath] = false;
+        _errors[repoPath] = err;
+        // Revert to first available worktree
+        final first = widget.worktrees[repoPath]?.first;
+        if (first != null) _selectedPaths[repoPath] = first.path;
+      });
+    } else {
+      setState(() {
+        _busy[repoPath] = false;
+        _selectedPaths[repoPath] = worktreePath;
+      });
+    }
+  }
+
+  /// Creates a NEW branch + worktree from HEAD.
+  Future<void> _createBranch(String repoPath, String newBranch) async {
+    if (newBranch.isEmpty) return;
+    setState(() {
+      _busy[repoPath] = true;
+      _errors[repoPath] = null;
+    });
+    final worktreePath = p.join(
+      p.dirname(repoPath),
+      '${p.basename(repoPath)}__${newBranch.replaceAll('/', '-')}',
+    );
+    final err = await WorktreeService.instance.addWorktree(
+      repoPath,
+      worktreePath,
+      newBranch,
+      createNewBranch: true,
+    );
+    if (!mounted) return;
+    if (err != null) {
+      setState(() {
+        _busy[repoPath] = false;
+        _errors[repoPath] = err;
+      });
+    } else {
+      _newBranchCtrls[repoPath]?.clear();
+      setState(() {
+        _busy[repoPath] = false;
+        _showingNewBranch[repoPath] = false;
+        _selectedPaths[repoPath] = worktreePath;
+      });
+    }
   }
 
   @override
@@ -579,7 +683,7 @@ class _NewAgentSessionDialogState extends State<_NewAgentSessionDialog> {
       child: Padding(
         padding: const EdgeInsets.all(20),
         child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 420),
+          constraints: const BoxConstraints(maxWidth: 440),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -614,40 +718,7 @@ class _NewAgentSessionDialogState extends State<_NewAgentSessionDialog> {
                   if (v != null) setState(() => _agentType = v);
                 },
               ),
-              ...widget.worktrees.entries.map((e) {
-                final repoName = p.basename(e.key);
-                final entries = e.value;
-                if (entries.isEmpty) return const SizedBox.shrink();
-                return Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const SizedBox(height: 12),
-                    Text(
-                      repoName,
-                      style: const TextStyle(
-                        color: AppColors.textMuted,
-                        fontSize: 10,
-                        letterSpacing: 0.8,
-                      ),
-                    ),
-                    const SizedBox(height: 6),
-                    DropdownButton<String>(
-                      value: _selectedPaths[e.key],
-                      dropdownColor: colors.surfaceHighlight,
-                      style: const TextStyle(color: AppColors.textPrimary, fontSize: 12),
-                      underline: Container(height: 1, color: colors.border),
-                      isExpanded: true,
-                      items: entries.map((wt) {
-                        final label = wt.branch ?? wt.commit ?? '(detached)';
-                        return DropdownMenuItem(value: wt.path, child: Text(label));
-                      }).toList(),
-                      onChanged: (v) {
-                        if (v != null) setState(() => _selectedPaths[e.key] = v);
-                      },
-                    ),
-                  ],
-                );
-              }),
+              ...widget.worktrees.entries.map((e) => _buildRepoSection(e.key, e.value, colors)),
               const SizedBox(height: 12),
               const Text(
                 'Session Name (optional)',
@@ -688,7 +759,7 @@ class _NewAgentSessionDialogState extends State<_NewAgentSessionDialog> {
                       backgroundColor: colors.primary,
                       foregroundColor: AppColors.textHighlight,
                     ),
-                    onPressed: _confirm,
+                    onPressed: _anyBusy ? null : _confirm,
                     child: const Text('Start', style: TextStyle(fontSize: 12)),
                   ),
                 ],
@@ -697,6 +768,204 @@ class _NewAgentSessionDialogState extends State<_NewAgentSessionDialog> {
           ),
         ),
       ),
+    );
+  }
+
+  bool get _anyBusy => _busy.values.any((v) => v);
+
+  Widget _buildRepoSection(
+    String repoPath,
+    List<WorktreeEntry> worktrees,
+    AppColorScheme colors,
+  ) {
+    if (worktrees.isEmpty) return const SizedBox.shrink();
+
+    final repoName = p.basename(repoPath);
+    final checkedOut = _checkedOutBranches(repoPath);
+    final allBranches = _allBranches[repoPath] ?? [];
+    final otherBranches = allBranches.where((b) => !checkedOut.contains(b)).toList();
+    final isBusy = _busy[repoPath] ?? false;
+    final showNewField = _showingNewBranch[repoPath] ?? false;
+    final error = _errors[repoPath];
+
+    final newBranchCtrl = _newBranchCtrls.putIfAbsent(
+      repoPath,
+      () => TextEditingController(),
+    );
+
+    // Build dropdown items
+    final items = <DropdownMenuItem<String>>[];
+
+    // --- Active worktrees ---
+    for (final wt in worktrees) {
+      final label = wt.branch ?? wt.commit ?? '(detached)';
+      items.add(DropdownMenuItem(
+        value: wt.path,
+        child: Row(
+          children: [
+            Icon(Icons.account_tree_outlined, size: 11, color: colors.primary),
+            const SizedBox(width: 6),
+            Expanded(child: Text(label, overflow: TextOverflow.ellipsis)),
+          ],
+        ),
+      ));
+    }
+
+    // --- Other branches (not yet worktrees) ---
+    if (otherBranches.isNotEmpty) {
+      // Section header (disabled item used as label)
+      items.add(DropdownMenuItem(
+        enabled: false,
+        value: null,
+        child: Divider(color: colors.border, height: 1),
+      ));
+      for (final branch in otherBranches) {
+        items.add(DropdownMenuItem(
+          value: '$_kBranchPrefix$branch',
+          child: Row(
+            children: [
+              Icon(Icons.call_split, size: 11, color: AppColors.textSecondary),
+              const SizedBox(width: 6),
+              Expanded(child: Text(branch, overflow: TextOverflow.ellipsis)),
+            ],
+          ),
+        ));
+      }
+    }
+
+    // --- Create new branch ---
+    items.add(DropdownMenuItem(
+      enabled: otherBranches.isNotEmpty || worktrees.isNotEmpty,
+      value: null,
+      child: Divider(color: colors.border, height: 1),
+    ));
+    items.add(DropdownMenuItem(
+      value: _kCreateNew,
+      child: Row(
+        children: [
+          Icon(Icons.add, size: 12, color: colors.primary),
+          const SizedBox(width: 6),
+          Text('New branch…', style: TextStyle(color: colors.primary, fontSize: 12)),
+        ],
+      ),
+    ));
+
+    final currentValue = _selectedPaths[repoPath];
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const SizedBox(height: 12),
+        Text(
+          repoName,
+          style: const TextStyle(color: AppColors.textMuted, fontSize: 10, letterSpacing: 0.8),
+        ),
+        const SizedBox(height: 6),
+        if (isBusy)
+          SizedBox(
+            height: 32,
+            child: Row(
+              children: [
+                SizedBox(
+                  width: 14,
+                  height: 14,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 1.5,
+                    color: colors.primary,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                const Text(
+                  'Creating worktree…',
+                  style: TextStyle(color: AppColors.textMuted, fontSize: 12),
+                ),
+              ],
+            ),
+          )
+        else
+          DropdownButton<String>(
+            value: currentValue,
+            dropdownColor: colors.surfaceHighlight,
+            style: const TextStyle(color: AppColors.textPrimary, fontSize: 12),
+            underline: Container(height: 1, color: colors.border),
+            isExpanded: true,
+            items: items,
+            onChanged: (v) {
+              if (v == null) return;
+              if (v == _kCreateNew) {
+                setState(() {
+                  _showingNewBranch[repoPath] = true;
+                  _errors[repoPath] = null;
+                });
+              } else if (v.startsWith(_kBranchPrefix)) {
+                final branch = v.substring(_kBranchPrefix.length);
+                _checkoutBranch(repoPath, branch);
+              } else {
+                setState(() => _selectedPaths[repoPath] = v);
+              }
+            },
+          ),
+        // New-branch inline field
+        if (showNewField && !isBusy) ...[
+          const SizedBox(height: 6),
+          Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: newBranchCtrl,
+                  autofocus: true,
+                  style: const TextStyle(color: AppColors.textPrimary, fontSize: 12),
+                  decoration: InputDecoration(
+                    hintText: 'branch-name',
+                    hintStyle: const TextStyle(color: AppColors.textMuted, fontSize: 12),
+                    isDense: true,
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                    filled: true,
+                    fillColor: colors.surfaceHighlight,
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(4),
+                      borderSide: BorderSide(color: colors.border),
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(4),
+                      borderSide: BorderSide(color: colors.primary),
+                    ),
+                  ),
+                  onSubmitted: (v) => _createBranch(repoPath, v.trim()),
+                ),
+              ),
+              const SizedBox(width: 6),
+              IconButton(
+                icon: Icon(Icons.check, size: 16, color: colors.primary),
+                tooltip: 'Create branch',
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                onPressed: () => _createBranch(repoPath, newBranchCtrl.text.trim()),
+              ),
+              IconButton(
+                icon: const Icon(Icons.close, size: 16, color: AppColors.textSecondary),
+                tooltip: 'Cancel',
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                onPressed: () => setState(() {
+                  _showingNewBranch[repoPath] = false;
+                  _errors[repoPath] = null;
+                  newBranchCtrl.clear();
+                }),
+              ),
+            ],
+          ),
+        ],
+        if (error != null) ...[
+          const SizedBox(height: 4),
+          Text(
+            error,
+            style: const TextStyle(color: Colors.red, fontSize: 10),
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ],
+      ],
     );
   }
 
