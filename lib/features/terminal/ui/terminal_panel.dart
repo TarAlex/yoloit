@@ -260,6 +260,39 @@ class _AgentTabState extends State<_AgentTab> {
     setState(() => _editing = false);
   }
 
+  void _showContextMenu(BuildContext context, Offset position) async {
+    final result = await showMenu<String>(
+      context: context,
+      position: RelativeRect.fromLTRB(position.dx, position.dy, position.dx + 1, position.dy + 1),
+      items: [
+        PopupMenuItem(
+          value: 'rename',
+          height: 32,
+          child: Row(
+            children: [
+              Icon(Icons.drive_file_rename_outline, size: 14, color: context.appColors.textSecondary),
+              const SizedBox(width: 8),
+              const Text('Rename', style: TextStyle(fontSize: 13)),
+            ],
+          ),
+        ),
+        PopupMenuItem(
+          value: 'close',
+          height: 32,
+          child: Row(
+            children: [
+              Icon(Icons.close, size: 14, color: context.appColors.textSecondary),
+              const SizedBox(width: 8),
+              const Text('Close', style: TextStyle(fontSize: 13)),
+            ],
+          ),
+        ),
+      ],
+    );
+    if (result == 'rename') _startEditing();
+    if (result == 'close') widget.onClose();
+  }
+
   @override
   Widget build(BuildContext context) {
     final colors = context.appColors;
@@ -275,6 +308,7 @@ class _AgentTabState extends State<_AgentTab> {
       child: GestureDetector(
         onTap: _editing ? null : widget.onTap,
         onDoubleTap: _editing ? null : _startEditing,
+        onSecondaryTapDown: _editing ? null : (d) => _showContextMenu(context, d.globalPosition),
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 10),
           decoration: BoxDecoration(
