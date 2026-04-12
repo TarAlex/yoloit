@@ -14,7 +14,10 @@ import 'package:yoloit/features/terminal/models/agent_session.dart';
 import 'package:yoloit/features/terminal/models/agent_type.dart';
 import 'package:yoloit/features/workspaces/bloc/workspace_cubit.dart';
 import 'package:yoloit/features/workspaces/bloc/workspace_state.dart';
+import 'package:yoloit/features/workspaces/data/worktree_service.dart';
 import 'package:yoloit/features/workspaces/models/workspace.dart';
+import 'package:yoloit/features/workspaces/models/worktree_model.dart';
+import 'package:yoloit/features/workspaces/ui/new_agent_session_dialog.dart';
 import 'package:yoloit/core/theme/app_color_scheme.dart';
 
 class TerminalPanel extends StatelessWidget {
@@ -178,10 +181,7 @@ class _TerminalHeader extends StatelessWidget {
                   border: Border(left: BorderSide(color: colors.border)),
                 ),
                 padding: const EdgeInsets.symmetric(horizontal: 8),
-                child: _AddSessionButton(
-                  workspacePath: workspace.workspaceDir,
-                  workspaceId: workspace.id,
-                ),
+                child: _AddSessionButton(workspace: workspace),
               );
             },
           ),
@@ -739,53 +739,23 @@ class _TerminalWidgetState extends State<_TerminalWidget> {
 }
 
 class _AddSessionButton extends StatelessWidget {
-  const _AddSessionButton({
-    required this.workspacePath,
-    required this.workspaceId,
-  });
+  const _AddSessionButton({required this.workspace});
 
-  final String workspacePath;
-  final String workspaceId;
+  final Workspace workspace;
 
-  void _showMenu(BuildContext context) {
-    final renderBox = context.findRenderObject() as RenderBox;
-    final offset = renderBox.localToGlobal(Offset.zero);
-    final size = renderBox.size;
-
-    showMenu<AgentType>(
-      context: context,
-      position: RelativeRect.fromLTRB(
-        offset.dx,
-        offset.dy + size.height,
-        offset.dx + size.width,
-        0,
-      ),
-      items: AgentType.values.map((type) {
-        final colors = context.appColors;
-        return PopupMenuItem<AgentType>(
-          value: type,
-          height: 36,
-          child: Row(
-            children: [
-              Text(type.iconLabel, style: TextStyle(fontSize: 13, color: colors.primaryLight)),
-              const SizedBox(width: 8),
-              Text(
-                type.displayName,
-                style: TextStyle(color: AppColors.textPrimary, fontSize: 13),
-              ),
-            ],
-          ),
-        );
-      }).toList(),
-    ).then((type) {
-      if (type != null && context.mounted) {
-        context.read<TerminalCubit>().spawnSession(
-              type: type,
-              workspacePath: workspacePath,
-              workspaceId: workspaceId,
-            );
-      }
-    });
+  Future<void> _showDialog(BuildContext context) async {
+    // Load worktrees for all repos in the workspace
+    final worktrees = <String, List<WorktreeEntry>>{};
+    for (final repoPath in workspace.paths) {
+      worktrees[repoPath] =
+          await WorktreeService.instance.listWorktrees(repoPath);
+    }
+    if (!context.mounted) return;
+    showNewAgentSessionDialog(
+      context,
+      workspace: workspace,
+      worktrees: worktrees,
+    );
   }
 
   @override
@@ -794,7 +764,7 @@ class _AddSessionButton extends StatelessWidget {
     return Tooltip(
       message: 'New agent session',
       child: GestureDetector(
-        onTap: () => _showMenu(context),
+        onTap: () => _showDialog(context),
         child: MouseRegion(
           cursor: SystemMouseCursors.click,
           child: Container(
