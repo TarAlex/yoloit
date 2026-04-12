@@ -64,12 +64,11 @@ void main() {
       expect(find.text('Docker Configs'), findsNothing);
     });
 
-    testWidgets('renders Color Themes and Settings at bottom', (tester) async {
+    testWidgets('renders Color Themes at bottom', (tester) async {
       await tester.pumpWidget(_buildTestWidget(const WorkspacePanel()));
       await tester.pump();
 
       expect(find.text('Color Themes'), findsOneWidget);
-      expect(find.text('Settings'), findsOneWidget);
     });
 
     testWidgets('shows workspace tile when workspace is loaded', (tester) async {

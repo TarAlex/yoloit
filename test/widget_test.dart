@@ -31,7 +31,10 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   setUp(() async {
-    SharedPreferences.setMockInitialValues({});
+    // Mark setup as complete so SetupGuidePage is not shown.
+    // SetupGuidePage runs Process.run calls in initState which create
+    // pending timers that can't complete in fakeAsync test context.
+    SharedPreferences.setMockInitialValues({'app.setupCompleted': true});
     await ThemeManager.instance.load();
   });
 
@@ -44,7 +47,8 @@ void main() {
     // All three panels attempt to render
     expect(find.byType(MaterialApp), findsOneWidget);
 
-    // Drain pending timers (e.g. 600ms focus delay in MainShell.initState)
-    await tester.pump(const Duration(seconds: 1));
+    // Drain all pending timers from MainShell.initState
+    // (600ms focus, 800ms window setup, 3s auto-update check)
+    await tester.pump(const Duration(seconds: 4));
   });
 }

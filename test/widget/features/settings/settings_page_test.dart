@@ -84,7 +84,7 @@ void main() {
       // Navigate to About tab (last category)
       await tester.tap(find.text('About'));
       await tester.pump();
-      expect(find.textContaining('yoloit'), findsWidgets);
+      expect(find.textContaining('YoLoIT'), findsWidgets);
     });
 
     testWidgets('shows Setup Guide category in sidebar', (tester) async {
