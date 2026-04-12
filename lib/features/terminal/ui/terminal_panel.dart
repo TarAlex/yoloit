@@ -255,9 +255,10 @@ class _AgentTabState extends State<_AgentTab> {
   }
 
   void _commitRename() {
+    if (!_editing) return;           // guard against double-call (onSubmitted + focus lost)
     final name = _nameController.text.trim();
-    widget.onRename(name);
     setState(() => _editing = false);
+    widget.onRename(name);
   }
 
   void _showContextMenu(BuildContext context, Offset position) async {

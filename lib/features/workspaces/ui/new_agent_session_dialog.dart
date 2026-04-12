@@ -162,6 +162,8 @@ class _NewAgentSessionDialogState extends State<NewAgentSessionDialog> {
     if (!mounted) return;
     final cubit = context.read<TerminalCubit>();
     final name = _nameController.text.trim();
+    // Generate ID here so we can rename after spawn with the same ID.
+    final sessionId = '${_agentType.name}_${DateTime.now().millisecondsSinceEpoch}';
 
     final contexts = <String, String>{};
     for (final repoPath in widget.worktrees.keys) {
@@ -173,13 +175,10 @@ class _NewAgentSessionDialogState extends State<NewAgentSessionDialog> {
       type: _agentType,
       workspacePath: widget.workspace.workspaceDir,
       workspaceId: widget.workspace.id,
+      savedSessionId: sessionId,   // sets the ID, isRestore=false so command still runs
       worktreeContexts: contexts.isEmpty ? null : contexts,
     );
-    if (name.isNotEmpty) {
-      // The sessionId mirrors what spawnSession generates internally.
-      final sessionId = '${_agentType.name}_${DateTime.now().millisecondsSinceEpoch}';
-      cubit.renameSession(sessionId, name);
-    }
+    if (name.isNotEmpty) cubit.renameSession(sessionId, name);
     if (!mounted) return;
     Navigator.of(context).pop();
     widget.onSpawned();
