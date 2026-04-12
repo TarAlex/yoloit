@@ -43,7 +43,81 @@ class SetupCheckResult {
 class SetupCheckService {
   const SetupCheckService._();
 
+  /// Builds an extended PATH that includes common macOS tool locations which
+  /// are not present in the GUI app's minimal process environment.
+  static String _buildExtendedPath() {
+    final current = Platform.environment['PATH'] ?? '';
+    final home = Platform.environment['HOME'] ?? '';
+
+    // Collect candidate directories in priority order
+    final candidates = <String>[
+      // Homebrew (Apple Silicon)
+      '/opt/homebrew/bin',
+      '/opt/homebrew/sbin',
+      // Homebrew (Intel)
+      '/usr/local/bin',
+      '/usr/local/sbin',
+      // Standard macOS locations
+      '/usr/bin',
+      '/bin',
+      '/usr/sbin',
+      '/sbin',
+    ];
+
+    if (home.isNotEmpty) {
+      candidates.addAll([
+        // NVM active version (symlink)
+        '$home/.nvm/versions/node/current/bin',
+        // Volta
+        '$home/.volta/bin',
+        // pyenv
+        '$home/.pyenv/shims',
+        '$home/.pyenv/bin',
+        // Cargo (Rust)
+        '$home/.cargo/bin',
+        // Local bin
+        '$home/.local/bin',
+        '$home/bin',
+      ]);
+
+      // Probe NVM directory for the highest installed version
+      final nvmDir = '$home/.nvm/versions/node';
+      try {
+        final dir = Directory(nvmDir);
+        if (dir.existsSync()) {
+          final versions = dir
+              .listSync()
+              .whereType<Directory>()
+              .map((d) => d.path)
+              .toList()
+            ..sort((a, b) => b.compareTo(a)); // descending → highest first
+          for (final v in versions.take(3)) {
+            candidates.add('$v/bin');
+          }
+        }
+      } catch (_) {
+        // ignore — directory might not exist
+      }
+    }
+
+    // Merge with the current PATH, deduplicating while preserving order
+    final existing = current.split(':').where((p) => p.isNotEmpty).toSet();
+    final merged = <String>[
+      ...candidates.where((c) => !existing.contains(c)),
+      ...current.split(':').where((p) => p.isNotEmpty),
+    ];
+
+    return merged.join(':');
+  }
+
+  /// Cached extended PATH (built once per process lifetime).
+  static String? _extendedPath;
+
+  static String get _path => _extendedPath ??= _buildExtendedPath();
+
   static Future<SetupCheckResult> check() async {
+    // Reset cached path so Re-check picks up newly installed tools.
+    _extendedPath = null;
     final results = await Future.wait([
       _checkAll(),
     ]);
@@ -107,10 +181,13 @@ class SetupCheckService {
       _checkTool(
         id: 'copilot',
         name: 'GitHub Copilot',
-        description: 'AI coding agent by GitHub — run with copilot --allow-all',
-        command: 'copilot',
-        versionArgs: ['--version'],
-        installHint: 'npm install -g @github/copilot-cli',
+        description: 'AI coding agent by GitHub — run with gh copilot or copilot --allow-all',
+        // 'gh copilot' is the modern agent; fall back to legacy 'copilot' npm package
+        command: 'gh',
+        versionArgs: ['copilot', '--version'],
+        fallbackCommand: 'copilot',
+        fallbackVersionArgs: ['--version'],
+        installHint: 'gh extension install github/gh-copilot',
         installUrl: 'https://docs.github.com/en/copilot/github-copilot-in-the-cli',
         isRequired: false,
       ),
@@ -169,52 +246,65 @@ class SetupCheckService {
     required String command,
     required List<String> versionArgs,
     required String installHint,
+    String? fallbackCommand,
+    List<String>? fallbackVersionArgs,
     String? installUrl,
     bool isRequired = false,
   }) async {
-    try {
-      // First check if it's in PATH
-      final whichResult = await Process.run('which', [command]);
-      if (whichResult.exitCode != 0) {
+    final env = Map<String, String>.from(Platform.environment)
+      ..['PATH'] = _path;
+
+    Future<DependencyStatus?> tryCommand(
+        String cmd, List<String> verArgs) async {
+      try {
+        final whichResult = await Process.run(
+          'which', [cmd],
+          environment: env,
+        );
+        if (whichResult.exitCode != 0) return null;
+
+        final versionResult = await Process.run(cmd, verArgs, environment: env)
+            .timeout(const Duration(seconds: 5));
+        final versionOutput =
+            (versionResult.stdout as String).trim().isNotEmpty
+                ? (versionResult.stdout as String).trim().split('\n').first
+                : (versionResult.stderr as String).trim().split('\n').first;
+
         return DependencyStatus(
           id: id,
           name: name,
           description: description,
           installHint: installHint,
           installUrl: installUrl,
-          isAvailable: false,
+          isAvailable: true,
+          version: _cleanVersion(versionOutput),
           isRequired: isRequired,
         );
+      } catch (_) {
+        return null;
       }
-
-      // Get version string
-      final versionResult = await Process.run(command, versionArgs)
-          .timeout(const Duration(seconds: 5));
-      final versionOutput = (versionResult.stdout as String).trim().isNotEmpty
-          ? (versionResult.stdout as String).trim().split('\n').first
-          : (versionResult.stderr as String).trim().split('\n').first;
-
-      return DependencyStatus(
-        id: id,
-        name: name,
-        description: description,
-        installHint: installHint,
-        installUrl: installUrl,
-        isAvailable: true,
-        version: _cleanVersion(versionOutput),
-        isRequired: isRequired,
-      );
-    } catch (_) {
-      return DependencyStatus(
-        id: id,
-        name: name,
-        description: description,
-        installHint: installHint,
-        installUrl: installUrl,
-        isAvailable: false,
-        isRequired: isRequired,
-      );
     }
+
+    // Try primary command first
+    final primary = await tryCommand(command, versionArgs);
+    if (primary != null) return primary;
+
+    // Try fallback command if provided
+    if (fallbackCommand != null) {
+      final fallback = await tryCommand(
+          fallbackCommand, fallbackVersionArgs ?? versionArgs);
+      if (fallback != null) return fallback;
+    }
+
+    return DependencyStatus(
+      id: id,
+      name: name,
+      description: description,
+      installHint: installHint,
+      installUrl: installUrl,
+      isAvailable: false,
+      isRequired: isRequired,
+    );
   }
 
   static String _cleanVersion(String raw) {
