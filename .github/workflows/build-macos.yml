@@ -238,7 +238,7 @@ jobs:
           gh release create "$RELEASE_TAG" \
             --title "yoloit macOS $RELEASE_TAG" \
             --notes-file release-notes.md \
-            --prerelease \
+            --latest \
             "$DMG_NAME"
 
       # ── Cleanup ──────────────────────────────────────────────────────────────
