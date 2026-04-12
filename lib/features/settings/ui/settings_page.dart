@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:yoloit/core/hotkeys/hotkey_definition.dart';
 import 'package:yoloit/core/hotkeys/hotkey_registry.dart';
 import 'package:yoloit/core/services/app_logger.dart';
+import 'package:yoloit/core/session/session_prefs.dart';
 import 'package:yoloit/core/theme/app_color_scheme.dart';
 import 'package:yoloit/core/theme/app_colors.dart';
 import 'package:yoloit/core/theme/app_theme.dart';
@@ -11,6 +12,7 @@ import 'package:yoloit/features/settings/data/agent_config_service.dart';
 import 'package:yoloit/features/settings/ui/setup_guide_page.dart';
 import 'package:yoloit/features/terminal/data/logging_service.dart';
 import 'package:yoloit/features/terminal/data/tmux_service.dart';
+import 'package:yoloit/features/updates/data/update_service.dart';
 
 const _kCategories = [
   'Appearance',
@@ -1007,41 +1009,227 @@ class _KeyCaptureDialogState extends State<_KeyCaptureDialog> {
   }
 }
 
-class _AboutSection extends StatelessWidget {
+class _AboutSection extends StatefulWidget {
+  @override
+  State<_AboutSection> createState() => _AboutSectionState();
+}
+
+class _AboutSectionState extends State<_AboutSection> {
+  bool _checking = false;
+  bool _autoCheck = true;
+  UpdateInfo? _updateInfo;
+  String? _upToDateMsg;
+
+  @override
+  void initState() {
+    super.initState();
+    SessionPrefs.isAutoUpdateCheckEnabled()
+        .then((v) { if (mounted) setState(() => _autoCheck = v); });
+  }
+
+  Future<void> _checkNow() async {
+    setState(() { _checking = true; _upToDateMsg = null; _updateInfo = null; });
+    final info = await UpdateService.checkForUpdate();
+    if (!mounted) return;
+    setState(() {
+      _checking = false;
+      _updateInfo = info;
+      if (info == null) _upToDateMsg = 'You are on the latest version (${UpdateService.currentVersion}).';
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     final colors = context.appColors;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // ── App info ────────────────────────────────────────────────────────
+        Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: colors.background,
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: colors.border),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  const Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('yoloit — AI Orchestrator',
+                            style: TextStyle(color: AppColors.textPrimary, fontSize: 14, fontWeight: FontWeight.w600)),
+                        SizedBox(height: 2),
+                        Text('v${UpdateService.currentVersion}',
+                            style: TextStyle(color: AppColors.textMuted, fontSize: 11)),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                'A Flutter desktop app for orchestrating AI CLI tools (GitHub Copilot, Claude Code) with embedded PTY terminals and git workspace management.',
+                style: TextStyle(color: AppColors.textMuted, fontSize: 12, height: 1.6),
+              ),
+              const SizedBox(height: 6),
+              const Text('Platform: macOS (primary) • Windows (coming soon)',
+                  style: TextStyle(color: AppColors.textMuted, fontSize: 11)),
+            ],
+          ),
+        ),
+        const SizedBox(height: 16),
+
+        // ── Update section ──────────────────────────────────────────────────
+        Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: colors.background,
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: colors.border),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('Updates',
+                  style: TextStyle(color: AppColors.textPrimary, fontSize: 12, fontWeight: FontWeight.w600)),
+              const SizedBox(height: 12),
+
+              // Auto-check toggle
+              Row(
+                children: [
+                  const Expanded(
+                    child: Text('Auto-check for updates',
+                        style: TextStyle(color: AppColors.textSecondary, fontSize: 12)),
+                  ),
+                  Switch(
+                    value: _autoCheck,
+                    activeColor: AppColors.neonBlue,
+                    onChanged: (v) {
+                      setState(() => _autoCheck = v);
+                      SessionPrefs.saveAutoUpdateCheckEnabled(v);
+                    },
+                  ),
+                ],
+              ),
+              const SizedBox(height: 4),
+              const Text('Checks GitHub releases once per day when enabled.',
+                  style: TextStyle(color: AppColors.textMuted, fontSize: 10)),
+
+              const SizedBox(height: 16),
+
+              // Check now button
+              Row(
+                children: [
+                  ElevatedButton.icon(
+                    onPressed: _checking ? null : _checkNow,
+                    icon: _checking
+                        ? const SizedBox(
+                            width: 12, height: 12,
+                            child: CircularProgressIndicator(strokeWidth: 1.5, color: Colors.white),
+                          )
+                        : const Icon(Icons.search, size: 14),
+                    label: Text(_checking ? 'Checking...' : 'Check for Updates'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: colors.surfaceElevated,
+                      foregroundColor: AppColors.textPrimary,
+                      textStyle: const TextStyle(fontSize: 11),
+                      side: BorderSide(color: colors.border),
+                      elevation: 0,
+                    ),
+                  ),
+                ],
+              ),
+
+              // Result
+              if (_upToDateMsg != null) ...[
+                const SizedBox(height: 10),
+                Row(children: [
+                  const Icon(Icons.check_circle_outline, size: 14, color: AppColors.neonGreen),
+                  const SizedBox(width: 6),
+                  Text(_upToDateMsg!, style: const TextStyle(color: AppColors.neonGreen, fontSize: 11)),
+                ]),
+              ],
+
+              if (_updateInfo != null) ...[
+                const SizedBox(height: 10),
+                _UpdateAvailableCard(
+                  info: _updateInfo!,
+                  onDownload: () => UpdateService.openRelease(_updateInfo!),
+                  onSkip: () async {
+                    await UpdateService.skipVersion(_updateInfo!.version);
+                    if (mounted) setState(() => _updateInfo = null);
+                  },
+                ),
+              ],
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _UpdateAvailableCard extends StatelessWidget {
+  const _UpdateAvailableCard({required this.info, required this.onDownload, required this.onSkip});
+  final UpdateInfo info;
+  final VoidCallback onDownload;
+  final VoidCallback onSkip;
+
+  @override
+  Widget build(BuildContext context) {
     return Container(
-      padding: EdgeInsets.all(14),
+      padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: colors.background,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: colors.border),
+        color: AppColors.neonBlue.withAlpha(15),
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: AppColors.neonBlue.withAlpha(60)),
       ),
-      child: const Column(
+      child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            'yoloit — AI Orchestrator',
-            style: TextStyle(
-              color: AppColors.textPrimary,
-              fontSize: 14,
-              fontWeight: FontWeight.w600,
-            ),
+          Row(
+            children: [
+              const Icon(Icons.system_update_alt_rounded, size: 14, color: AppColors.neonBlue),
+              const SizedBox(width: 8),
+              Text('${info.tagName} is available!',
+                  style: const TextStyle(color: AppColors.textPrimary, fontSize: 12, fontWeight: FontWeight.w600)),
+            ],
           ),
-          SizedBox(height: 6),
-          Text(
-            'A Flutter desktop app for orchestrating AI CLI tools (GitHub Copilot, Claude Code) with embedded PTY terminals and git workspace management.',
-            style: TextStyle(
-              color: AppColors.textMuted,
-              fontSize: 12,
-              height: 1.6,
+          if (info.releaseNotes.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Text(
+              info.releaseNotes.length > 200
+                  ? '${info.releaseNotes.substring(0, 200)}...'
+                  : info.releaseNotes,
+              style: const TextStyle(color: AppColors.textMuted, fontSize: 10, height: 1.5),
             ),
-          ),
-          SizedBox(height: 10),
-          Text(
-            'Platform: macOS (primary) • Windows (coming soon)',
-            style: TextStyle(color: AppColors.textMuted, fontSize: 11),
+          ],
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              ElevatedButton.icon(
+                onPressed: onDownload,
+                icon: const Icon(Icons.download_rounded, size: 14),
+                label: const Text('Download'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.neonBlue,
+                  foregroundColor: Colors.white,
+                  textStyle: const TextStyle(fontSize: 11),
+                  elevation: 0,
+                ),
+              ),
+              const SizedBox(width: 8),
+              TextButton(
+                onPressed: onSkip,
+                child: const Text('Skip this version',
+                    style: TextStyle(fontSize: 10, color: AppColors.textMuted)),
+              ),
+            ],
           ),
         ],
       ),

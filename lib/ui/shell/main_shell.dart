@@ -25,6 +25,8 @@ import 'package:yoloit/features/workspaces/bloc/workspace_state.dart';
 import 'package:yoloit/features/workspaces/ui/workspace_panel.dart';
 import 'package:yoloit/core/services/resource_monitor_service.dart';
 import 'package:yoloit/features/settings/ui/setup_guide_page.dart';
+import 'package:yoloit/features/updates/data/update_service.dart';
+import 'package:yoloit/features/updates/ui/update_banner.dart';
 import 'package:yoloit/ui/widgets/activity_rail.dart';
 import 'package:yoloit/ui/widgets/panel_shell.dart';
 import 'package:yoloit/ui/widgets/panel_visibility.dart';
@@ -43,6 +45,7 @@ class _MainShellState extends State<MainShell> with WindowListener {
   PanelVisibility _agentsVis    = PanelVisibility.open;
   PanelVisibility _fileTreeVis  = PanelVisibility.open;
   SessionSnapshot? _sessionSnapshot;
+  UpdateInfo? _pendingUpdate;
 
   @override
   void initState() {
@@ -80,7 +83,27 @@ class _MainShellState extends State<MainShell> with WindowListener {
       Future.delayed(const Duration(milliseconds: 800), () {
         if (mounted) SetupGuidePage.showIfFirstLaunch(context);
       });
+      // Auto-check for updates (once per day max)
+      Future.delayed(const Duration(seconds: 3), _autoCheckForUpdate);
     });
+  }
+
+  Future<void> _autoCheckForUpdate() async {
+    if (!mounted) return;
+    final autoEnabled = await SessionPrefs.isAutoUpdateCheckEnabled();
+    if (!autoEnabled) return;
+
+    // Throttle: max once per day
+    final lastMs = await SessionPrefs.getLastUpdateCheckMs();
+    if (lastMs != null) {
+      final elapsed = DateTime.now().millisecondsSinceEpoch - lastMs;
+      if (elapsed < const Duration(hours: 24).inMilliseconds) return;
+    }
+
+    final info = await UpdateService.checkForUpdate();
+    if (mounted && info != null) {
+      setState(() => _pendingUpdate = info);
+    }
   }
 
   void _openFileSearch() {
@@ -221,6 +244,15 @@ class _MainShellState extends State<MainShell> with WindowListener {
                   },
                   onSearch: _openFileSearch,
                 ),
+                if (_pendingUpdate != null)
+                  UpdateBanner(
+                    info: _pendingUpdate!,
+                    onDownload: () => UpdateService.openRelease(_pendingUpdate!),
+                    onDismiss: () async {
+                      await UpdateService.skipVersion(_pendingUpdate!.version);
+                      if (mounted) setState(() => _pendingUpdate = null);
+                    },
+                  ),
                 Expanded(
                   child: _FourPaneLayout(
                     workspacePanelKey: _workspacePanelKey,

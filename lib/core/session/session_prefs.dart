@@ -31,6 +31,11 @@ class SessionPrefs {
   // First-launch / setup
   static const _kSetupCompleted = 'app.setupCompleted';
 
+  // Updates
+  static const _kAutoUpdateCheck   = 'updates.autoCheck';
+  static const _kLastUpdateCheckMs = 'updates.lastCheckMs';
+  static const _kSkippedVersion    = 'updates.skippedVersion';
+
   // ── Load ─────────────────────────────────────────────────────────────────
   static Future<SessionSnapshot> load() async {
     final p = await SharedPreferences.getInstance();
@@ -89,6 +94,26 @@ class SessionPrefs {
 
   static Future<void> markSetupCompleted() async =>
       (await _p()).setBool(_kSetupCompleted, true);
+
+  // ── Update prefs ──────────────────────────────────────────────────────────
+
+  static Future<bool> isAutoUpdateCheckEnabled() async =>
+      (await _p()).getBool(_kAutoUpdateCheck) ?? true;
+
+  static Future<void> saveAutoUpdateCheckEnabled(bool v) async =>
+      (await _p()).setBool(_kAutoUpdateCheck, v);
+
+  static Future<int?> getLastUpdateCheckMs() async =>
+      (await _p()).getInt(_kLastUpdateCheckMs);
+
+  static Future<void> saveLastUpdateCheckMs(int ms) async =>
+      (await _p()).setInt(_kLastUpdateCheckMs, ms);
+
+  static Future<String?> getSkippedVersion() async =>
+      (await _p()).getString(_kSkippedVersion);
+
+  static Future<void> saveSkippedVersion(String v) async =>
+      (await _p()).setString(_kSkippedVersion, v);
 }
 
 /// Immutable snapshot of persisted session state.
