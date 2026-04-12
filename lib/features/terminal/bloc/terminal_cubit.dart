@@ -76,6 +76,7 @@ class TerminalCubit extends Cubit<TerminalState> {
           workspacePath: s.workspacePath,
           workspaceId: s.workspaceId ?? workspaceId,
           savedSessionId: s.id,
+          isRestore: true,
         );
       }
     } else {
@@ -94,6 +95,7 @@ class TerminalCubit extends Cubit<TerminalState> {
     required String workspacePath,
     String? workspaceId,
     String? savedSessionId,
+    bool isRestore = false,
     Map<String, String>? worktreeContexts,
   }) async {
     if (state is! TerminalLoaded) return;
@@ -156,7 +158,6 @@ class TerminalCubit extends Cubit<TerminalState> {
     }
 
     // Auto-run agent command (skip for plain terminal and when restoring tmux session).
-    final isRestore = savedSessionId != null;
     final effectiveCommand = AgentConfigService.instance.effectiveLaunchCommand(type);
     if (effectiveCommand.isNotEmpty && !(isRestore && _tmux.isActive)) {
       await Future<void>.delayed(const Duration(milliseconds: 1200));
