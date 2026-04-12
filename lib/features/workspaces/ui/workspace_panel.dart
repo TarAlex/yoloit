@@ -552,10 +552,20 @@ class _PathChipState extends State<_PathChip> {
               ),
               if (_hovering && widget.onRemove != null) ...[
                 const SizedBox(width: 3),
-                GestureDetector(
-                  onTap: widget.onRemove,
-                  child: Icon(Icons.close, size: 9, color: Colors.red.shade300),
+                AnimatedOpacity(
+                  opacity: _hovering ? 1.0 : 0.0,
+                  duration: const Duration(milliseconds: 150),
+                  child: IgnorePointer(
+                    ignoring: !_hovering,
+                    child: GestureDetector(
+                      onTap: widget.onRemove,
+                      child: Icon(Icons.close, size: 9, color: Colors.red.shade300),
+                    ),
+                  ),
                 ),
+              ] else if (widget.onRemove != null) ...[
+                const SizedBox(width: 3),
+                const SizedBox(width: 9),
               ],
             ],
           ),
@@ -783,14 +793,20 @@ class _WorkspaceTileState extends State<_WorkspaceTile> {
                           ),
                         ),
                       ),
-                    if (_hovering)
-                      Builder(
-                        builder: (ctx) => _SmallIconButton(
-                          icon: Icons.more_horiz,
-                          onTap: () => _showMenu(ctx),
-                          tooltip: 'More actions',
+                    AnimatedOpacity(
+                      opacity: _hovering ? 1.0 : 0.0,
+                      duration: const Duration(milliseconds: 150),
+                      child: IgnorePointer(
+                        ignoring: !_hovering,
+                        child: Builder(
+                          builder: (ctx) => _SmallIconButton(
+                            icon: Icons.more_horiz,
+                            onTap: () => _showMenu(ctx),
+                            tooltip: 'More actions',
+                          ),
                         ),
                       ),
+                    ),
                   ],
                 ),
                 // Color picker row
@@ -1348,16 +1364,22 @@ class _AgentSessionRowState extends State<_AgentSessionRow> {
                 overflow: TextOverflow.ellipsis,
               ),
             ),
-            if (_hovering)
-              GestureDetector(
-                onTap: () =>
-                    context.read<TerminalCubit>().closeSession(s.id),
-                child: Tooltip(
-                  message: 'Kill session',
-                  child: Icon(Icons.close,
-                      size: 12, color: Colors.red.shade300),
+            AnimatedOpacity(
+              opacity: _hovering ? 1.0 : 0.0,
+              duration: const Duration(milliseconds: 150),
+              child: IgnorePointer(
+                ignoring: !_hovering,
+                child: GestureDetector(
+                  onTap: () =>
+                      context.read<TerminalCubit>().closeSession(s.id),
+                  child: Tooltip(
+                    message: 'Kill session',
+                    child: Icon(Icons.close,
+                        size: 12, color: Colors.red.shade300),
+                  ),
                 ),
               ),
+            ),
           ],
         ),
       ),
@@ -1394,7 +1416,8 @@ class _RunSessionRowState extends State<_RunSessionRow> {
       onExit: (_) => setState(() => _hovering = false),
       child: GestureDetector(
         onTap: () => context.read<RunCubit>().setActiveSession(s.id),
-        child: Container(
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 150),
           padding: const EdgeInsets.fromLTRB(12, 4, 8, 4),
           color: _hovering ? colors.surfaceHighlight : Colors.transparent,
           child: Row(
@@ -1416,24 +1439,30 @@ class _RunSessionRowState extends State<_RunSessionRow> {
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
-              if (_hovering && s.status == RunStatus.running)
-                GestureDetector(
-                  onTap: () => context.read<RunCubit>().stopRun(s.id),
-                  child: Tooltip(
-                    message: 'Stop run',
-                    child: Icon(Icons.stop,
-                        size: 12, color: Colors.orange.shade300),
-                  ),
+              AnimatedOpacity(
+                opacity: _hovering ? 1.0 : 0.0,
+                duration: const Duration(milliseconds: 150),
+                child: IgnorePointer(
+                  ignoring: !_hovering,
+                  child: s.status == RunStatus.running
+                    ? GestureDetector(
+                        onTap: () => context.read<RunCubit>().stopRun(s.id),
+                        child: Tooltip(
+                          message: 'Stop run',
+                          child: Icon(Icons.stop,
+                              size: 12, color: Colors.orange.shade300),
+                        ),
+                      )
+                    : GestureDetector(
+                        onTap: () => context.read<RunCubit>().removeSession(s.id),
+                        child: Tooltip(
+                          message: 'Remove',
+                          child: Icon(Icons.close,
+                              size: 12, color: Colors.red.shade300),
+                        ),
+                      ),
                 ),
-              if (_hovering && s.status != RunStatus.running)
-                GestureDetector(
-                  onTap: () => context.read<RunCubit>().removeSession(s.id),
-                  child: Tooltip(
-                    message: 'Remove',
-                    child: Icon(Icons.close,
-                        size: 12, color: Colors.red.shade300),
-                  ),
-                ),
+              ),
             ],
           ),
         ),
