@@ -660,7 +660,8 @@ class _AgentsContent extends StatelessWidget {
           workspacePath: ws.workspaceDir,
         );
         context.read<RunCubit>().loadForWorkspace(ws.path);
-        context.read<ReviewCubit>().loadWorkspace(ws.paths);
+        context.read<ReviewCubit>().loadWorkspace(ws.paths, workspaceId: wsId);
+        context.read<FileEditorCubit>().setWorkspace(wsId);
       },
       child: const TerminalPanel(),
     );

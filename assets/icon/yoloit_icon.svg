@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+
+  <!-- Background -->
+  <rect width="1024" height="1024" fill="#0A0A0A"/>
+
+  <!--
+    YoLoIT — editable SVG source
+    ─────────────────────────────
+    Adjust x/y/font-size to position each letter.
+    font-weight: 400=Regular  700=Bold  900=Black
+    Open in Figma or browser (drag SVG into Safari/Chrome).
+  -->
+
+  <!-- Big Y — left, Black weight -->
+  <text x="90"  y="660"
+    font-family="Helvetica Neue, Helvetica, Arial, sans-serif"
+    font-weight="900" font-size="500" fill="#FFFFFF">Y</text>
+
+  <!-- Big L — overlaps Y's right arm -->
+  <text x="358" y="660"
+    font-family="Helvetica Neue, Helvetica, Arial, sans-serif"
+    font-weight="900" font-size="500" fill="#FFFFFF">L</text>
+
+  <!-- Big O — top-right, same baseline as Y/L -->
+  <text x="548" y="660"
+    font-family="Helvetica Neue, Helvetica, Arial, sans-serif"
+    font-weight="900" font-size="440" fill="#FFFFFF">O</text>
+
+  <!-- small o — bottom-left, between Y base and L -->
+  <text x="348" y="760"
+    font-family="Helvetica Neue, Helvetica, Arial, sans-serif"
+    font-weight="400" font-size="100" fill="#FFFFFF">o</text>
+
+  <!-- small IT — bottom-right, below O -->
+  <text x="548" y="760"
+    font-family="Helvetica Neue, Helvetica, Arial, sans-serif"
+    font-weight="400" font-size="100" fill="#FFFFFF">IT</text>
+
+</svg>

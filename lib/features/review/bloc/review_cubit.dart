@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:path/path.dart' as p;
 import 'package:yoloit/core/services/git_service.dart';
+import 'package:yoloit/core/session/session_prefs.dart';
 import 'package:yoloit/features/review/bloc/review_state.dart';
 import 'package:yoloit/features/review/data/diff_service.dart';
 import 'package:yoloit/features/review/data/file_viewer_service.dart';
@@ -12,12 +13,14 @@ class ReviewCubit extends Cubit<ReviewState> {
   ReviewCubit() : super(const ReviewInitial());
 
   List<String> _workspacePaths = [];
+  String? _workspaceId;
 
   /// Primary path used for git operations (first path in the list).
   String? get _primaryPath => _workspacePaths.isEmpty ? null : _workspacePaths.first;
 
-  Future<void> loadWorkspace(List<String> paths) async {
+  Future<void> loadWorkspace(List<String> paths, {String? workspaceId}) async {
     _workspacePaths = paths;
+    _workspaceId = workspaceId;
     emit(const ReviewLoaded(fileTree: [], changedFiles: []));
     await refresh();
   }
@@ -27,7 +30,7 @@ class ReviewCubit extends Cubit<ReviewState> {
 
     final current = _loaded;
     // Build a root node per path, each expanded one level.
-    final List<FileTreeNode> roots = [];
+    List<FileTreeNode> roots = [];
     for (final path in _workspacePaths) {
       final children = await _buildFileTree(path);
       roots.add(FileTreeNode(
@@ -45,6 +48,17 @@ class ReviewCubit extends Cubit<ReviewState> {
         final changed = await DiffService.instance.getChangedFiles(path);
         allChanged.addAll(changed);
       } catch (_) {}
+    }
+
+    // Restore previously expanded directories.
+    final id = _workspaceId;
+    if (id != null) {
+      final expandedPaths = await SessionPrefs.loadExpandedPaths(id);
+      for (final path in expandedPaths) {
+        // Skip root paths (already expanded above).
+        if (_workspacePaths.contains(path)) continue;
+        roots = _toggleNodeInTree(roots, path);
+      }
     }
 
     emit(ReviewLoaded(
@@ -104,6 +118,24 @@ class ReviewCubit extends Cubit<ReviewState> {
     if (current == null) return;
     final updatedTree = _toggleNodeInTree(current.fileTree, nodePath);
     emit(current.copyWith(fileTree: updatedTree));
+    _saveExpandedPaths(updatedTree);
+  }
+
+  void _saveExpandedPaths(List<FileTreeNode> tree) {
+    final id = _workspaceId;
+    if (id == null) return;
+    final paths = <String>[];
+    _collectExpandedPaths(tree, paths);
+    SessionPrefs.saveExpandedPaths(id, paths);
+  }
+
+  void _collectExpandedPaths(List<FileTreeNode> nodes, List<String> result) {
+    for (final node in nodes) {
+      if (node.isDirectory && node.isExpanded) {
+        result.add(node.path);
+        _collectExpandedPaths(node.children, result);
+      }
+    }
   }
 
   Future<void> stageFile(String filePath) async {

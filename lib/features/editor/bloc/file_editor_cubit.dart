@@ -3,11 +3,14 @@ import 'dart:io';
 
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:path/path.dart' as p;
+import 'package:yoloit/core/session/session_prefs.dart';
 import 'package:yoloit/features/editor/bloc/file_editor_state.dart';
 import 'package:yoloit/features/review/data/diff_service.dart';
 
 class FileEditorCubit extends Cubit<FileEditorState> {
   FileEditorCubit() : super(const FileEditorState());
+
+  String? _workspaceId;
 
   // Debounce timer per file path — auto-saves 800 ms after the last keystroke.
   final Map<String, Timer> _saveTimers = {};
@@ -20,12 +23,52 @@ class FileEditorCubit extends Cubit<FileEditorState> {
     return super.close();
   }
 
+  /// Called when the active workspace changes — clears current tabs and
+  /// restores the previously open files for [workspaceId].
+  Future<void> setWorkspace(String workspaceId) async {
+    _workspaceId = workspaceId;
+    for (final t in _saveTimers.values) t.cancel();
+    _saveTimers.clear();
+
+    final saved = await SessionPrefs.loadEditorTabs(workspaceId);
+    final paths = saved.paths.where((path) => File(path).existsSync()).toList();
+    if (paths.isEmpty) {
+      emit(const FileEditorState(tabs: [], activeIndex: 0, isVisible: false));
+      return;
+    }
+
+    // Show placeholders while loading.
+    final placeholders = paths.map((path) => EditorTab(filePath: path, isLoading: true)).toList();
+    final activeIndex = saved.activeIndex.clamp(0, placeholders.length - 1);
+    emit(FileEditorState(tabs: placeholders, activeIndex: activeIndex, isVisible: true));
+
+    // Load all files in parallel.
+    final loadedTabs = await Future.wait(paths.map((path) async {
+      if (_isImagePath(path)) return EditorTab(filePath: path);
+      try {
+        final content = await File(path).readAsString();
+        return EditorTab(filePath: path, content: content, originalContent: content);
+      } catch (e) {
+        return EditorTab(filePath: path, error: 'Cannot read file: $e');
+      }
+    }));
+
+    if (!isClosed) {
+      emit(FileEditorState(
+        tabs: loadedTabs,
+        activeIndex: activeIndex,
+        isVisible: true,
+      ));
+    }
+  }
+
   /// Opens [absolutePath] in a new tab; switches to it if already open.
   Future<void> openFile(String absolutePath) async {
     final existingIndex =
         state.tabs.indexWhere((t) => t.filePath == absolutePath);
     if (existingIndex != -1) {
       emit(state.copyWith(activeIndex: existingIndex, isVisible: true));
+      _saveTabsToPrefs();
       return;
     }
 
@@ -33,6 +76,7 @@ class FileEditorCubit extends Cubit<FileEditorState> {
     if (_isImagePath(absolutePath)) {
       final newTabs = [...state.tabs, EditorTab(filePath: absolutePath)];
       emit(state.copyWith(tabs: newTabs, activeIndex: newTabs.length - 1, isVisible: true));
+      _saveTabsToPrefs();
       return;
     }
 
@@ -51,6 +95,7 @@ class FileEditorCubit extends Cubit<FileEditorState> {
           originalContent: content,
         ),
       );
+      _saveTabsToPrefs();
     } catch (e) {
       _updateTab(
         absolutePath,
@@ -83,17 +128,20 @@ class FileEditorCubit extends Cubit<FileEditorState> {
     final newTabs = List<EditorTab>.from(state.tabs)..removeAt(index);
     if (newTabs.isEmpty) {
       emit(state.copyWith(tabs: newTabs, activeIndex: 0, isVisible: false));
+      _saveTabsToPrefs();
       return;
     }
     final newActive = (state.activeIndex >= newTabs.length)
         ? newTabs.length - 1
         : state.activeIndex;
     emit(state.copyWith(tabs: newTabs, activeIndex: newActive));
+    _saveTabsToPrefs();
   }
 
   void switchTab(int index) {
     if (index < 0 || index >= state.tabs.length) return;
     emit(state.copyWith(activeIndex: index));
+    _saveTabsToPrefs();
   }
 
   void closeFile() => closeTab(state.activeIndex);
@@ -180,5 +228,16 @@ class FileEditorCubit extends Cubit<FileEditorState> {
   static bool _isImagePath(String path) {
     final ext = path.split('.').last.toLowerCase();
     return const {'png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'ico'}.contains(ext);
+  }
+
+  void _saveTabsToPrefs() {
+    final id = _workspaceId;
+    if (id == null) return;
+    final paths = state.tabs
+        .where((t) => !t.isDiff)
+        .map((t) => t.filePath)
+        .toList();
+    final active = state.activeIndex.clamp(0, paths.isEmpty ? 0 : paths.length - 1);
+    SessionPrefs.saveEditorTabs(id, paths, active);
   }
 }

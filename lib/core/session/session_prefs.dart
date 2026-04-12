@@ -114,6 +114,29 @@ class SessionPrefs {
 
   static Future<void> saveSkippedVersion(String v) async =>
       (await _p()).setString(_kSkippedVersion, v);
+
+  // ── Editor tabs (per workspace) ───────────────────────────────────────────
+
+  static Future<void> saveEditorTabs(String workspaceId, List<String> paths, int activeIndex) async {
+    final p = await _p();
+    await p.setStringList('editor.tabs.$workspaceId', paths);
+    await p.setInt('editor.active.$workspaceId', activeIndex);
+  }
+
+  static Future<({List<String> paths, int activeIndex})> loadEditorTabs(String workspaceId) async {
+    final p = await _p();
+    final paths = p.getStringList('editor.tabs.$workspaceId') ?? [];
+    final active = p.getInt('editor.active.$workspaceId') ?? 0;
+    return (paths: paths, activeIndex: active);
+  }
+
+  // ── File tree expanded paths (per workspace) ──────────────────────────────
+
+  static Future<void> saveExpandedPaths(String workspaceId, List<String> paths) async =>
+      (await _p()).setStringList('filetree.expanded.$workspaceId', paths);
+
+  static Future<List<String>> loadExpandedPaths(String workspaceId) async =>
+      (await _p()).getStringList('filetree.expanded.$workspaceId') ?? [];
 }
 
 /// Immutable snapshot of persisted session state.
