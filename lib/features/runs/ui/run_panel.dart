@@ -631,39 +631,41 @@ class _ConsoleState extends State<_Console> {
                 height: 24,
                 padding: const EdgeInsets.symmetric(horizontal: 10),
                 color: AppColors.surface,
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        '> ${session.config.command}',
-                        style: const TextStyle(
-                          color: AppColors.textMuted,
-                          fontSize: 11,
-                          fontFamily: 'monospace',
+                child: ClipRect(
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          '> ${session.config.command}',
+                          style: const TextStyle(
+                            color: AppColors.textMuted,
+                            fontSize: 11,
+                            fontFamily: 'monospace',
+                          ),
+                          overflow: TextOverflow.ellipsis,
                         ),
-                        overflow: TextOverflow.ellipsis,
                       ),
-                    ),
-                    if (session.startedAt != null) ...[
+                      if (session.startedAt != null) ...[
+                        const SizedBox(width: 6),
+                        Text(
+                          _formatTime(session.startedAt!),
+                          style: const TextStyle(
+                              color: AppColors.textMuted, fontSize: 10),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
                       const SizedBox(width: 6),
-                      Text(
-                        _formatTime(session.startedAt!),
-                        style: const TextStyle(
-                            color: AppColors.textMuted, fontSize: 10),
-                        overflow: TextOverflow.ellipsis,
+                      Tooltip(
+                        message: 'Copy all (⌘A)',
+                        child: InkWell(
+                          onTap: _copyAll,
+                          child: const Icon(Icons.copy_outlined,
+                              size: 12, color: AppColors.textMuted),
+                        ),
                       ),
+                      const SizedBox(width: 6),
                     ],
-                    const SizedBox(width: 6),
-                    Tooltip(
-                      message: 'Copy all (⌘A)',
-                      child: InkWell(
-                        onTap: _copyAll,
-                        child: const Icon(Icons.copy_outlined,
-                            size: 12, color: AppColors.textMuted),
-                      ),
-                    ),
-                    const SizedBox(width: 6),
-                  ],
+                  ),
                 ),
               ),
               Expanded(

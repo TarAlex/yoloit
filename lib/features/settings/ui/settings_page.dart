@@ -331,13 +331,17 @@ class _AgentSettingsSectionState extends State<_AgentSettingsSection> {
 class _AgentRow extends StatefulWidget {
   const _AgentRow({
     required this.config,
+    required this.isDefault,
     required this.onChanged,
     required this.onDelete,
+    required this.onSetDefault,
   });
 
   final AgentConfig config;
+  final bool isDefault;
   final ValueChanged<AgentConfig> onChanged;
   final VoidCallback? onDelete;
+  final VoidCallback onSetDefault;
 
   @override
   State<_AgentRow> createState() => _AgentRowState();
@@ -491,6 +495,19 @@ class _AgentRowState extends State<_AgentRow> {
                   borderRadius: BorderRadius.circular(6),
                   borderSide: BorderSide(color: colors.border),
                 ),
+              ),
+            ),
+          ),
+          // Default star button
+          const SizedBox(width: 4),
+          Tooltip(
+            message: widget.isDefault ? 'Default agent (click to unset)' : 'Set as default agent',
+            child: GestureDetector(
+              onTap: widget.onSetDefault,
+              child: Icon(
+                widget.isDefault ? Icons.star : Icons.star_border,
+                size: 18,
+                color: widget.isDefault ? Colors.amber : AppColors.textMuted,
               ),
             ),
           ),
