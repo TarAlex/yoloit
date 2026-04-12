@@ -580,6 +580,16 @@ class _FileTreeNodeWidgetState extends State<_FileTreeNodeWidget> {
             ]),
           ),
         ],
+        const PopupMenuDivider(height: 1),
+        PopupMenuItem(
+          value: 'show_in_finder',
+          height: 32,
+          child: Row(children: [
+            Icon(Icons.folder_open_outlined, size: 14, color: AppColors.textMuted),
+            const SizedBox(width: 8),
+            const Text('Show in Finder', style: TextStyle(fontSize: 13)),
+          ]),
+        ),
       ],
     );
     if (!mounted) return;
@@ -600,6 +610,9 @@ class _FileTreeNodeWidgetState extends State<_FileTreeNodeWidget> {
         }
       case 'rename':
         _startRename();
+      case 'show_in_finder':
+        final target = node.isDirectory ? node.path : node.path;
+        Process.run('open', ['-R', target]);
     }
   }
 
