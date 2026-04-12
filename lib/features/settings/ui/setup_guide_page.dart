@@ -1,9 +1,13 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:yoloit/core/session/session_prefs.dart';
 import 'package:yoloit/core/theme/app_color_scheme.dart';
 import 'package:yoloit/core/theme/app_colors.dart';
 import 'package:yoloit/features/settings/data/setup_check_service.dart';
+
+// ── Embedded (Settings panel) ─────────────────────────────────────────────────
 
 /// Embedded version used inside the Settings panel (no dialog chrome).
 class SetupGuideEmbedded extends StatefulWidget {
@@ -57,7 +61,7 @@ class _SetupGuideEmbeddedState extends State<SetupGuideEmbedded> {
               ),
               const Spacer(),
               TextButton.icon(
-                onPressed: _runChecks,
+                onPressed: _loading ? null : _runChecks,
                 icon: const Icon(Icons.refresh, size: 12),
                 label: const Text('Re-check', style: TextStyle(fontSize: 11)),
                 style: TextButton.styleFrom(foregroundColor: AppColors.textMuted),
@@ -70,6 +74,7 @@ class _SetupGuideEmbeddedState extends State<SetupGuideEmbedded> {
   }
 }
 
+// ── Wizard dialog ─────────────────────────────────────────────────────────────
 
 class SetupGuidePage extends StatefulWidget {
   const SetupGuidePage({super.key, this.isWizard = false});
@@ -81,19 +86,13 @@ class SetupGuidePage extends StatefulWidget {
     return showDialog<void>(
       context: context,
       barrierDismissible: !isWizard,
-      barrierColor: Colors.black.withAlpha(180),
-      builder: (_) => Dialog(
-        backgroundColor: Colors.transparent,
-        insetPadding: const EdgeInsets.symmetric(horizontal: 60, vertical: 40),
-        child: SetupGuidePage(isWizard: isWizard),
-      ),
+      builder: (_) => SetupGuidePage(isWizard: isWizard),
     );
   }
 
-  /// Show on first launch if setup has not been completed.
   static Future<void> showIfFirstLaunch(BuildContext context) async {
-    final completed = await SessionPrefs.isSetupCompleted();
-    if (!completed && context.mounted) {
+    final done = await SessionPrefs.isSetupCompleted();
+    if (!done && context.mounted) {
       await show(context, isWizard: true);
     }
   }
@@ -118,36 +117,37 @@ class _SetupGuidePageState extends State<SetupGuidePage> {
     if (mounted) setState(() { _result = result; _loading = false; });
   }
 
-  Future<void> _dismiss() async {
-    if (widget.isWizard) await SessionPrefs.markSetupCompleted();
-    if (mounted) Navigator.of(context).pop();
-  }
-
   @override
   Widget build(BuildContext context) {
     final colors = context.appColors;
-    return Container(
-      constraints: const BoxConstraints(maxWidth: 680, maxHeight: 640),
-      decoration: BoxDecoration(
-        color: colors.surface,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: colors.border),
-      ),
-      child: Column(
-        children: [
-          _Header(isWizard: widget.isWizard, onClose: widget.isWizard ? null : () => Navigator.of(context).pop()),
-          Expanded(
-            child: _loading
-                ? const Center(child: _LoadingView())
-                : _Body(result: _result!, onRecheck: _runChecks),
-          ),
-          _Footer(
-            isWizard: widget.isWizard,
-            result: _result,
-            onDismiss: _dismiss,
-            onRecheck: _runChecks,
-          ),
-        ],
+    return Dialog(
+      backgroundColor: colors.surface,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: SizedBox(
+        width: 600,
+        height: 680,
+        child: Column(
+          children: [
+            _Header(isWizard: widget.isWizard, onClose: widget.isWizard ? null : () => Navigator.pop(context)),
+            const Divider(height: 1),
+            Expanded(
+              child: _loading
+                  ? const Center(child: _LoadingView())
+                  : _Body(result: _result!, onRecheck: _runChecks),
+            ),
+            const Divider(height: 1),
+            _Footer(
+              isWizard: widget.isWizard,
+              result: _result,
+              loading: _loading,
+              onRecheck: _runChecks,
+              onGetStarted: () async {
+                await SessionPrefs.markSetupCompleted();
+                if (context.mounted) Navigator.pop(context);
+              },
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -162,41 +162,35 @@ class _Header extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colors = context.appColors;
-    return Container(
-      padding: const EdgeInsets.fromLTRB(24, 20, 20, 16),
-      decoration: BoxDecoration(
-        border: Border(bottom: BorderSide(color: colors.border)),
-      ),
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
       child: Row(
         children: [
           Container(
-            width: 36, height: 36,
+            width: 40, height: 40,
             decoration: BoxDecoration(
-              color: AppColors.neonBlue.withAlpha(30),
+              color: AppColors.neonBlue.withAlpha(20),
               borderRadius: BorderRadius.circular(8),
             ),
-            child: const Icon(Icons.checklist_rounded, color: AppColors.neonBlue, size: 20),
+            child: const Icon(Icons.checklist_rtl_rounded, color: AppColors.neonBlue, size: 20),
           ),
           const SizedBox(width: 12),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                isWizard ? 'Welcome to yoloit 👋' : 'Setup Guide',
-                style: const TextStyle(color: AppColors.textPrimary, fontSize: 16, fontWeight: FontWeight.w700),
-              ),
-              Text(
-                'Check dependencies and configure AI agents',
-                style: const TextStyle(color: AppColors.textMuted, fontSize: 11),
-              ),
-            ],
+          const Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Welcome to yoloit 👋',
+                    style: TextStyle(color: AppColors.textPrimary, fontSize: 16, fontWeight: FontWeight.w600)),
+                Text('Check dependencies and configure AI agents',
+                    style: TextStyle(color: AppColors.textMuted, fontSize: 11)),
+              ],
+            ),
           ),
-          const Spacer(),
           if (onClose != null)
             IconButton(
+              icon: const Icon(Icons.close, size: 16),
               onPressed: onClose,
-              icon: const Icon(Icons.close, size: 16, color: AppColors.textMuted),
+              color: AppColors.textMuted,
               splashRadius: 16,
             ),
         ],
@@ -237,17 +231,15 @@ class _Body extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // ── Dependencies ───────────────────────────────────────────────────
-          _SectionTitle(
+          const _SectionTitle(
             icon: Icons.settings_suggest_outlined,
             label: 'System Dependencies',
             subtitle: 'Required for core functionality',
           ),
           const SizedBox(height: 10),
-          ...result.deps.map((dep) => _DepRow(dep: dep)),
+          ...result.deps.map((dep) => _DependencyCard(dep: dep, onInstalled: onRecheck)),
           const SizedBox(height: 28),
 
-          // ── AI Agents ─────────────────────────────────────────────────────
           _SectionTitle(
             icon: Icons.smart_toy_outlined,
             label: 'AI Agents',
@@ -257,12 +249,7 @@ class _Body extends StatelessWidget {
             subtitleColor: result.anyAgentAvailable ? null : AppColors.neonOrange,
           ),
           const SizedBox(height: 10),
-          ...result.agents.map((agent) => _AgentRow(agent: agent)),
-
-          if (!result.anyAgentAvailable) ...[
-            const SizedBox(height: 16),
-            _InstallSuggestion(),
-          ],
+          ...result.agents.map((agent) => _DependencyCard(dep: agent, onInstalled: onRecheck)),
         ],
       ),
     );
@@ -298,159 +285,347 @@ class _SectionTitle extends StatelessWidget {
   }
 }
 
-// ── Dep row ───────────────────────────────────────────────────────────────────
+// ── Install phase ─────────────────────────────────────────────────────────────
 
-class _DepRow extends StatelessWidget {
-  const _DepRow({required this.dep});
+enum _Phase { idle, installing, done, failed }
+
+// ── Dependency card (stateful — handles install + progress) ───────────────────
+
+class _DependencyCard extends StatefulWidget {
+  const _DependencyCard({required this.dep, required this.onInstalled});
   final DependencyStatus dep;
+  final VoidCallback onInstalled;
+
+  @override
+  State<_DependencyCard> createState() => _DependencyCardState();
+}
+
+class _DependencyCardState extends State<_DependencyCard> {
+  _Phase _phase = _Phase.idle;
+  final List<String> _output = [];
+  bool _showOutput = false;
+  StreamSubscription<String>? _sub;
+  final _scrollController = ScrollController();
+
+  @override
+  void dispose() {
+    _sub?.cancel();
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _install() async {
+    final action = widget.dep.installAction;
+    if (action == null) return;
+
+    setState(() {
+      _phase = _Phase.installing;
+      _output.clear();
+      _showOutput = true;
+    });
+
+    _sub = SetupCheckService.install(action).listen(
+      (line) {
+        if (mounted) {
+          setState(() => _output.add(line));
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (_scrollController.hasClients) {
+              _scrollController.animateTo(
+                _scrollController.position.maxScrollExtent,
+                duration: const Duration(milliseconds: 150),
+                curve: Curves.easeOut,
+              );
+            }
+          });
+        }
+      },
+      onDone: () {
+        if (!mounted) return;
+        final success = _output.any((l) => l.contains('✅'));
+        setState(() => _phase = success ? _Phase.done : _Phase.failed);
+        if (success) {
+          Future.delayed(const Duration(milliseconds: 800), widget.onInstalled);
+        }
+      },
+      onError: (Object e) {
+        if (mounted) setState(() { _output.add('❌ $e'); _phase = _Phase.failed; });
+      },
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
     final colors = context.appColors;
+    final dep = widget.dep;
     final ok = dep.isAvailable;
-    final statusColor = ok
-        ? AppColors.neonGreen
-        : dep.isRequired ? Colors.red.shade400 : AppColors.neonOrange;
-    final statusIcon = ok ? Icons.check_circle_outline : Icons.warning_amber_rounded;
+
+    Color statusColor;
+    IconData statusIcon;
+    if (ok) {
+      statusColor = AppColors.neonGreen;
+      statusIcon = Icons.check_circle_outline;
+    } else if (_phase == _Phase.installing) {
+      statusColor = AppColors.neonBlue;
+      statusIcon = Icons.hourglass_top_rounded;
+    } else if (_phase == _Phase.done) {
+      statusColor = AppColors.neonGreen;
+      statusIcon = Icons.check_circle_outline;
+    } else if (_phase == _Phase.failed) {
+      statusColor = Colors.red.shade400;
+      statusIcon = Icons.error_outline;
+    } else {
+      statusColor = dep.isRequired ? Colors.red.shade400 : AppColors.neonOrange;
+      statusIcon = Icons.warning_amber_rounded;
+    }
+
+    final borderColor = ok || _phase == _Phase.done
+        ? AppColors.neonGreen.withAlpha(60)
+        : _phase == _Phase.installing
+            ? AppColors.neonBlue.withAlpha(60)
+            : _phase == _Phase.failed
+                ? Colors.red.withAlpha(60)
+                : dep.isRequired
+                    ? Colors.red.withAlpha(40)
+                    : colors.border;
 
     return Container(
       margin: const EdgeInsets.only(bottom: 6),
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
         color: colors.surfaceElevated,
         borderRadius: BorderRadius.circular(6),
-        border: Border.all(color: ok ? colors.border : statusColor.withAlpha(60)),
+        border: Border.all(color: borderColor),
       ),
-      child: Row(
+      child: Column(
         children: [
-          Icon(statusIcon, size: 14, color: statusColor),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+          // ── Main row ───────────────────────────────────────────────────
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            child: Row(
               children: [
-                Row(
-                  children: [
-                    Text(dep.name,
-                        style: const TextStyle(color: AppColors.textPrimary, fontSize: 12, fontWeight: FontWeight.w500)),
-                    if (dep.isRequired)
-                      Container(
-                        margin: const EdgeInsets.only(left: 6),
-                        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
-                        decoration: BoxDecoration(
-                          color: Colors.red.withAlpha(25),
-                          borderRadius: BorderRadius.circular(3),
-                        ),
-                        child: const Text('required', style: TextStyle(color: Colors.redAccent, fontSize: 8)),
+                // Status icon / spinner
+                if (_phase == _Phase.installing)
+                  SizedBox(
+                    width: 14, height: 14,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 1.5,
+                      color: AppColors.neonBlue,
+                    ),
+                  )
+                else
+                  Icon(statusIcon, size: 14, color: statusColor),
+
+                const SizedBox(width: 10),
+
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Text(dep.name,
+                              style: const TextStyle(color: AppColors.textPrimary, fontSize: 12, fontWeight: FontWeight.w500)),
+                          if (dep.isRequired)
+                            Container(
+                              margin: const EdgeInsets.only(left: 6),
+                              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                              decoration: BoxDecoration(
+                                color: Colors.red.withAlpha(25),
+                                borderRadius: BorderRadius.circular(3),
+                              ),
+                              child: const Text('required', style: TextStyle(color: Colors.redAccent, fontSize: 8)),
+                            ),
+                          if ((ok || _phase == _Phase.done) && dep.version != null) ...[
+                            const SizedBox(width: 8),
+                            Text(dep.version!, style: const TextStyle(color: AppColors.textMuted, fontSize: 10)),
+                          ],
+                        ],
                       ),
-                    if (ok && dep.version != null) ...[
-                      const SizedBox(width: 8),
-                      Text(dep.version!, style: const TextStyle(color: AppColors.textMuted, fontSize: 10)),
+                      const SizedBox(height: 1),
+                      Text(dep.description, style: const TextStyle(color: AppColors.textMuted, fontSize: 10)),
                     ],
-                  ],
+                  ),
                 ),
-                const SizedBox(height: 1),
-                Text(dep.description, style: const TextStyle(color: AppColors.textMuted, fontSize: 10)),
+
+                // Action area
+                if (ok || _phase == _Phase.done)
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: AppColors.neonGreen.withAlpha(20),
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: const Text('Available', style: TextStyle(color: AppColors.neonGreen, fontSize: 9, fontWeight: FontWeight.w600)),
+                  )
+                else if (_phase == _Phase.installing)
+                  _outputToggleButton(_showOutput)
+                else if (!ok) ...[
+                  if (dep.installAction != null) ...[
+                    _InstallButton(onPressed: _install),
+                    const SizedBox(width: 4),
+                  ],
+                  _CopyButton(hint: dep.installHint),
+                ],
               ],
             ),
           ),
-          if (!ok) ...[
-            const SizedBox(width: 8),
-            _CopyInstallButton(hint: dep.installHint),
-          ],
+
+          // ── Output log ─────────────────────────────────────────────────
+          if (_showOutput && _output.isNotEmpty)
+            _OutputLog(
+              output: _output,
+              phase: _phase,
+              scrollController: _scrollController,
+              onToggle: () => setState(() => _showOutput = !_showOutput),
+            ),
+
+          // ── Retry / dismiss ────────────────────────────────────────────
+          if (_phase == _Phase.failed)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  TextButton(
+                    onPressed: () => setState(() { _phase = _Phase.idle; _output.clear(); _showOutput = false; }),
+                    child: const Text('Dismiss', style: TextStyle(fontSize: 10, color: AppColors.textMuted)),
+                  ),
+                  const SizedBox(width: 4),
+                  TextButton(
+                    onPressed: _install,
+                    child: const Text('Retry', style: TextStyle(fontSize: 10, color: AppColors.neonBlue)),
+                  ),
+                ],
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _outputToggleButton(bool expanded) {
+    return GestureDetector(
+      onTap: () => setState(() => _showOutput = !_showOutput),
+      child: Text(
+        expanded ? 'Hide log ▲' : 'Show log ▼',
+        style: const TextStyle(color: AppColors.textMuted, fontSize: 9),
+      ),
+    );
+  }
+}
+
+// ── Output log ────────────────────────────────────────────────────────────────
+
+class _OutputLog extends StatelessWidget {
+  const _OutputLog({
+    required this.output,
+    required this.phase,
+    required this.scrollController,
+    required this.onToggle,
+  });
+  final List<String> output;
+  final _Phase phase;
+  final ScrollController scrollController;
+  final VoidCallback onToggle;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.appColors;
+    return Container(
+      margin: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+      padding: const EdgeInsets.all(10),
+      constraints: const BoxConstraints(maxHeight: 180),
+      decoration: BoxDecoration(
+        color: colors.background,
+        borderRadius: BorderRadius.circular(4),
+        border: Border.all(color: colors.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Text(
+                phase == _Phase.installing ? 'Installing...' : 'Output',
+                style: const TextStyle(color: AppColors.textMuted, fontSize: 9, fontWeight: FontWeight.w600),
+              ),
+              const Spacer(),
+              GestureDetector(
+                onTap: onToggle,
+                child: const Text('▲ hide', style: TextStyle(color: AppColors.textMuted, fontSize: 9)),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Expanded(
+            child: ListView.builder(
+              controller: scrollController,
+              itemCount: output.length,
+              itemBuilder: (_, i) {
+                final line = output[i];
+                final isSuccess = line.contains('✅');
+                final isError = line.contains('❌');
+                return Text(
+                  line,
+                  style: TextStyle(
+                    fontFamily: 'monospace',
+                    fontSize: 9,
+                    color: isSuccess
+                        ? AppColors.neonGreen
+                        : isError
+                            ? Colors.red.shade300
+                            : AppColors.textSecondary,
+                  ),
+                );
+              },
+            ),
+          ),
         ],
       ),
     );
   }
 }
 
-// ── Agent row ─────────────────────────────────────────────────────────────────
+// ── Install button ────────────────────────────────────────────────────────────
 
-class _AgentRow extends StatelessWidget {
-  const _AgentRow({required this.agent});
-  final DependencyStatus agent;
+class _InstallButton extends StatelessWidget {
+  const _InstallButton({required this.onPressed});
+  final VoidCallback onPressed;
 
   @override
   Widget build(BuildContext context) {
-    final colors = context.appColors;
-    final ok = agent.isAvailable;
-
-    return Container(
-      margin: const EdgeInsets.only(bottom: 6),
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      decoration: BoxDecoration(
-        color: colors.surfaceElevated,
-        borderRadius: BorderRadius.circular(6),
-        border: Border.all(
-          color: ok ? AppColors.neonGreen.withAlpha(50) : colors.border,
+    return GestureDetector(
+      onTap: onPressed,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        decoration: BoxDecoration(
+          color: AppColors.neonBlue.withAlpha(25),
+          borderRadius: BorderRadius.circular(4),
+          border: Border.all(color: AppColors.neonBlue.withAlpha(80)),
+        ),
+        child: const Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.download_rounded, size: 10, color: AppColors.neonBlue),
+            SizedBox(width: 4),
+            Text('Install', style: TextStyle(color: AppColors.neonBlue, fontSize: 9, fontWeight: FontWeight.w600)),
+          ],
         ),
       ),
-      child: Row(
-        children: [
-          Container(
-            width: 28, height: 28,
-            decoration: BoxDecoration(
-              color: (ok ? AppColors.neonGreen : AppColors.textMuted).withAlpha(20),
-              borderRadius: BorderRadius.circular(6),
-            ),
-            child: Icon(
-              ok ? Icons.check : Icons.download_outlined,
-              size: 14,
-              color: ok ? AppColors.neonGreen : AppColors.textMuted,
-            ),
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Text(agent.name,
-                        style: TextStyle(
-                          color: ok ? AppColors.textPrimary : AppColors.textSecondary,
-                          fontSize: 12,
-                          fontWeight: FontWeight.w500,
-                        )),
-                    if (ok && agent.version != null) ...[
-                      const SizedBox(width: 8),
-                      Text(agent.version!, style: const TextStyle(color: AppColors.textMuted, fontSize: 10)),
-                    ],
-                  ],
-                ),
-                Text(agent.description, style: const TextStyle(color: AppColors.textMuted, fontSize: 10)),
-              ],
-            ),
-          ),
-          const SizedBox(width: 8),
-          if (ok)
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-              decoration: BoxDecoration(
-                color: AppColors.neonGreen.withAlpha(20),
-                borderRadius: BorderRadius.circular(4),
-              ),
-              child: const Text('Available', style: TextStyle(color: AppColors.neonGreen, fontSize: 9, fontWeight: FontWeight.w600)),
-            )
-          else
-            _CopyInstallButton(hint: agent.installHint),
-        ],
-      ),
     );
   }
 }
 
-// ── Copy install command button ───────────────────────────────────────────────
+// ── Copy button ───────────────────────────────────────────────────────────────
 
-class _CopyInstallButton extends StatefulWidget {
-  const _CopyInstallButton({required this.hint});
+class _CopyButton extends StatefulWidget {
+  const _CopyButton({required this.hint});
   final String hint;
 
   @override
-  State<_CopyInstallButton> createState() => _CopyInstallButtonState();
+  State<_CopyButton> createState() => _CopyButtonState();
 }
 
-class _CopyInstallButtonState extends State<_CopyInstallButton> {
+class _CopyButtonState extends State<_CopyButton> {
   bool _copied = false;
 
   @override
@@ -465,11 +640,10 @@ class _CopyInstallButtonState extends State<_CopyInstallButton> {
           if (mounted) setState(() => _copied = false);
         },
         child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
           decoration: BoxDecoration(
-            color: AppColors.neonBlue.withAlpha(20),
             borderRadius: BorderRadius.circular(4),
-            border: Border.all(color: AppColors.neonBlue.withAlpha(60)),
+            border: Border.all(color: AppColors.textMuted.withAlpha(60)),
           ),
           child: Row(
             mainAxisSize: MainAxisSize.min,
@@ -477,52 +651,16 @@ class _CopyInstallButtonState extends State<_CopyInstallButton> {
               Icon(
                 _copied ? Icons.check : Icons.copy_outlined,
                 size: 10,
-                color: AppColors.neonBlue,
+                color: AppColors.textMuted,
               ),
-              const SizedBox(width: 4),
+              const SizedBox(width: 3),
               Text(
-                _copied ? 'Copied!' : 'Install',
-                style: const TextStyle(color: AppColors.neonBlue, fontSize: 9, fontWeight: FontWeight.w600),
+                _copied ? 'Copied' : 'Copy',
+                style: const TextStyle(color: AppColors.textMuted, fontSize: 9),
               ),
             ],
           ),
         ),
-      ),
-    );
-  }
-}
-
-// ── Install suggestion (no agents found) ──────────────────────────────────────
-
-class _InstallSuggestion extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: AppColors.neonBlue.withAlpha(15),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: AppColors.neonBlue.withAlpha(50)),
-      ),
-      child: Row(
-        children: [
-          const Icon(Icons.tips_and_updates_outlined, size: 16, color: AppColors.neonBlue),
-          const SizedBox(width: 10),
-          const Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('Recommended: GitHub Copilot CLI',
-                    style: TextStyle(color: AppColors.textPrimary, fontSize: 11, fontWeight: FontWeight.w600)),
-                SizedBox(height: 2),
-                Text('Install gh CLI, then: gh extension install github/gh-copilot',
-                    style: TextStyle(color: AppColors.textMuted, fontSize: 10)),
-              ],
-            ),
-          ),
-          const SizedBox(width: 8),
-          _CopyInstallButton(hint: 'gh extension install github/gh-copilot'),
-        ],
       ),
     );
   }
@@ -534,62 +672,57 @@ class _Footer extends StatelessWidget {
   const _Footer({
     required this.isWizard,
     required this.result,
-    required this.onDismiss,
+    required this.loading,
     required this.onRecheck,
+    required this.onGetStarted,
   });
   final bool isWizard;
   final SetupCheckResult? result;
-  final VoidCallback onDismiss;
+  final bool loading;
   final VoidCallback onRecheck;
+  final VoidCallback onGetStarted;
 
   @override
   Widget build(BuildContext context) {
-    final colors = context.appColors;
-    final allOk = result?.allRequiredDepsOk ?? false;
-
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
-      decoration: BoxDecoration(
-        border: Border(top: BorderSide(color: colors.border)),
-      ),
+    final ok = result?.allRequiredDepsOk ?? false;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
       child: Row(
         children: [
-          if (result != null) ...[
+          if (!loading && result != null) ...[
             Icon(
-              allOk ? Icons.check_circle_outline : Icons.warning_amber_rounded,
-              size: 14,
-              color: allOk ? AppColors.neonGreen : AppColors.neonOrange,
+              ok ? Icons.check_circle_outline : Icons.warning_amber_rounded,
+              size: 13,
+              color: ok ? AppColors.neonGreen : AppColors.neonOrange,
             ),
             const SizedBox(width: 6),
-            Text(
-              allOk
-                  ? 'All required dependencies found'
-                  : 'Some required dependencies are missing',
-              style: TextStyle(
-                color: allOk ? AppColors.neonGreen : AppColors.neonOrange,
-                fontSize: 11,
+            Expanded(
+              child: Text(
+                ok ? 'All required dependencies found' : 'Some required dependencies are missing',
+                style: TextStyle(color: ok ? AppColors.neonGreen : AppColors.neonOrange, fontSize: 11),
               ),
             ),
-          ],
-          const Spacer(),
+          ] else
+            const Spacer(),
           TextButton.icon(
-            onPressed: onRecheck,
-            icon: const Icon(Icons.refresh, size: 13),
+            onPressed: loading ? null : onRecheck,
+            icon: const Icon(Icons.refresh, size: 12),
             label: const Text('Re-check', style: TextStyle(fontSize: 11)),
             style: TextButton.styleFrom(foregroundColor: AppColors.textMuted),
           ),
-          const SizedBox(width: 8),
-          ElevatedButton(
-            onPressed: onDismiss,
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.neonBlue,
-              foregroundColor: Colors.white,
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-              textStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+          if (isWizard) ...[
+            const SizedBox(width: 8),
+            ElevatedButton(
+              onPressed: onGetStarted,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.neonBlue,
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                textStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+              ),
+              child: const Text('Get Started →'),
             ),
-            child: Text(isWizard ? 'Get Started →' : 'Close'),
-          ),
+          ],
         ],
       ),
     );
