@@ -28,20 +28,28 @@ void main() {
       await tester.pumpWidget(
         MaterialApp(
           theme: AppThemePreset.neonPurple.theme,
-          home: const Scaffold(body: SettingsPage()),
+          home: const Scaffold(
+            body: SizedBox(width: 700, height: 600, child: SettingsPage()),
+          ),
         ),
       );
       await tester.pump();
-      expect(find.text('Appearance'), findsOneWidget);
+      // "Appearance" appears in sidebar AND in section header
+      expect(find.text('Appearance'), findsAtLeastNWidgets(1));
     });
 
     testWidgets('shows Keyboard Shortcuts section', (tester) async {
       await tester.pumpWidget(
         MaterialApp(
           theme: AppThemePreset.neonPurple.theme,
-          home: const Scaffold(body: SettingsPage()),
+          home: const Scaffold(
+            body: SizedBox(width: 700, height: 600, child: SettingsPage()),
+          ),
         ),
       );
+      await tester.pump();
+      // Navigate to Shortcuts tab (index 3)
+      await tester.tap(find.text('Shortcuts'));
       await tester.pump();
       expect(find.text('Keyboard Shortcuts'), findsOneWidget);
     });
@@ -50,9 +58,14 @@ void main() {
       await tester.pumpWidget(
         MaterialApp(
           theme: AppThemePreset.neonPurple.theme,
-          home: const Scaffold(body: SettingsPage()),
+          home: const Scaffold(
+            body: SizedBox(width: 700, height: 600, child: SettingsPage()),
+          ),
         ),
       );
+      await tester.pump();
+      // Navigate to Shortcuts tab
+      await tester.tap(find.text('Shortcuts'));
       await tester.pump();
       expect(find.textContaining('⌘'), findsWidgets);
       expect(find.textContaining('agent tab'), findsWidgets);
@@ -62,11 +75,41 @@ void main() {
       await tester.pumpWidget(
         MaterialApp(
           theme: AppThemePreset.neonPurple.theme,
-          home: const Scaffold(body: SettingsPage()),
+          home: const Scaffold(
+            body: SizedBox(width: 700, height: 600, child: SettingsPage()),
+          ),
         ),
       );
       await tester.pump();
+      // Navigate to About tab (last category)
+      await tester.tap(find.text('About'));
+      await tester.pump();
       expect(find.textContaining('yoloit'), findsWidgets);
+    });
+
+    testWidgets('shows Setup Guide section', (tester) async {
+      SharedPreferences.setMockInitialValues({'setup_completed': false});
+      await tester.runAsync(() async {
+        await tester.pumpWidget(
+          MaterialApp(
+            theme: AppThemePreset.neonPurple.theme,
+            home: const Scaffold(
+              body: SizedBox(width: 700, height: 600, child: SettingsPage()),
+            ),
+          ),
+        );
+        await tester.pump();
+        // Navigate to Setup Guide tab
+        await tester.tap(find.text('Setup Guide'));
+        await tester.pump();
+        // Wait for Process.run checks to complete
+        await Future<void>.delayed(const Duration(seconds: 3));
+        await tester.pump();
+      });
+      // Either loading or results are shown — both are valid
+      final hasLoader = tester.any(find.byType(CircularProgressIndicator));
+      final hasContent = tester.any(find.text('Dependencies'));
+      expect(hasLoader || hasContent, isTrue);
     });
 
     testWidgets('close button pops dialog', (tester) async {

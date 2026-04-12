@@ -28,6 +28,9 @@ class SessionPrefs {
   static const _kAgentsVis    = 'panel.agents.vis';
   static const _kEditorVis    = 'panel.editor.vis';
 
+  // First-launch / setup
+  static const _kSetupCompleted = 'app.setupCompleted';
+
   // ── Load ─────────────────────────────────────────────────────────────────
   static Future<SessionSnapshot> load() async {
     final p = await SharedPreferences.getInstance();
@@ -80,6 +83,12 @@ class SessionPrefs {
   }
 
   static Future<SharedPreferences> _p() => SharedPreferences.getInstance();
+
+  static Future<bool> isSetupCompleted() async =>
+      (await _p()).getBool(_kSetupCompleted) ?? false;
+
+  static Future<void> markSetupCompleted() async =>
+      (await _p()).setBool(_kSetupCompleted, true);
 }
 
 /// Immutable snapshot of persisted session state.

@@ -8,6 +8,7 @@ import 'package:yoloit/core/theme/app_colors.dart';
 import 'package:yoloit/core/theme/app_theme.dart';
 import 'package:yoloit/core/theme/theme_manager.dart';
 import 'package:yoloit/features/settings/data/agent_config_service.dart';
+import 'package:yoloit/features/settings/ui/setup_guide_page.dart';
 import 'package:yoloit/features/terminal/data/logging_service.dart';
 import 'package:yoloit/features/terminal/data/tmux_service.dart';
 
@@ -16,6 +17,7 @@ const _kCategories = [
   'AI Agents',
   'Sessions',
   'Shortcuts',
+  'Setup Guide',
   'About',
 ];
 
@@ -178,6 +180,7 @@ class _SettingsPageState extends State<SettingsPage> {
               _ShortcutsTable(),
             ],
           ),
+        4 => const SetupGuideEmbedded(),
         _ => Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [

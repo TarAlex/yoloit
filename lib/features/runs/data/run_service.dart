@@ -10,8 +10,9 @@ class RunService {
   static final instance = RunService._();
 
   final Map<String, String> _sessionTmux = {};
-  final Map<String, Process> _tails = {};
-  final Map<String, List<StreamSubscription>> _subs = {};
+  final Map<String, Timer> _pollers = {};
+  final Map<String, RandomAccessFile> _logFiles = {};
+  final Map<String, String> _lineBuffers = {};
 
   static String tmuxName(String configId) =>
       'yoloit_run_${configId.replaceAll(RegExp(r"[^a-zA-Z0-9]"), "_")}';
@@ -105,6 +106,9 @@ class RunService {
     return true;
   }
 
+  /// Polls the log file every 50ms using Dart's RandomAccessFile — no process
+  /// spawning, no stdio pipe buffering. New bytes are decoded and split into
+  /// lines immediately as they arrive.
   Future<void> _tailLog({
     required String sessionId,
     required String log,
@@ -112,29 +116,54 @@ class RunService {
     required OutputCallback onOutput,
     required ExitCallback onExit,
   }) async {
-    final args = fromStart ? ["-n", "+1", "-F", log] : ["-n", "0", "-F", log];
-    final tail = await Process.start("tail", args);
-    _tails[sessionId] = tail;
+    final file = File(log);
+    // Wait for the file to appear (tmux may not have created it yet).
+    for (var i = 0; i < 20; i++) {
+      if (await file.exists()) break;
+      await Future.delayed(const Duration(milliseconds: 100));
+    }
+    if (!await file.exists()) {
+      onOutput('[log file not found: $log]', true);
+      onExit(1);
+      return;
+    }
 
-    final outSub = tail.stdout
-        .transform(utf8.decoder)
-        .transform(const LineSplitter())
-        .listen((line) {
-      if (line.startsWith("__YOLOIT_EXIT_")) {
-        final code = int.tryParse(line.substring("__YOLOIT_EXIT_".length)) ?? 0;
-        _cleanup(sessionId);
-        onExit(code);
-      } else {
-        onOutput(line, false);
-      }
-    });
+    final raf = await file.open(mode: FileMode.read);
+    if (!fromStart) {
+      // Start from current end so only new output is shown.
+      await raf.setPosition(await raf.length());
+    }
+    _logFiles[sessionId] = raf;
+    _lineBuffers[sessionId] = '';
 
-    final errSub = tail.stderr
-        .transform(utf8.decoder)
-        .transform(const LineSplitter())
-        .listen((_) {});
-
-    _subs[sessionId] = [outSub, errSub];
+    _pollers[sessionId] = Timer.periodic(
+      const Duration(milliseconds: 50),
+      (_) async {
+        final raf = _logFiles[sessionId];
+        if (raf == null) return;
+        try {
+          final bytes = await raf.read(65536);
+          if (bytes.isEmpty) return;
+          final chunk = utf8.decode(bytes, allowMalformed: true);
+          final buffered = (_lineBuffers[sessionId] ?? '') + chunk;
+          final lines = buffered.split('\n');
+          // Last element may be an incomplete line — keep it in the buffer.
+          _lineBuffers[sessionId] = lines.removeLast();
+          for (final line in lines) {
+            final trimmed = line.endsWith('\r') ? line.substring(0, line.length - 1) : line;
+            if (trimmed.startsWith('__YOLOIT_EXIT_')) {
+              final code = int.tryParse(trimmed.substring('__YOLOIT_EXIT_'.length)) ?? 0;
+              _cleanup(sessionId);
+              onExit(code);
+              return;
+            }
+            onOutput(trimmed, false);
+          }
+        } catch (_) {
+          // File may have been truncated/replaced; ignore silently.
+        }
+      },
+    );
   }
 
   void stop(String sessionId) {
@@ -152,13 +181,12 @@ class RunService {
     if (name != null) Process.run("tmux", ["send-keys", "-t", name, keys, ""]);
   }
 
-  bool isRunning(String sessionId) => _tails.containsKey(sessionId);
+  bool isRunning(String sessionId) => _pollers.containsKey(sessionId);
 
   void _cleanup(String sessionId) {
-    for (final sub in _subs[sessionId] ?? []) sub.cancel();
-    final proc = _tails.remove(sessionId);
-    if (proc != null) proc.kill(ProcessSignal.sigterm);
-    _subs.remove(sessionId);
+    _pollers.remove(sessionId)?.cancel();
+    _logFiles.remove(sessionId)?.close();
+    _lineBuffers.remove(sessionId);
     _sessionTmux.remove(sessionId);
   }
 }

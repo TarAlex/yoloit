@@ -24,6 +24,7 @@ import 'package:yoloit/features/workspaces/bloc/workspace_cubit.dart';
 import 'package:yoloit/features/workspaces/bloc/workspace_state.dart';
 import 'package:yoloit/features/workspaces/ui/workspace_panel.dart';
 import 'package:yoloit/core/services/resource_monitor_service.dart';
+import 'package:yoloit/features/settings/ui/setup_guide_page.dart';
 import 'package:yoloit/ui/widgets/activity_rail.dart';
 import 'package:yoloit/ui/widgets/panel_shell.dart';
 import 'package:yoloit/ui/widgets/panel_visibility.dart';
@@ -74,6 +75,10 @@ class _MainShellState extends State<MainShell> with WindowListener {
       // Focus terminal after startup
       Future.delayed(const Duration(milliseconds: 600), () {
         if (mounted) _terminalFocusNode.requestFocus();
+      });
+      // Show setup wizard on first launch
+      Future.delayed(const Duration(milliseconds: 800), () {
+        if (mounted) SetupGuidePage.showIfFirstLaunch(context);
       });
     });
   }
