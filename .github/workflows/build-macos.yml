@@ -20,6 +20,8 @@ jobs:
   build-macos:
     name: Build macOS App
     runs-on: [self-hosted, macOS, ARM64]
+    permissions:
+      contents: write   # needed to create GitHub Releases
 
     steps:
       # ── Checkout ────────────────────────────────────────────────────────────
