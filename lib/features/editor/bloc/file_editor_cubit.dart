@@ -179,6 +179,6 @@ class FileEditorCubit extends Cubit<FileEditorState> {
 
   static bool _isImagePath(String path) {
     final ext = path.split('.').last.toLowerCase();
-    return const {'png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'ico', 'svg'}.contains(ext);
+    return const {'png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'ico'}.contains(ext);
   }
 }

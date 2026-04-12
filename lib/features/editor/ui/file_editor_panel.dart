@@ -161,7 +161,8 @@ class _FileEditorPanelState extends State<FileEditorPanel> {
         final toggleVisible = _editorReady &&
             !activeTab.isDiff &&
             !activeTab.isLoading &&
-            _isMarkdown(activeTab.filePath);
+            !_isImage(activeTab.filePath) &&
+            (_isMarkdown(activeTab.filePath) || _isSvg(activeTab.filePath));
 
         return GestureDetector(
           onScaleStart: (d) => _scaleBase = _fontSizeNotifier.value,
@@ -188,7 +189,9 @@ class _FileEditorPanelState extends State<FileEditorPanel> {
                                   : _isImage(activeTab.filePath)
                                       ? _ImagePreview(filePath: activeTab.filePath)
                                       : _previewPaths.contains(activeTab.filePath)
-                                          ? _MarkdownPreview(content: activeTab.content ?? '')
+                                          ? (_isSvg(activeTab.filePath)
+                                              ? _SvgPreview(filePath: activeTab.filePath)
+                                              : _MarkdownPreview(content: activeTab.content ?? ''))
                                           : _EditorBody(key: ValueKey(activeTab.filePath), tab: activeTab, codeController: controller!, fontSizeNotifier: _fontSizeNotifier),
                     ),
                     // Toggle bar: floats at top, fades in/out without affecting layout
@@ -245,8 +248,10 @@ class _FileEditorPanelState extends State<FileEditorPanel> {
 
   static bool _isImage(String filePath) {
     final ext = filePath.split('.').last.toLowerCase();
-    return const {'png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'ico', 'svg'}.contains(ext);
+    return const {'png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'ico'}.contains(ext);
   }
+
+  static bool _isSvg(String filePath) => filePath.split('.').last.toLowerCase() == 'svg';
 }
 
 // ── Animated wrapper for the markdown toggle bar ───────────────────────────
@@ -488,7 +493,7 @@ class _MarkdownPreview extends StatelessWidget {
   }
 }
 
-// ── Image / SVG preview ────────────────────────────────────────────────────
+// ── Image preview (raster only) ────────────────────────────────────────────
 
 class _ImagePreview extends StatelessWidget {
   const _ImagePreview({required this.filePath});
@@ -498,7 +503,6 @@ class _ImagePreview extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = context.appColors;
     final ext = filePath.split('.').last.toLowerCase();
-    final isSvg = ext == 'svg';
     final fileName = filePath.split('/').last;
 
     return Container(
@@ -516,15 +520,9 @@ class _ImagePreview extends StatelessWidget {
               children: [
                 Icon(Icons.image_outlined, size: 14, color: AppColors.textMuted),
                 const SizedBox(width: 6),
-                Text(
-                  fileName,
-                  style: const TextStyle(color: AppColors.textMuted, fontSize: 12),
-                ),
+                Text(fileName, style: const TextStyle(color: AppColors.textMuted, fontSize: 12)),
                 const SizedBox(width: 6),
-                Text(
-                  ext.toUpperCase(),
-                  style: const TextStyle(color: AppColors.textMuted, fontSize: 11),
-                ),
+                Text(ext.toUpperCase(), style: const TextStyle(color: AppColors.textMuted, fontSize: 11)),
               ],
             ),
           ),
@@ -533,24 +531,41 @@ class _ImagePreview extends StatelessWidget {
               minScale: 0.1,
               maxScale: 10,
               child: Center(
-                child: isSvg
-                    ? SvgPicture.file(
-                        File(filePath),
-                        fit: BoxFit.contain,
-                      )
-                    : Image.file(
-                        File(filePath),
-                        errorBuilder: (_, error, __) => Center(
-                          child: Text(
-                            'Cannot load image',
-                            style: const TextStyle(color: AppColors.textMuted),
-                          ),
-                        ),
-                      ),
+                child: Image.file(
+                  File(filePath),
+                  errorBuilder: (_, __, ___) => const Center(
+                    child: Text('Cannot load image', style: TextStyle(color: AppColors.textMuted)),
+                  ),
+                ),
               ),
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+// ── SVG preview (used by toggle, like Markdown preview) ────────────────────
+
+class _SvgPreview extends StatelessWidget {
+  const _SvgPreview({required this.filePath});
+  final String filePath;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.appColors;
+    return Container(
+      color: colors.background,
+      child: InteractiveViewer(
+        minScale: 0.1,
+        maxScale: 10,
+        child: Center(
+          child: SvgPicture.file(
+            File(filePath),
+            fit: BoxFit.contain,
+          ),
+        ),
       ),
     );
   }
