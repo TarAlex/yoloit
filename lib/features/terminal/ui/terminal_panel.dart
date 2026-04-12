@@ -118,56 +118,32 @@ class _TerminalView extends StatefulWidget {
 }
 
 class _TerminalViewState extends State<_TerminalView> {
-  // Persists scroll position across session switches without keeping all
-  // TerminalView widgets alive simultaneously (memory-efficient).
-  final Map<String, ScrollController> _scrollControllers = {};
-
-  ScrollController _controllerFor(String sessionId) {
-    return _scrollControllers.putIfAbsent(
-      sessionId,
-      // TerminalView autoscrolls to bottom on output by default.
-      () => ScrollController(),
-    );
-  }
-
-  @override
-  void didUpdateWidget(_TerminalView old) {
-    super.didUpdateWidget(old);
-    // Clean up controllers for sessions that no longer exist.
-    final activeIds = widget.state.sessions.map((s) => s.id).toSet();
-    final stale = _scrollControllers.keys.where((k) => !activeIds.contains(k)).toList();
-    for (final id in stale) {
-      _scrollControllers.remove(id)?.dispose();
-    }
-  }
-
-  @override
-  void dispose() {
-    for (final c in _scrollControllers.values) {
-      c.dispose();
-    }
-    super.dispose();
-  }
-
   @override
   Widget build(BuildContext context) {
     final colors = context.appColors;
+    final sessions = widget.state.sessions;
+    final activeIndex = widget.state.activeIndex.clamp(0, sessions.isEmpty ? 0 : sessions.length - 1);
     final activeSession = widget.state.activeSession;
 
     return Container(
       color: colors.terminalBackground,
       child: Column(
         children: [
-          _TerminalHeader(sessions: widget.state.sessions, activeIndex: widget.state.activeIndex),
+          _TerminalHeader(sessions: sessions, activeIndex: activeIndex),
           if (activeSession != null) _SessionInfoBar(session: activeSession),
           Expanded(
-            child: activeSession != null
-                ? _TerminalWidget(
-                    key: ValueKey(activeSession.id),
-                    session: activeSession,
-                    scrollController: _controllerFor(activeSession.id),
-                  )
-                : const SizedBox(),
+            child: sessions.isEmpty
+                ? const SizedBox()
+                : IndexedStack(
+                    index: activeIndex,
+                    children: sessions.asMap().entries.map((e) {
+                      return _TerminalWidget(
+                        key: ValueKey(e.value.id),
+                        session: e.value,
+                        isActive: e.key == activeIndex,
+                      );
+                    }).toList(),
+                  ),
           ),
           _WorkspaceStatusBar(session: activeSession),
         ],
@@ -489,9 +465,9 @@ class _SessionInfoBar extends StatelessWidget {
 }
 
 class _TerminalWidget extends StatefulWidget {
-  const _TerminalWidget({super.key, required this.session, required this.scrollController});
+  const _TerminalWidget({super.key, required this.session, required this.isActive});
   final AgentSession session;
-  final ScrollController scrollController;
+  final bool isActive;
 
   @override
   State<_TerminalWidget> createState() => _TerminalWidgetState();
@@ -523,11 +499,13 @@ class _TerminalWidgetState extends State<_TerminalWidget> {
     if (old.session.id != widget.session.id) {
       old.session.terminal.onOutput = null;
       old.session.terminal.onResize = null;
-      // Remove old handler before re-adding to prevent duplicates
       HardwareKeyboard.instance.removeHandler(_handleHardwareKey);
       _bindTerminal();
-      _requestFocusAfterFrame();
       HardwareKeyboard.instance.addHandler(_handleHardwareKey);
+    }
+    // Request focus when this session becomes active (IndexedStack shows it).
+    if (!old.isActive && widget.isActive) {
+      _requestFocusAfterFrame();
     }
   }
 
@@ -763,7 +741,6 @@ class _TerminalWidgetState extends State<_TerminalWidget> {
             child: TerminalView(
               widget.session.terminal,
               controller: _controller,
-              scrollController: widget.scrollController,
               focusNode: _focusNode,
               autofocus: true,
               onKeyEvent: _onTerminalKeyEvent,
