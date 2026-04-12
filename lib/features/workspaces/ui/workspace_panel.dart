@@ -657,52 +657,62 @@ class _ActiveWorkspaceCard extends StatefulWidget {
 
 class _ActiveWorkspaceCardState extends State<_ActiveWorkspaceCard>
     with SingleTickerProviderStateMixin {
-  late final AnimationController _ctrl;
-  // Border/background: animates during [0.0, 0.5] of the controller.
-  // On forward: fades in first. On reverse: fades out last.
-  late final Animation<double> _borderAnim;
-  // Tree height: animates during [0.5, 1.0] of the controller.
-  // On forward: expands second. On reverse: collapses first.
-  late final Animation<double> _treeAnim;
+  AnimationController? _ctrl;
+  Animation<double>? _borderAnim;
+  Animation<double>? _treeAnim;
 
-  @override
-  void initState() {
-    super.initState();
+  void _initAnimations() {
+    _ctrl?.dispose();
     _ctrl = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 420),
     )..forward();
     _borderAnim = CurvedAnimation(
-      parent: _ctrl,
+      parent: _ctrl!,
       curve: const Interval(0.0, 0.5, curve: Curves.easeOut),
     );
     _treeAnim = CurvedAnimation(
-      parent: _ctrl,
+      parent: _ctrl!,
       curve: const Interval(0.5, 1.0, curve: Curves.easeInOut),
     );
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _initAnimations();
+  }
+
+  @override
+  void reassemble() {
+    // Hot reload: re-create animations if they were lost.
+    super.reassemble();
+    if (_ctrl == null) _initAnimations();
   }
 
   @override
   void didUpdateWidget(_ActiveWorkspaceCard old) {
     super.didUpdateWidget(old);
     if (widget.fadeOut && !old.fadeOut) {
-      _ctrl.reverse();
+      _ctrl?.reverse();
     } else if (!widget.fadeOut && old.fadeOut) {
-      _ctrl.forward();
+      _ctrl?.forward();
     }
   }
 
   @override
   void dispose() {
-    _ctrl.dispose();
+    _ctrl?.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     final accent = widget.accentColor;
+    final borderAnim = _borderAnim ?? const AlwaysStoppedAnimation(1.0);
+    final treeAnim = _treeAnim ?? const AlwaysStoppedAnimation(1.0);
     return FadeTransition(
-      opacity: _borderAnim,
+      opacity: borderAnim,
       child: Container(
         margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
         decoration: BoxDecoration(
@@ -717,7 +727,7 @@ class _ActiveWorkspaceCardState extends State<_ActiveWorkspaceCard>
             // Tree collapses first on exit, expands second on enter.
             ClipRect(
               child: SizeTransition(
-                sizeFactor: _treeAnim,
+                sizeFactor: treeAnim,
                 axisAlignment: -1,
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
