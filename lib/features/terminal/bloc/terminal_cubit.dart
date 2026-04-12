@@ -11,6 +11,7 @@ import 'package:yoloit/features/terminal/data/session_persistence_service.dart';
 import 'package:yoloit/features/terminal/data/tmux_service.dart';
 import 'package:yoloit/features/terminal/models/agent_session.dart';
 import 'package:yoloit/features/terminal/models/agent_type.dart';
+import 'package:yoloit/features/workspaces/data/agent_workspace_dir_service.dart';
 import 'package:yoloit/features/workspaces/data/workspace_secrets_service.dart';
 
 class TerminalCubit extends Cubit<TerminalState> {
@@ -90,18 +91,27 @@ class TerminalCubit extends Cubit<TerminalState> {
     required String workspacePath,
     String? workspaceId,
     String? savedSessionId,
+    Map<String, String>? worktreeContexts,
   }) async {
     if (state is! TerminalLoaded) return;
 
     final sessionId =
         savedSessionId ?? '${type.name}_${DateTime.now().millisecondsSinceEpoch}';
+
+    String effectivePath = workspacePath;
+    if (worktreeContexts != null && workspaceId != null) {
+      effectivePath = await AgentWorkspaceDirService.instance
+          .createAgentDir(workspaceId, sessionId, worktreeContexts);
+    }
+
     final session = AgentSession(
       id: sessionId,
       type: type,
-      workspacePath: workspacePath,
+      workspacePath: effectivePath,
       workspaceId: workspaceId,
       status: AgentStatus.live,
       sessionId: _generateSessionId(),
+      worktreeContexts: worktreeContexts,
     );
 
     final secrets = workspaceId != null
@@ -114,7 +124,7 @@ class TerminalCubit extends Cubit<TerminalState> {
       pty = _ptyService.launchTmux(
         sessionId: sessionId,
         label: type.displayName,
-        workspacePath: workspacePath,
+        workspacePath: effectivePath,
         tmuxLauncher: _tmux.launch,
         extraEnv: extraEnv,
       );
@@ -122,12 +132,12 @@ class TerminalCubit extends Cubit<TerminalState> {
       pty = _ptyService.launch(
         sessionId: sessionId,
         label: type.displayName,
-        workspacePath: workspacePath,
+        workspacePath: effectivePath,
         extraEnv: extraEnv,
       );
     }
 
-    unawaited(_logging.startSession(sessionId, '${type.displayName} @ $workspacePath'));
+    unawaited(_logging.startSession(sessionId, '${type.displayName} @ $effectivePath'));
     _attachPtyToSession(pty, session);
 
     _allSessions.add(session);

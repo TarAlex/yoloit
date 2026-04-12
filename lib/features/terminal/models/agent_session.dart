@@ -13,6 +13,7 @@ class AgentSession extends Equatable {
     this.status = AgentStatus.idle,
     this.sessionId,
     this.customName,
+    this.worktreeContexts,
   }) : terminal = Terminal(maxLines: 10000);
 
   // Private constructor that preserves an existing terminal instance.
@@ -25,6 +26,7 @@ class AgentSession extends Equatable {
     this.status = AgentStatus.idle,
     this.sessionId,
     this.customName,
+    this.worktreeContexts,
   });
 
   final String id;
@@ -36,12 +38,15 @@ class AgentSession extends Equatable {
   final String? sessionId;
   final String? customName;
   final Terminal terminal;
+  /// Maps repoPath → selectedWorktreePath. Null = default workspace dir.
+  final Map<String, String>? worktreeContexts;
 
   AgentSession copyWith({
     AgentStatus? status,
     String? sessionId,
     String? customName,
     bool clearCustomName = false,
+    Map<String, String>? worktreeContexts,
   }) {
     return AgentSession._preserve(
       id: id,
@@ -52,11 +57,12 @@ class AgentSession extends Equatable {
       status: status ?? this.status,
       sessionId: sessionId ?? this.sessionId,
       customName: clearCustomName ? null : (customName ?? this.customName),
+      worktreeContexts: worktreeContexts ?? this.worktreeContexts,
     );
   }
 
   String get displayName => customName?.isNotEmpty == true ? customName! : type.displayName;
 
   @override
-  List<Object?> get props => [id, type.name, workspacePath, status, sessionId, customName];
+  List<Object?> get props => [id, type.name, workspacePath, status, sessionId, customName, worktreeContexts];
 }

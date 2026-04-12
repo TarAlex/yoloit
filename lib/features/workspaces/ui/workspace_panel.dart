@@ -18,6 +18,7 @@ import 'package:yoloit/features/workspaces/data/workspace_secrets_service.dart';
 import 'package:yoloit/features/workspaces/models/workspace.dart';
 import 'package:yoloit/features/workspaces/ui/worktree_section.dart';
 import 'package:yoloit/core/theme/app_color_scheme.dart';
+import 'package:yoloit/features/workspaces/ui/workspace_inline_tree.dart';
 
 class WorkspacePanel extends StatefulWidget {
   const WorkspacePanel({super.key});
@@ -45,7 +46,6 @@ class WorkspacePanelState extends State<WorkspacePanel> {
               child: Column(
                 children: [
                   _buildWorkspacesList(),
-                  _buildWorktreeSection(),
                   _buildSetupSection(),
                 ],
               ),
@@ -143,10 +143,13 @@ class WorkspacePanelState extends State<WorkspacePanel> {
                 ),
               )
             else
-              ...workspaces.map(
-                (ws) => _WorkspaceTile(
+              ...workspaces.map((ws) {
+                final isActive = ws.id == activeId;
+                final accentColor = ws.color ?? colors.primary;
+                final tile = _WorkspaceTile(
                   workspace: ws,
-                  isActive: ws.id == activeId,
+                  isActive: isActive,
+                  suppressDecoration: isActive,
                   onTap: () => _selectWorkspace(context, ws),
                   onRemove: () => _confirmRemoveWorkspace(context, ws),
                   onRename: () => _renameWorkspaceDialog(context, ws),
@@ -156,8 +159,28 @@ class WorkspacePanelState extends State<WorkspacePanel> {
                   onSecretsOpen: () => _showSecretsDialog(context, ws),
                   onAddPath: () => _addPathToWorkspace(context, ws.id),
                   onRemovePath: (path) => _confirmRemovePath(context, ws.id, path),
-                ),
-              ),
+                );
+
+                if (!isActive) return tile;
+
+                // Active workspace: tile + inline tree share one decorated container.
+                return Container(
+                  margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: accentColor.withAlpha(30),
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(color: accentColor.withAlpha(80)),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      tile,
+                      Divider(height: 1, thickness: 1, color: accentColor.withAlpha(50)),
+                      WorkspaceInlineTree(workspace: ws),
+                    ],
+                  ),
+                );
+              }).toList(),
           ],
         );
       },
@@ -556,6 +579,7 @@ class _WorkspaceTile extends StatefulWidget {
     required this.onSecretsOpen,
     required this.onAddPath,
     required this.onRemovePath,
+    this.suppressDecoration = false,
   });
 
   final Workspace workspace;
@@ -568,6 +592,9 @@ class _WorkspaceTile extends StatefulWidget {
   final VoidCallback onSecretsOpen;
   final VoidCallback onAddPath;
   final void Function(String path) onRemovePath;
+  /// When true the tile renders without its own margin/border/background —
+  /// a parent container provides the decoration instead.
+  final bool suppressDecoration;
 
   @override
   State<_WorkspaceTile> createState() => _WorkspaceTileState();
@@ -690,19 +717,23 @@ class _WorkspaceTileState extends State<_WorkspaceTile> {
           onTap: widget.onTap,
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 120),
-            margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+            margin: widget.suppressDecoration
+                ? EdgeInsets.zero
+                : const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
             padding: EdgeInsets.all(10),
-            decoration: BoxDecoration(
-              color: widget.isActive
-                  ? accentColor.withAlpha(30)
-                  : _hovering
-                      ? colors.surfaceHighlight
-                      : Colors.transparent,
-              borderRadius: BorderRadius.circular(6),
-              border: widget.isActive
-                  ? Border.all(color: accentColor.withAlpha(80))
-                  : null,
-            ),
+            decoration: widget.suppressDecoration
+                ? const BoxDecoration()
+                : BoxDecoration(
+                    color: widget.isActive
+                        ? accentColor.withAlpha(30)
+                        : _hovering
+                            ? colors.surfaceHighlight
+                            : Colors.transparent,
+                    borderRadius: BorderRadius.circular(6),
+                    border: widget.isActive
+                        ? Border.all(color: accentColor.withAlpha(80))
+                        : null,
+                  ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [

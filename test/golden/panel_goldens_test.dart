@@ -18,6 +18,7 @@ import 'package:yoloit/features/terminal/ui/terminal_panel.dart';
 import 'package:yoloit/features/workspaces/bloc/workspace_cubit.dart';
 import 'package:yoloit/features/workspaces/bloc/workspace_state.dart';
 import 'package:yoloit/features/workspaces/models/workspace.dart';
+import 'package:yoloit/features/workspaces/ui/workspace_inline_tree.dart';
 import 'package:yoloit/features/workspaces/ui/workspace_panel.dart';
 
 Widget _reviewShell({required ReviewState state, double width = 360, double height = 800}) {
@@ -248,6 +249,107 @@ void main() {
       );
       await tester.pump();
       await screenMatchesGolden(tester, 'review_panel_diff_view');
+    });
+  });
+
+  group('Golden tests — WorkspaceInlineTree', () {
+    Widget _inlineTreeShell({
+      required Workspace workspace,
+      TerminalState termState = const TerminalLoaded(sessions: [], activeIndex: 0, allSessions: []),
+    }) {
+      return MultiBlocProvider(
+        providers: [
+          BlocProvider<WorkspaceCubit>(
+            create: (_) => WorkspaceCubit()
+              ..emit(WorkspaceLoaded(
+                workspaces: [workspace],
+                activeWorkspaceId: workspace.id,
+              )),
+          ),
+          BlocProvider<TerminalCubit>(create: (_) => TerminalCubit()..emit(termState)),
+          BlocProvider<ReviewCubit>(create: (_) => ReviewCubit()),
+          BlocProvider<RunCubit>(create: (_) => RunCubit()),
+        ],
+        child: _shell(
+          child: SingleChildScrollView(
+            child: WorkspaceInlineTree(workspace: workspace),
+          ),
+        ),
+      );
+    }
+
+    testGoldens('workspace_panel_inline_tree_empty_repos', (tester) async {
+      const workspace = Workspace(
+        id: 'ws_golden',
+        name: 'golden-project',
+        paths: ['/fake/repo-alpha', '/fake/repo-beta'],
+      );
+
+      await tester.pumpWidgetBuilder(
+        _inlineTreeShell(workspace: workspace),
+        surfaceSize: const Size(260, 800),
+      );
+      // Wait for async git calls (fail gracefully for fake paths)
+      await tester.pump(const Duration(seconds: 3));
+      await screenMatchesGolden(tester, 'workspace_panel_inline_tree_empty_repos');
+    });
+
+    testGoldens('workspace_panel_with_agent_sessions', (tester) async {
+      const workspace = Workspace(
+        id: 'ws_sessions',
+        name: 'sessions-project',
+        paths: ['/fake/main-repo'],
+      );
+
+      final runningSession = AgentSession(
+        id: 'sess_running',
+        type: AgentType.copilot,
+        workspacePath: '/fake/main-repo',
+        workspaceId: 'ws_sessions',
+        status: AgentStatus.live,
+        customName: 'running-task',
+      );
+      final idleSession = AgentSession(
+        id: 'sess_idle',
+        type: AgentType.claude,
+        workspacePath: '/fake/main-repo',
+        workspaceId: 'ws_sessions',
+        status: AgentStatus.idle,
+        customName: 'idle-task',
+      );
+
+      final termState = TerminalLoaded(
+        sessions: [runningSession, idleSession],
+        activeIndex: 0,
+        allSessions: [runningSession, idleSession],
+      );
+
+      await tester.pumpWidgetBuilder(
+        _inlineTreeShell(workspace: workspace, termState: termState),
+        surfaceSize: const Size(260, 800),
+      );
+      await tester.pump(const Duration(seconds: 3));
+      await screenMatchesGolden(tester, 'workspace_panel_with_agent_sessions');
+    });
+
+    testGoldens('workspace_inline_tree_new_session_dialog', (tester) async {
+      const workspace = Workspace(
+        id: 'ws_dialog',
+        name: 'dialog-project',
+        paths: ['/fake/repo-dialog'],
+      );
+
+      await tester.pumpWidgetBuilder(
+        _inlineTreeShell(workspace: workspace),
+        surfaceSize: const Size(420, 600),
+      );
+      await tester.pump(const Duration(seconds: 3));
+
+      // Tap "＋ New Agent Session" to open dialog
+      await tester.tap(find.text('＋ New Agent Session'));
+      await tester.pumpAndSettle();
+
+      await screenMatchesGolden(tester, 'workspace_inline_tree_new_session_dialog');
     });
   });
 }

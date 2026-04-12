@@ -155,31 +155,41 @@ class _FileEditorPanelState extends State<FileEditorPanel> {
           child: Column(
             children: [
               _TabBar(state: state),
-              // Toggle bar: size + fade animation — always in tree to avoid layout jumps
-              _AnimatedToggleBar(
-                visible: !activeTab.isDiff && !activeTab.isLoading && _isMarkdown(activeTab.filePath),
-                child: _MarkdownToggleBar(
-                  isPreview: _previewPaths.contains(activeTab.filePath),
-                  onToggle: () => setState(() {
-                    final path = activeTab.filePath;
-                    if (_previewPaths.contains(path)) {
-                      _previewPaths.remove(path);
-                    } else {
-                      _previewPaths.add(path);
-                    }
-                  }),
-                ),
-              ),
               Expanded(
-                child: activeTab.isLoading
-                    ? const Center(child: CircularProgressIndicator())
-                    : activeTab.error != null
-                        ? _ErrorView(message: activeTab.error!)
-                        : activeTab.isDiff
-                            ? _DiffBody(tab: activeTab)
-                            : _previewPaths.contains(activeTab.filePath)
-                                ? _MarkdownPreview(content: activeTab.content ?? '')
-                                : _EditorBody(key: ValueKey(activeTab.filePath), tab: activeTab, codeController: controller!, fontSizeNotifier: _fontSizeNotifier),
+                child: Stack(
+                  children: [
+                    // Main content — full height, never resizes
+                    Positioned.fill(
+                      child: activeTab.isLoading
+                          ? const Center(child: CircularProgressIndicator())
+                          : activeTab.error != null
+                              ? _ErrorView(message: activeTab.error!)
+                              : activeTab.isDiff
+                                  ? _DiffBody(tab: activeTab)
+                                  : _previewPaths.contains(activeTab.filePath)
+                                      ? _MarkdownPreview(content: activeTab.content ?? '')
+                                      : _EditorBody(key: ValueKey(activeTab.filePath), tab: activeTab, codeController: controller!, fontSizeNotifier: _fontSizeNotifier),
+                    ),
+                    // Toggle bar: floats at top, fades in/out without affecting layout
+                    Positioned(
+                      top: 0, left: 0, right: 0,
+                      child: _AnimatedToggleBar(
+                        visible: !activeTab.isDiff && !activeTab.isLoading && _isMarkdown(activeTab.filePath),
+                        child: _MarkdownToggleBar(
+                          isPreview: _previewPaths.contains(activeTab.filePath),
+                          onToggle: () => setState(() {
+                            final path = activeTab.filePath;
+                            if (_previewPaths.contains(path)) {
+                              _previewPaths.remove(path);
+                            } else {
+                              _previewPaths.add(path);
+                            }
+                          }),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ],
           ),
@@ -227,19 +237,22 @@ class _AnimatedToggleBar extends StatefulWidget {
 class _AnimatedToggleBarState extends State<_AnimatedToggleBar>
     with SingleTickerProviderStateMixin {
   late final AnimationController _ctrl;
-  late final Animation<double> _sizeAnim;
   late final Animation<double> _fadeAnim;
+  late final Animation<Offset> _slideAnim;
 
   @override
   void initState() {
     super.initState();
     _ctrl = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 250),
+      duration: const Duration(milliseconds: 200),
       value: widget.visible ? 1.0 : 0.0,
     );
-    _sizeAnim = CurvedAnimation(parent: _ctrl, curve: Curves.easeOutCubic);
-    _fadeAnim = CurvedAnimation(parent: _ctrl, curve: Curves.easeIn);
+    _fadeAnim = CurvedAnimation(parent: _ctrl, curve: Curves.easeOut);
+    _slideAnim = Tween<Offset>(
+      begin: const Offset(0, -1),
+      end: Offset.zero,
+    ).animate(CurvedAnimation(parent: _ctrl, curve: Curves.easeOutCubic));
   }
 
   @override
@@ -262,10 +275,9 @@ class _AnimatedToggleBarState extends State<_AnimatedToggleBar>
 
   @override
   Widget build(BuildContext context) {
-    return SizeTransition(
-      sizeFactor: _sizeAnim,
-      axisAlignment: -1,
-      child: FadeTransition(opacity: _fadeAnim, child: widget.child),
+    return FadeTransition(
+      opacity: _fadeAnim,
+      child: SlideTransition(position: _slideAnim, child: widget.child),
     );
   }
 }
