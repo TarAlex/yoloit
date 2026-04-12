@@ -633,16 +633,17 @@ class _ConsoleState extends State<_Console> {
                 color: AppColors.surface,
                 child: Row(
                   children: [
-                    Text(
-                      '> ${session.config.command}',
-                      style: const TextStyle(
-                        color: AppColors.textMuted,
-                        fontSize: 11,
-                        fontFamily: 'monospace',
+                    Expanded(
+                      child: Text(
+                        '> ${session.config.command}',
+                        style: const TextStyle(
+                          color: AppColors.textMuted,
+                          fontSize: 11,
+                          fontFamily: 'monospace',
+                        ),
+                        overflow: TextOverflow.ellipsis,
                       ),
-                      overflow: TextOverflow.ellipsis,
                     ),
-                    const Spacer(),
                     if (session.startedAt != null)
                       Text(
                         _formatTime(session.startedAt!),

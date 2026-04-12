@@ -155,23 +155,20 @@ class _FileEditorPanelState extends State<FileEditorPanel> {
           child: Column(
             children: [
               _TabBar(state: state),
-              // Toggle bar: animated height — always in tree to avoid layout jumps
-              AnimatedSize(
-                duration: const Duration(milliseconds: 150),
-                curve: Curves.easeInOut,
-                child: (!activeTab.isDiff && !activeTab.isLoading && _isMarkdown(activeTab.filePath))
-                    ? _MarkdownToggleBar(
-                        isPreview: _previewPaths.contains(activeTab.filePath),
-                        onToggle: () => setState(() {
-                          final path = activeTab.filePath;
-                          if (_previewPaths.contains(path)) {
-                            _previewPaths.remove(path);
-                          } else {
-                            _previewPaths.add(path);
-                          }
-                        }),
-                      )
-                    : const SizedBox.shrink(),
+              // Toggle bar: size + fade animation — always in tree to avoid layout jumps
+              _AnimatedToggleBar(
+                visible: !activeTab.isDiff && !activeTab.isLoading && _isMarkdown(activeTab.filePath),
+                child: _MarkdownToggleBar(
+                  isPreview: _previewPaths.contains(activeTab.filePath),
+                  onToggle: () => setState(() {
+                    final path = activeTab.filePath;
+                    if (_previewPaths.contains(path)) {
+                      _previewPaths.remove(path);
+                    } else {
+                      _previewPaths.add(path);
+                    }
+                  }),
+                ),
               ),
               Expanded(
                 child: activeTab.isLoading
@@ -213,6 +210,63 @@ class _FileEditorPanelState extends State<FileEditorPanel> {
   static bool _isMarkdown(String filePath) {
     final ext = filePath.split('.').last.toLowerCase();
     return ext == 'md' || ext == 'mdx' || ext == 'markdown';
+  }
+}
+
+// ── Animated wrapper for the markdown toggle bar ───────────────────────────
+
+class _AnimatedToggleBar extends StatefulWidget {
+  const _AnimatedToggleBar({required this.visible, required this.child});
+  final bool visible;
+  final Widget child;
+
+  @override
+  State<_AnimatedToggleBar> createState() => _AnimatedToggleBarState();
+}
+
+class _AnimatedToggleBarState extends State<_AnimatedToggleBar>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _ctrl;
+  late final Animation<double> _sizeAnim;
+  late final Animation<double> _fadeAnim;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 250),
+      value: widget.visible ? 1.0 : 0.0,
+    );
+    _sizeAnim = CurvedAnimation(parent: _ctrl, curve: Curves.easeOutCubic);
+    _fadeAnim = CurvedAnimation(parent: _ctrl, curve: Curves.easeIn);
+  }
+
+  @override
+  void didUpdateWidget(_AnimatedToggleBar old) {
+    super.didUpdateWidget(old);
+    if (widget.visible != old.visible) {
+      if (widget.visible) {
+        _ctrl.forward();
+      } else {
+        _ctrl.reverse();
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SizeTransition(
+      sizeFactor: _sizeAnim,
+      axisAlignment: -1,
+      child: FadeTransition(opacity: _fadeAnim, child: widget.child),
+    );
   }
 }
 
