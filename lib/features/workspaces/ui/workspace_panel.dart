@@ -711,35 +711,49 @@ class _ActiveWorkspaceCardState extends State<_ActiveWorkspaceCard>
     final accent = widget.accentColor;
     final borderAnim = _borderAnim ?? const AlwaysStoppedAnimation(1.0);
     final treeAnim = _treeAnim ?? const AlwaysStoppedAnimation(1.0);
-    return FadeTransition(
-      opacity: borderAnim,
-      child: Container(
-        margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-        decoration: BoxDecoration(
-          color: accent.withAlpha(30),
-          borderRadius: BorderRadius.circular(6),
-          border: Border.all(color: accent.withAlpha(80)),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            widget.tile,
-            // Tree collapses first on exit, expands second on enter.
-            ClipRect(
-              child: SizeTransition(
-                sizeFactor: treeAnim,
-                axisAlignment: -1,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Divider(height: 1, thickness: 1, color: accent.withAlpha(50)),
-                    WorkspaceInlineTree(workspace: widget.workspace),
-                  ],
+
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+      child: Stack(
+        children: [
+          // Layer 1 (behind): fading border + background decoration.
+          // The Positioned.fill sizes itself to the Column (layer 2) below.
+          Positioned.fill(
+            child: FadeTransition(
+              opacity: borderAnim,
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  color: accent.withAlpha(28),
+                  borderRadius: BorderRadius.circular(6),
+                  border: Border.all(color: accent.withAlpha(80)),
                 ),
               ),
             ),
-          ],
-        ),
+          ),
+          // Layer 2 (front): tile always visible + collapsing tree.
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              widget.tile, // never fades — no blinking
+              ClipRect(
+                child: SizeTransition(
+                  sizeFactor: treeAnim,
+                  axisAlignment: -1,
+                  child: FadeTransition(
+                    opacity: borderAnim,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Divider(height: 1, thickness: 1, color: accent.withAlpha(50)),
+                        WorkspaceInlineTree(workspace: widget.workspace),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
       ),
     );
   }
@@ -947,22 +961,28 @@ class _WorkspaceTileState extends State<_WorkspaceTile> {
                         overflow: TextOverflow.ellipsis,
                       ),
                     ),
-                    if (widget.isActive)
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
-                        decoration: BoxDecoration(
-                          color: AppColors.neonGreen.withAlpha(30),
-                          borderRadius: BorderRadius.circular(3),
-                        ),
-                        child: const Text(
-                          'Active',
-                          style: TextStyle(
-                            color: AppColors.neonGreen,
-                            fontSize: 9,
-                            fontWeight: FontWeight.w600,
+                    AnimatedOpacity(
+                      opacity: widget.isActive ? 1.0 : 0.0,
+                      duration: const Duration(milliseconds: 200),
+                      child: IgnorePointer(
+                        ignoring: !widget.isActive,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                          decoration: BoxDecoration(
+                            color: AppColors.neonGreen.withAlpha(30),
+                            borderRadius: BorderRadius.circular(3),
+                          ),
+                          child: const Text(
+                            'Active',
+                            style: TextStyle(
+                              color: AppColors.neonGreen,
+                              fontSize: 9,
+                              fontWeight: FontWeight.w600,
+                            ),
                           ),
                         ),
                       ),
+                    ),
                     AnimatedOpacity(
                       opacity: _hovering ? 1.0 : 0.0,
                       duration: const Duration(milliseconds: 150),
