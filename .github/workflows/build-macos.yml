@@ -157,9 +157,11 @@ jobs:
       - name: Build macOS release (universal)
         env:
           BUILD_NUMBER: ${{ github.run_number }}
+          BUILD_VERSION: ${{ steps.version.outputs.version }}
         run: |
           # Build universal binary (arm64 + x86_64) via Xcode ARCHS override
           FLUTTER_XCODE_ARCHS="arm64 x86_64" flutter build macos --release \
+            --build-name=$BUILD_VERSION \
             --build-number=$BUILD_NUMBER
           # Verify architectures in the produced binary
           MAIN_BIN=$(find build/macos/Build/Products/Release/YoLoIT.app -name "YoLoIT" -type f | head -1)

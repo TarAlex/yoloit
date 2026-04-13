@@ -39,8 +39,36 @@ class UpdateService {
   static const _owner = 'IstiN';
   static const _repo = 'yoloit';
 
-  /// Current app version — must match the release tag (without leading "v").
-  static const currentVersion = '0.0.1';
+  /// Current app version — read from Info.plist at runtime.
+  /// Falls back to pubspec version if plist read fails.
+  static String? _cachedVersion;
+  static const _fallbackVersion = '0.0.11';
+
+  static Future<String> getAppVersion() async {
+    if (_cachedVersion != null) return _cachedVersion!;
+    try {
+      // Read CFBundleShortVersionString from running app's Info.plist
+      final executable = Platform.resolvedExecutable;
+      // .app/Contents/MacOS/YoLoIT → .app
+      final appBundle = executable
+          .split('/Contents/')
+          .first;
+      final plistPath = '$appBundle/Contents/Info.plist';
+      final result = await Process.run(
+        '/usr/bin/defaults',
+        ['read', plistPath, 'CFBundleShortVersionString'],
+      );
+      if (result.exitCode == 0) {
+        _cachedVersion = (result.stdout as String).trim();
+        return _cachedVersion!;
+      }
+    } catch (_) {}
+    _cachedVersion = _fallbackVersion;
+    return _fallbackVersion;
+  }
+
+  /// Synchronous getter for cached version (after first async call).
+  static String get currentVersion => _cachedVersion ?? _fallbackVersion;
 
   static const _apiUrl =
       'https://api.github.com/repos/$_owner/$_repo/releases/latest';
@@ -61,6 +89,7 @@ class UpdateService {
     if (!force && isDevBuild) return null;
 
     try {
+      final appVersion = await getAppVersion();
       final info = await _fetchLatestRelease();
       await SessionPrefs.saveLastUpdateCheckMs(
           DateTime.now().millisecondsSinceEpoch);
@@ -69,7 +98,7 @@ class UpdateService {
       final skipped = await SessionPrefs.getSkippedVersion();
       if (skipped == info.version) return null; // user dismissed this version
 
-      return _isNewer(info.version, currentVersion) ? info : null;
+      return _isNewer(info.version, appVersion) ? info : null;
     } catch (_) {
       return null;
     }
