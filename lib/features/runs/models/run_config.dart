@@ -62,11 +62,12 @@ class RunConfig extends Equatable {
         isFlutterRun: json['isFlutterRun'] as bool? ?? false,
       );
 
-  static RunConfig flutterRunMacos(String workspacePath) => const RunConfig(
+  static RunConfig flutterRunMacos(String workspacePath) => RunConfig(
         id: 'preset_flutter_run_macos',
         name: 'Flutter Run (macOS)',
         command: 'flutter run -d macos --debug',
-        color: Color(0xFF54C5F8),
+        workingDir: workspacePath,
+        color: const Color(0xFF54C5F8),
         isFlutterRun: true,
       );
 
