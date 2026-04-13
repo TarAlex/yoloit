@@ -178,7 +178,7 @@ class RunService {
 
   void _sendKeys(String sessionId, String keys) {
     final name = _sessionTmux[sessionId];
-    if (name != null) Process.run("tmux", ["send-keys", "-t", name, keys, ""]);
+    if (name != null) Process.run("tmux", ["send-keys", "-t", name, keys]);
   }
 
   bool isRunning(String sessionId) => _pollers.containsKey(sessionId);
