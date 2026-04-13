@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:yoloit/core/platform/platform_dirs.dart';
 
 /// File-based logging for terminal session output.
 ///
@@ -30,8 +31,7 @@ class LoggingService {
   }
 
   Future<Directory> get logsDir async {
-    final home = Platform.environment['HOME'] ?? '/tmp';
-    final dir = Directory('$home/.yoloit/logs');
+    final dir = Directory(PlatformDirs.instance.logsDir);
     if (!dir.existsSync()) dir.createSync(recursive: true);
     return dir;
   }

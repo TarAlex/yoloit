@@ -1,15 +1,14 @@
 import 'dart:io';
 
 import 'package:path/path.dart' as p;
+import 'package:yoloit/core/platform/platform_dirs.dart';
 
 class AgentWorkspaceDirService {
   AgentWorkspaceDirService._();
   static final instance = AgentWorkspaceDirService._();
 
-  static String _baseDir() {
-    final home = Platform.environment['HOME'] ?? '/tmp';
-    return p.join(home, '.config', 'yoloit', 'workspaces');
-  }
+  static String _baseDir() =>
+      p.join(PlatformDirs.instance.configDir, 'workspaces');
 
   String dirForAgent(String workspaceId, String agentId) =>
       p.join(_baseDir(), workspaceId, 'agents', agentId);

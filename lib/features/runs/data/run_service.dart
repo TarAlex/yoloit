@@ -2,6 +2,9 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:yoloit/core/platform/platform_dirs.dart';
+import 'package:yoloit/core/platform/platform_shell.dart';
+
 typedef OutputCallback = void Function(String line, bool isError);
 typedef ExitCallback = void Function(int exitCode);
 
@@ -18,26 +21,16 @@ class RunService {
       'yoloit_run_${configId.replaceAll(RegExp(r"[^a-zA-Z0-9]"), "_")}';
 
   static Future<String> logPath(String configId) async {
-    final home = Platform.environment["HOME"] ?? "/tmp";
-    final dir = Directory("$home/.config/yoloit/runs");
+    final dir = Directory('${PlatformDirs.instance.configDir}/runs');
     await dir.create(recursive: true);
     return "${dir.path}/${tmuxName(configId)}.log";
   }
 
   /// Builds PATH with common GUI-app-missing tool dirs, including flutter.
-  static String _enrichedPath() {
-    final home = Platform.environment['HOME'] ?? '';
-    final existing = Platform.environment['PATH'] ?? '/usr/bin:/bin';
-    final extras = [
-      if (home.isNotEmpty) '$home/.local/bin',
-      if (home.isNotEmpty) '$home/development/flutter/bin',
-      if (home.isNotEmpty) '$home/flutter/bin',
-      '/opt/homebrew/bin',
-      '/opt/homebrew/sbin',
-      '/usr/local/bin',
-    ].join(':');
-    return '$extras:$existing';
-  }
+  static String _enrichedPath() =>
+      PlatformShell.instance.enrichedPath(
+        Platform.environment['PATH'] ?? '/usr/bin:/bin',
+      );
 
   Future<void> start({
     required String sessionId,

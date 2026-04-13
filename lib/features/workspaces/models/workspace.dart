@@ -1,8 +1,7 @@
-import 'dart:io';
-
 import 'package:equatable/equatable.dart';
 import 'package:flutter/material.dart';
 import 'package:path/path.dart' as p;
+import 'package:yoloit/core/platform/platform_dirs.dart';
 
 class Workspace extends Equatable {
   const Workspace({
@@ -34,10 +33,8 @@ class Workspace extends Equatable {
 
   /// The internal workspace directory where symlinks to all paths live.
   /// Copilot/Claude are launched from here and can see all repos.
-  String get workspaceDir {
-    final home = Platform.environment['HOME'] ?? '/tmp';
-    return p.join(home, '.config', 'yoloit', 'workspaces', id);
-  }
+  String get workspaceDir =>
+      p.join(PlatformDirs.instance.configDir, 'workspaces', id);
 
   Workspace copyWith({
     String? name,

@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:super_clipboard/super_clipboard.dart';
+import 'package:yoloit/core/platform/platform_dirs.dart';
 
 /// Saves the current clipboard content to a temp file under /tmp/yoloit_clip/
 /// and returns the absolute path, or null if the clipboard is empty.
@@ -10,7 +11,7 @@ class ClipboardFileService {
   ClipboardFileService._();
   static final ClipboardFileService instance = ClipboardFileService._();
 
-  static const _dir = '/tmp/yoloit_clip';
+  static String get _dir => '${PlatformDirs.instance.tempDir}/yoloit_clip';
 
   Future<String?> saveClipboardToFile() async {
     final clipboard = SystemClipboard.instance;

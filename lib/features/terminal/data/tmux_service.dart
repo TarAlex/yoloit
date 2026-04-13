@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:flutter_pty/flutter_pty.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:yoloit/core/platform/platform_dirs.dart';
 
 /// Manages tmux sessions as a backend for persistent terminal sessions.
 ///
@@ -78,10 +79,8 @@ class TmuxService {
       sessionId.replaceAll(RegExp(r'[^a-zA-Z0-9_-]'), '_');
 
   /// Path to yoloit's tmux config — written on first use.
-  static String get _configPath {
-    final home = Platform.environment['HOME'] ?? '/tmp';
-    return '$home/.config/yoloit/tmux.conf';
-  }
+  static String get _configPath =>
+      '${PlatformDirs.instance.configDir}/tmux.conf';
 
   /// Ensures the yoloit tmux config exists with status bar disabled.
   Future<void> _ensureConfig() async {

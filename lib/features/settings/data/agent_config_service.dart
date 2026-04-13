@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 import 'package:path/path.dart' as p;
+import 'package:yoloit/core/platform/platform_dirs.dart';
 import 'package:yoloit/features/terminal/models/agent_type.dart';
 
 class AgentConfig {
@@ -75,15 +76,11 @@ class AgentConfigService {
       )
       .toList();
 
-  String get _configPath {
-    final home = Platform.environment['HOME'] ?? '/tmp';
-    return p.join(home, '.config', 'yoloit', 'agent_configs.json');
-  }
+  String get _configPath =>
+      p.join(PlatformDirs.instance.configDir, 'agent_configs.json');
 
-  String get _prefsPath {
-    final home = Platform.environment['HOME'] ?? '/tmp';
-    return p.join(home, '.config', 'yoloit', 'agent_prefs.json');
-  }
+  String get _prefsPath =>
+      p.join(PlatformDirs.instance.configDir, 'agent_prefs.json');
 
   Future<List<AgentConfig>> load() async {
     try {

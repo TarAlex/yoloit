@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:yoloit/core/platform/platform_launcher.dart';
 import 'package:yoloit/core/theme/app_color_scheme.dart';
 import 'package:yoloit/core/theme/app_colors.dart';
 import 'package:yoloit/features/editor/bloc/file_editor_cubit.dart';
@@ -612,7 +613,7 @@ class _FileTreeNodeWidgetState extends State<_FileTreeNodeWidget> {
         _startRename();
       case 'show_in_finder':
         final target = node.isDirectory ? node.path : node.path;
-        Process.run('open', ['-R', target]);
+        PlatformLauncher.instance.revealInFinder(target);
     }
   }
 

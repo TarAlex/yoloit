@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:yoloit/core/platform/platform_dirs.dart';
 
 /// Captures Flutter debug output and unhandled errors to a rotating log file.
 ///
@@ -61,8 +62,7 @@ class AppLogger {
 
   /// Path to the current log file (may not exist yet if logging is off).
   Future<String> get logPath async {
-    final home = Platform.environment['HOME'] ?? '/tmp';
-    return '$home/Library/Logs/yoloit/app.log';
+    return '${PlatformDirs.instance.logsDir}/app.log';
   }
 
   Future<String> readLog() async {
@@ -93,10 +93,7 @@ class AppLogger {
   }
 
   Future<File> _openFile() async {
-    final home = Platform.environment['HOME'] ?? '/tmp';
-    // Write to ~/Library/Logs/yoloit/ to respect macOS sandbox app container
-    // while still being easily accessible.
-    final dir = Directory('$home/Library/Logs/yoloit');
+    final dir = Directory(PlatformDirs.instance.logsDir);
     if (!dir.existsSync()) dir.createSync(recursive: true);
     final f = File('${dir.path}/app.log');
     // Rotate if > 5 MB

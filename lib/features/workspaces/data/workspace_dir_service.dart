@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:path/path.dart' as p;
+import 'package:yoloit/core/platform/platform_dirs.dart';
 import 'package:yoloit/features/workspaces/models/workspace.dart';
 
 /// Manages the internal workspace directory structure.
@@ -17,10 +18,8 @@ class WorkspaceDirService {
   WorkspaceDirService._();
   static final instance = WorkspaceDirService._();
 
-  static String _baseDir() {
-    final home = Platform.environment['HOME'] ?? '/tmp';
-    return p.join(home, '.config', 'yoloit', 'workspaces');
-  }
+  static String _baseDir() =>
+      p.join(PlatformDirs.instance.configDir, 'workspaces');
 
   String dirForWorkspace(String workspaceId) =>
       p.join(_baseDir(), workspaceId);

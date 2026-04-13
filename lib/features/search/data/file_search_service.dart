@@ -34,6 +34,33 @@ class FileSearchService {
     '.idea', '.vscode', '__pycache__', '.gradle',
   };
 
+  /// Cached ripgrep binary path, or null if not available.
+  static String? _rgBin;
+  static bool _rgChecked = false;
+
+  /// Returns the ripgrep (`rg`) binary if available, null otherwise.
+  static Future<String?> _findRg() async {
+    if (_rgChecked) return _rgBin;
+    _rgChecked = true;
+    for (final candidate in ['/opt/homebrew/bin/rg', '/usr/local/bin/rg', '/usr/bin/rg']) {
+      if (await File(candidate).exists()) {
+        _rgBin = candidate;
+        return _rgBin;
+      }
+    }
+    try {
+      final result = await Process.run('which', ['rg']);
+      if (result.exitCode == 0) {
+        final p = (result.stdout as String).trim();
+        if (p.isNotEmpty) {
+          _rgBin = p;
+          return _rgBin;
+        }
+      }
+    } catch (_) {}
+    return null;
+  }
+
   /// Search file names matching [query] in [workspaces] using fuzzy matching.
   ///
   /// Supports:
@@ -119,6 +146,79 @@ class FileSearchService {
   }
 
   Future<List<SearchResult>> _grepContent(
+    String dirPath,
+    String wsName,
+    String query,
+  ) async {
+    try {
+      final rg = await _findRg();
+      if (rg != null) {
+        return _rgContent(rg, dirPath, wsName, query);
+      }
+      return _grepFallback(dirPath, wsName, query);
+    } catch (_) {
+      return [];
+    }
+  }
+
+  Future<List<SearchResult>> _rgContent(
+    String rgBin,
+    String dirPath,
+    String wsName,
+    String query,
+  ) async {
+    final excludeArgs = _ignoreDirs
+        .expand((d) => ['--glob=!$d/**'])
+        .toList();
+
+    final result = await Process.run(rgBin, [
+      '--files-with-matches',
+      '--line-number',
+      '--max-count=1',
+      '--no-heading',
+      '-m', '1',
+      ...excludeArgs,
+      query,
+      dirPath,
+    ]);
+
+    if (result.exitCode > 1) return [];
+
+    final files = (result.stdout as String)
+        .split('\n')
+        .where((l) => l.isNotEmpty)
+        .take(20)
+        .toList();
+
+    final results = <SearchResult>[];
+    for (final file in files) {
+      if (results.length >= _maxResults) break;
+      final lineResult = await Process.run(rgBin, [
+        '--line-number',
+        '-m', '1',
+        query,
+        file,
+      ]);
+      if (lineResult.exitCode == 0) {
+        final match = (lineResult.stdout as String).trim();
+        final colonIdx = match.indexOf(':');
+        if (colonIdx > 0) {
+          final lineNum = int.tryParse(match.substring(0, colonIdx));
+          final content = match.substring(colonIdx + 1).trim();
+          results.add(SearchResult(
+            filePath: file,
+            workspaceName: wsName,
+            workspacePath: dirPath,
+            lineNumber: lineNum,
+            lineContent: content.length > 80 ? content.substring(0, 80) : content,
+          ));
+        }
+      }
+    }
+    return results;
+  }
+
+  Future<List<SearchResult>> _grepFallback(
     String dirPath,
     String wsName,
     String query,

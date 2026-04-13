@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 import 'package:flutter_pty/flutter_pty.dart';
+import 'package:yoloit/core/platform/platform_shell.dart';
 import 'package:yoloit/core/services/resource_monitor_service.dart';
 
 class PtyService {
@@ -34,7 +35,7 @@ class PtyService {
     };
 
     // Use the user's default shell
-    final shell = Platform.environment['SHELL'] ?? '/bin/zsh';
+    final shell = PlatformShell.instance.defaultShell;
 
     final pty = Pty.start(
       shell,
@@ -92,19 +93,10 @@ class PtyService {
   }
 
   /// Builds a PATH that includes common tool locations missed by GUI apps.
-  static String _enrichedPath() {
-    final home = Platform.environment['HOME'] ?? '';
-    final existing = Platform.environment['PATH'] ?? '/usr/bin:/bin';
-    final extras = [
-      if (home.isNotEmpty) '$home/.local/bin',
-      if (home.isNotEmpty) '$home/development/flutter/bin',
-      if (home.isNotEmpty) '$home/flutter/bin',
-      '/opt/homebrew/bin',
-      '/opt/homebrew/sbin',
-      '/usr/local/bin',
-    ].join(':');
-    return '$extras:$existing';
-  }
+  static String _enrichedPath() =>
+      PlatformShell.instance.enrichedPath(
+        Platform.environment['PATH'] ?? '/usr/bin:/bin',
+      );
 
   void write(String sessionId, String data) {
     final pty = _ptys[sessionId];

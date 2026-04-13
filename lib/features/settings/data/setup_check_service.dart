@@ -2,6 +2,8 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:yoloit/core/platform/platform_launcher.dart';
+
 // ── InstallAction ─────────────────────────────────────────────────────────────
 
 /// Describes how to install a dependency.
@@ -356,15 +358,7 @@ class SetupCheckService {
 
   /// Opens a new Terminal window running the given shell command.
   static Future<void> _openInTerminal(String command) async {
-    final escaped = command.replaceAll('"', r'\"');
-    await Process.run('osascript', [
-      '-e',
-      'tell application "Terminal" to do script "$escaped"',
-    ], environment: _env);
-    await Process.run('osascript', [
-      '-e',
-      'tell application "Terminal" to activate',
-    ], environment: _env);
+    await PlatformLauncher.instance.openTerminal(command);
   }
 
   // ── Internal check helper ────────────────────────────────────────────────

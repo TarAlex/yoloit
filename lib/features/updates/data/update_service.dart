@@ -2,6 +2,8 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
+import 'package:yoloit/core/platform/platform_installer.dart';
+import 'package:yoloit/core/platform/platform_launcher.dart';
 import 'package:yoloit/core/session/session_prefs.dart';
 
 // ── UpdateInfo ────────────────────────────────────────────────────────────────
@@ -46,25 +48,9 @@ class UpdateService {
 
   static Future<String> getAppVersion() async {
     if (_cachedVersion != null) return _cachedVersion!;
-    try {
-      // Read CFBundleShortVersionString from running app's Info.plist
-      final executable = Platform.resolvedExecutable;
-      // .app/Contents/MacOS/YoLoIT → .app
-      final appBundle = executable
-          .split('/Contents/')
-          .first;
-      final plistPath = '$appBundle/Contents/Info.plist';
-      final result = await Process.run(
-        '/usr/bin/defaults',
-        ['read', plistPath, 'CFBundleShortVersionString'],
-      );
-      if (result.exitCode == 0) {
-        _cachedVersion = (result.stdout as String).trim();
-        return _cachedVersion!;
-      }
-    } catch (_) {}
-    _cachedVersion = _fallbackVersion;
-    return _fallbackVersion;
+    _cachedVersion = await PlatformInstaller.instance
+        .getAppVersion(fallback: _fallbackVersion);
+    return _cachedVersion!;
   }
 
   /// Synchronous getter for cached version (after first async call).
@@ -106,8 +92,7 @@ class UpdateService {
 
   /// Opens the release page in the system browser (fallback).
   static Future<void> openRelease(UpdateInfo info) async {
-    final url = info.releaseUrl;
-    await Process.run('open', [url]);
+    await PlatformLauncher.instance.openUrl(info.releaseUrl);
   }
 
   /// Downloads the DMG, mounts it, copies the app to /Applications, relaunches.
@@ -117,84 +102,15 @@ class UpdateService {
     UpdateInfo info, {
     required void Function(double? progress, String status) onProgress,
   }) async {
-    final dmgUrl = info.downloadUrl;
-    if (dmgUrl == null) {
-      // No DMG — open browser as fallback
+    final installer = PlatformInstaller.instance;
+    if (!installer.supportsInAppInstall || info.downloadUrl == null) {
       await openRelease(info);
       return;
     }
-
-    // 1. Download DMG
-    onProgress(0.0, 'Downloading…');
-    final tmpDir = Directory.systemTemp.createTempSync('yoloit_update_');
-    final dmgFile = File('${tmpDir.path}/YoLoIT.dmg');
-
-    final client = HttpClient();
-    client.connectionTimeout = const Duration(seconds: 15);
-    try {
-      final req = await client.getUrl(Uri.parse(dmgUrl));
-      req.headers.set(HttpHeaders.userAgentHeader, 'YoLoIT/$currentVersion');
-      final resp = await req.close();
-      if (resp.statusCode != 200) {
-        throw Exception('Download failed: HTTP ${resp.statusCode}');
-      }
-
-      final total = resp.contentLength;
-      var received = 0;
-      final sink = dmgFile.openWrite();
-      await for (final chunk in resp) {
-        sink.add(chunk);
-        received += chunk.length;
-        if (total > 0) onProgress(received / total, 'Downloading…');
-      }
-      await sink.close();
-    } finally {
-      client.close();
-    }
-
-    // 2. Mount DMG
-    onProgress(null, 'Mounting…');
-    final mountPoint = '${tmpDir.path}/vol';
-    await Directory(mountPoint).create();
-    final mount = await Process.run('hdiutil', [
-      'attach', dmgFile.path,
-      '-nobrowse',
-      '-mountpoint', mountPoint,
-    ]);
-    if (mount.exitCode != 0) {
-      throw Exception('Mount failed: ${mount.stderr}');
-    }
-
-    try {
-      // 3. Find .app inside the mounted volume
-      onProgress(null, 'Installing…');
-      final volDir = Directory(mountPoint);
-      final appEntry = volDir
-          .listSync()
-          .whereType<Directory>()
-          .firstWhere(
-            (d) => d.path.endsWith('.app'),
-            orElse: () => throw Exception('No .app found in DMG'),
-          );
-
-      // 4. Copy to /Applications using ditto (preserves code signature)
-      final appName = appEntry.path.split('/').last;
-      final dest = '/Applications/$appName';
-      final ditto = await Process.run('ditto', [appEntry.path, dest]);
-      if (ditto.exitCode != 0) {
-        throw Exception('Copy failed: ${ditto.stderr}');
-      }
-
-      // 5. Relaunch from /Applications
-      onProgress(null, 'Relaunching…');
-      await Process.run('open', [dest]);
-      await Future.delayed(const Duration(milliseconds: 500));
-      exit(0);
-    } finally {
-      // Always unmount
-      await Process.run('hdiutil', ['detach', mountPoint, '-force']);
-      try { tmpDir.deleteSync(recursive: true); } catch (_) {}
-    }
+    await installer.install(
+      downloadUrl: info.downloadUrl!,
+      onProgress: onProgress,
+    );
   }
 
   /// Skips this version (don't nag again until a newer one is found).
