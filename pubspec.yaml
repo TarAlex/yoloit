@@ -35,7 +35,7 @@ dependencies:
   flutter_bloc: ^9.1.1
   bloc: ^9.0.0
   equatable: ^2.0.7
-  flutter_pty: ^0.3.1
+  flutter_pty: ^0.4.2
   xterm: ^4.0.0
   window_manager: ^0.4.3
   file_picker: ^9.2.1
