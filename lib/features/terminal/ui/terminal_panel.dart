@@ -482,9 +482,14 @@ class _TerminalWidgetState extends State<_TerminalWidget> {
   final _focusNode = FocusNode();
   Timer? _focusRetryTimer;
   double _fontSize = 13.0;
-  double _scaleBase = 13.0;
   Size _terminalSize = Size.zero;
   Offset? _clickDownPosition;
+
+  // Pinch-to-zoom tracked via raw pointer events (avoids gesture arena
+  // conflict with xterm's internal pan recogniser used for text selection).
+  final _activePointers = <int, Offset>{};
+  double _pinchStartDistance = 0;
+  double _pinchStartFontSize = 0;
 
   @override
   void initState() {
@@ -725,67 +730,80 @@ class _TerminalWidgetState extends State<_TerminalWidget> {
   @override
   Widget build(BuildContext context) {
     final colors = context.appColors;
-    return GestureDetector(
-      onScaleStart: (d) => _scaleBase = _fontSize,
-      onScaleUpdate: (d) {
-        final newSize = (_scaleBase * d.scale).clamp(8.0, 48.0);
-        setState(() => _fontSize = newSize);
-        SessionPrefs.saveTerminalFontSize(newSize);
-      },
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          _terminalSize = Size(constraints.maxWidth, constraints.maxHeight);
-          return Listener(
-            behavior: HitTestBehavior.opaque,
-            onPointerDown: (event) {
-              if (!_focusNode.hasFocus) _focusNode.requestFocus();
-              _clickDownPosition = event.localPosition;
-            },
-            onPointerUp: (event) {
-              final down = _clickDownPosition;
-              _clickDownPosition = null;
-              if (down == null) return;
-              // Only treat as a click if pointer didn't move much (no drag/selection)
-              if ((event.localPosition - down).distance > 6.0) return;
-              _handleTerminalClick(event.localPosition);
-            },
-            child: TerminalView(
-              widget.session.terminal,
-              controller: _controller,
-              focusNode: _focusNode,
-              autofocus: widget.isActive,
-              onKeyEvent: _onTerminalKeyEvent,
-              textStyle: TerminalStyle(fontSize: _fontSize),
-              theme: TerminalTheme(
-                cursor: colors.primary,
-                selection: colors.primary.withAlpha(68),
-                foreground: const Color(0xFFCECEEE),
-                background: const Color(0xFF070714),
-                black: const Color(0xFF1A1A2E),
-                red: const Color(0xFFFF4F6A),
-                green: const Color(0xFF00FF9F),
-                yellow: const Color(0xFFFFD700),
-                blue: const Color(0xFF00B4FF),
-                magenta: const Color(0xFFB87FFF),
-                cyan: const Color(0xFF00E5FF),
-                white: const Color(0xFFCECEEE),
-                brightBlack: const Color(0xFF44446A),
-                brightRed: const Color(0xFFFF6B85),
-                brightGreen: const Color(0xFF4DFFBE),
-                brightYellow: const Color(0xFFFFE866),
-                brightBlue: const Color(0xFF33C5FF),
-                brightMagenta: const Color(0xFFCDA0FF),
-                brightCyan: const Color(0xFF33EEFF),
-                brightWhite: const Color(0xFFFFFFFF),
-                searchHitBackground: const Color(0xFFFF9500),
-                searchHitBackgroundCurrent: const Color(0xFFFFB700),
-                searchHitForeground: const Color(0xFF000000),
-              ),
-              padding: const EdgeInsets.all(8),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        _terminalSize = Size(constraints.maxWidth, constraints.maxHeight);
+        return Listener(
+          behavior: HitTestBehavior.opaque,
+          onPointerDown: (event) {
+            if (!_focusNode.hasFocus) _focusNode.requestFocus();
+            _clickDownPosition = event.localPosition;
+            _activePointers[event.pointer] = event.localPosition;
+            if (_activePointers.length == 2) {
+              final positions = _activePointers.values.toList();
+              _pinchStartDistance = (positions[0] - positions[1]).distance;
+              _pinchStartFontSize = _fontSize;
+            }
+          },
+          onPointerMove: (event) {
+            _activePointers[event.pointer] = event.localPosition;
+            if (_activePointers.length == 2 && _pinchStartDistance > 0) {
+              final positions = _activePointers.values.toList();
+              final dist = (positions[0] - positions[1]).distance;
+              final newSize = (_pinchStartFontSize * dist / _pinchStartDistance)
+                  .clamp(8.0, 48.0);
+              setState(() => _fontSize = newSize);
+              SessionPrefs.saveTerminalFontSize(newSize);
+            }
+          },
+          onPointerUp: (event) {
+            _activePointers.remove(event.pointer);
+            final down = _clickDownPosition;
+            _clickDownPosition = null;
+            if (down == null) return;
+            // Only treat as a click if pointer didn't move much (no drag/selection)
+            if ((event.localPosition - down).distance > 6.0) return;
+            _handleTerminalClick(event.localPosition);
+          },
+          onPointerCancel: (event) {
+            _activePointers.remove(event.pointer);
+          },
+          child: TerminalView(
+            widget.session.terminal,
+            controller: _controller,
+            focusNode: _focusNode,
+            autofocus: widget.isActive,
+            onKeyEvent: _onTerminalKeyEvent,
+            textStyle: TerminalStyle(fontSize: _fontSize),
+            theme: TerminalTheme(
+              cursor: colors.primary,
+              selection: colors.primary.withAlpha(68),
+              foreground: const Color(0xFFCECEEE),
+              background: const Color(0xFF070714),
+              black: const Color(0xFF1A1A2E),
+              red: const Color(0xFFFF4F6A),
+              green: const Color(0xFF00FF9F),
+              yellow: const Color(0xFFFFD700),
+              blue: const Color(0xFF00B4FF),
+              magenta: const Color(0xFFB87FFF),
+              cyan: const Color(0xFF00E5FF),
+              white: const Color(0xFFCECEEE),
+              brightBlack: const Color(0xFF44446A),
+              brightRed: const Color(0xFFFF6B85),
+              brightGreen: const Color(0xFF4DFFBE),
+              brightYellow: const Color(0xFFFFE866),
+              brightBlue: const Color(0xFF33C5FF),
+              brightMagenta: const Color(0xFFCDA0FF),
+              brightCyan: const Color(0xFF33EEFF),
+              brightWhite: const Color(0xFFFFFFFF),
+              searchHitBackground: const Color(0xFFFF9500),
+              searchHitBackgroundCurrent: const Color(0xFFFFB700),
+              searchHitForeground: const Color(0xFF000000),
             ),
-          );
-        },
-      ),
+            padding: const EdgeInsets.all(8),
+          ),
+        );
+      },
     );
   }
 }
