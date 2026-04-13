@@ -163,6 +163,13 @@ class SetupCheckService {
       if (userProfile.isNotEmpty) '$userProfile\\AppData\\Local\\Microsoft\\WinGet\\Links',
       if (userProfile.isNotEmpty) '$userProfile\\.cargo\\bin',
       if (userProfile.isNotEmpty) '$userProfile\\AppData\\Local\\Programs\\Python\\Python3\\Scripts',
+      // Cursor IDE — installs to LocalAppData/Programs/cursor/resources/app/bin
+      if (localAppData.isNotEmpty) '$localAppData\\Programs\\cursor\\resources\\app\\bin',
+      if (localAppData.isNotEmpty) '$localAppData\\Programs\\Cursor',
+      // nvm / volta / fnm Node version managers
+      if (appData.isNotEmpty) '$appData\\nvm',
+      if (localAppData.isNotEmpty) '$localAppData\\Volta\\bin',
+      if (localAppData.isNotEmpty) '$localAppData\\fnm',
     ];
 
     final existing = current.split(';').where((p) => p.isNotEmpty).toSet();
@@ -577,29 +584,61 @@ class SetupCheckService {
 
   // ── Internal check helper ────────────────────────────────────────────────
 
-  /// Find the absolute path of [cmd] using `where` (Windows) or `which` (Unix).
+  /// Find the absolute path of [cmd].
+  ///
+  /// On Windows we first try PowerShell's `Get-Command` which reads PATH from
+  /// the registry (HKLM + HKCU), so it sees tools installed after the app
+  /// launched. Falls back to `where.exe` with our extended PATH as a backup.
   static Future<String?> _findPath(String cmd) async {
+    if (_isWindows) {
+      return _findPathWindows(cmd);
+    }
     try {
-      ProcessResult r;
-      if (_isWindows) {
-        r = await Process.run(
-          'where',
-          [cmd],
-          environment: _env,
-          runInShell: true,
-        ).timeout(const Duration(seconds: 5));
-      } else {
-        r = await Process.run(
-          '/bin/bash',
-          ['-c', 'which "$cmd" 2>/dev/null'],
-          environment: _env,
-        ).timeout(const Duration(seconds: 5));
-      }
+      final r = await Process.run(
+        '/bin/bash',
+        ['-c', 'which "$cmd" 2>/dev/null'],
+        environment: _env,
+      ).timeout(const Duration(seconds: 5));
       final out = (r.stdout as String).trim().split('\n').first.trim();
       return (r.exitCode == 0 && out.isNotEmpty) ? out : null;
     } catch (_) {
       return null;
     }
+  }
+
+  /// Windows-specific path resolution.
+  /// Uses PowerShell `Get-Command` (reads registry PATH) then falls back to
+  /// `where.exe` with our manually extended PATH.
+  static Future<String?> _findPathWindows(String cmd) async {
+    // 1) PowerShell Get-Command — always reads the current registry PATH
+    try {
+      final r = await Process.run(
+        'powershell',
+        [
+          '-NoProfile',
+          '-NonInteractive',
+          '-Command',
+          'try { (Get-Command "$cmd" -ErrorAction Stop).Source } catch { exit 1 }',
+        ],
+        runInShell: false,
+      ).timeout(const Duration(seconds: 8));
+      final out = (r.stdout as String).trim().split('\n').first.trim();
+      if (r.exitCode == 0 && out.isNotEmpty) return out;
+    } catch (_) {}
+
+    // 2) where.exe with our extended PATH as fallback
+    try {
+      final r = await Process.run(
+        'where',
+        [cmd],
+        environment: _env,
+        runInShell: true,
+      ).timeout(const Duration(seconds: 5));
+      final out = (r.stdout as String).trim().split('\n').first.trim();
+      if (r.exitCode == 0 && out.isNotEmpty) return out;
+    } catch (_) {}
+
+    return null;
   }
 
   static Future<String> _findExecutable(String exe) async {
