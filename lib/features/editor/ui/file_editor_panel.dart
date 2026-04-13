@@ -24,6 +24,7 @@ import 'package:highlight/languages/swift.dart';
 import 'package:highlight/languages/typescript.dart';
 import 'package:highlight/languages/xml.dart';
 import 'package:highlight/languages/yaml.dart';
+import 'package:yoloit/core/services/git_service.dart';
 import 'package:yoloit/core/session/session_prefs.dart';
 import 'package:yoloit/core/theme/app_color_scheme.dart';
 import 'package:yoloit/core/theme/app_colors.dart';
@@ -769,12 +770,123 @@ class _EditorBodyState extends State<_EditorBody> {
   bool _wordWrap = false;
   bool _showOutline = false;
 
+  // ── Auto-pairs ───────────────────────────────────────────────────────────
+  bool _suppressPairInsert = false;
+  TextEditingValue? _lastValue;
+
+  // ── Git gutter ───────────────────────────────────────────────────────────
+  Map<int, _GutterMarkerType> _gitMarkers = {};
+  double _codeScrollOffset = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.codeController.addListener(_onTextChanged);
+    _loadGitGutter();
+  }
+
+  @override
+  void didUpdateWidget(_EditorBody old) {
+    super.didUpdateWidget(old);
+    if (old.tab.filePath != widget.tab.filePath) {
+      _gitMarkers = {};
+      _loadGitGutter();
+    }
+    if (old.codeController != widget.codeController) {
+      old.codeController.removeListener(_onTextChanged);
+      widget.codeController.addListener(_onTextChanged);
+    }
+  }
+
   @override
   void dispose() {
+    widget.codeController.removeListener(_onTextChanged);
     _findCtrl.dispose();
     _replaceCtrl.dispose();
     _findFocus.dispose();
     super.dispose();
+  }
+
+  // ── Auto-pairs ───────────────────────────────────────────────────────────
+
+  void _onTextChanged() {
+    if (_suppressPairInsert) return;
+    final cur = widget.codeController.value;
+    final prev = _lastValue;
+    _lastValue = cur;
+
+    if (prev == null) return;
+    if (!cur.selection.isCollapsed) return;
+    if (cur.text.length != prev.text.length + 1) return;
+
+    final pos = cur.selection.baseOffset;
+    if (pos < 1) return;
+    final ch = cur.text[pos - 1];
+    final closing = _closingBracket(ch);
+    if (closing == null) return;
+
+    // Don't double-close when next char is already the closer.
+    final nextCh = pos < cur.text.length ? cur.text[pos] : '';
+    if (nextCh == closing) return;
+
+    _suppressPairInsert = true;
+    try {
+      final newText =
+          cur.text.substring(0, pos) + closing + cur.text.substring(pos);
+      widget.codeController.value = TextEditingValue(
+        text: newText,
+        selection: TextSelection.collapsed(offset: pos),
+      );
+      _lastValue = widget.codeController.value;
+    } finally {
+      _suppressPairInsert = false;
+    }
+  }
+
+  static String? _closingBracket(String ch) => switch (ch) {
+        '(' => ')',
+        '[' => ']',
+        '{' => '}',
+        _ => null,
+      };
+
+  // ── Git gutter ───────────────────────────────────────────────────────────
+
+  Future<void> _loadGitGutter() async {
+    final workspacePath = widget.tab.workspacePath;
+    if (workspacePath == null || widget.tab.isDiff) return;
+    try {
+      final diff =
+          await GitService.instance.getDiff(workspacePath, widget.tab.filePath);
+      if (mounted && diff.isNotEmpty) {
+        setState(() => _gitMarkers = _parseDiffMarkers(diff));
+      }
+    } catch (_) {}
+  }
+
+  /// Parses unified diff output into a line-number → marker type map.
+  static Map<int, _GutterMarkerType> _parseDiffMarkers(String diff) {
+    final result = <int, _GutterMarkerType>{};
+    int newLine = 0;
+
+    for (final line in diff.split('\n')) {
+      if (line.startsWith('@@')) {
+        final match = RegExp(r'\+(\d+)').firstMatch(line);
+        if (match != null) newLine = int.parse(match.group(1)!) - 1;
+      } else if (line.startsWith('+') && !line.startsWith('+++')) {
+        newLine++;
+        result[newLine] = _GutterMarkerType.added;
+      } else if (line.startsWith('-') && !line.startsWith('---')) {
+        // Removed line — mark the next new-file line as a deletion indicator.
+        final nextLine = newLine + 1;
+        if (!result.containsKey(nextLine)) {
+          result[nextLine] = _GutterMarkerType.removed;
+        }
+      } else if (!line.startsWith('\\')) {
+        newLine++;
+      }
+    }
+    return result;
   }
 
   // ── Language helpers ────────────────────────────────────────────────────
@@ -1125,22 +1237,56 @@ class _EditorBodyState extends State<_EditorBody> {
                         Expanded(
                           child: ValueListenableBuilder<double>(
                             valueListenable: widget.fontSizeNotifier,
-                            builder: (context, fontSize, _) => CodeTheme(
-                              data: CodeThemeData(styles: _darkTheme),
-                              child: CodeField(
-                                controller: widget.codeController,
-                                expands: true,
-                                wrap: _wordWrap,
-                                textStyle: TextStyle(fontFamily: 'monospace', fontSize: fontSize, height: 1.5),
-                                background: colors.background,
-                                gutterStyle: GutterStyle(
-                                  width: 72,
-                                  margin: 8,
-                                  textStyle: const TextStyle(color: AppColors.textMuted, fontFamily: 'monospace'),
-                                  background: colors.surfaceElevated,
+                            builder: (context, fontSize, _) {
+                              final lineHeight = fontSize * 1.5;
+                              return NotificationListener<ScrollNotification>(
+                                onNotification: (n) {
+                                  if (n.metrics.axis == Axis.vertical) {
+                                    setState(() => _codeScrollOffset =
+                                        n.metrics.pixels);
+                                  }
+                                  return false;
+                                },
+                                child: Stack(
+                                  children: [
+                                    CodeTheme(
+                                      data: CodeThemeData(styles: _darkTheme),
+                                      child: CodeField(
+                                        controller: widget.codeController,
+                                        expands: true,
+                                        wrap: _wordWrap,
+                                        textStyle: TextStyle(
+                                            fontFamily: 'monospace',
+                                            fontSize: fontSize,
+                                            height: 1.5),
+                                        background: colors.background,
+                                        gutterStyle: GutterStyle(
+                                          width: 72,
+                                          margin: 8,
+                                          textStyle: const TextStyle(
+                                              color: AppColors.textMuted,
+                                              fontFamily: 'monospace'),
+                                          background: colors.surfaceElevated,
+                                        ),
+                                      ),
+                                    ),
+                                    // Git gutter overlay — 3px strip at left edge of gutter.
+                                    if (_gitMarkers.isNotEmpty)
+                                      Positioned(
+                                        left: 0,
+                                        top: 0,
+                                        bottom: 0,
+                                        width: 3,
+                                        child: _GitGutterPainter(
+                                          markers: _gitMarkers,
+                                          lineHeight: lineHeight,
+                                          scrollOffset: _codeScrollOffset,
+                                        ),
+                                      ),
+                                  ],
                                 ),
-                              ),
-                            ),
+                              );
+                            },
                           ),
                         ),
                         _EditorStatusBar(controller: widget.codeController, language: language),
@@ -1198,6 +1344,72 @@ class _EditorBodyState extends State<_EditorBody> {
     'addition': TextStyle(color: Color(0xFF98C379)),
     'deletion': TextStyle(color: Color(0xFFE06C75)),
   };
+}
+
+// ── Git gutter types & painter ────────────────────────────────────────────────
+
+enum _GutterMarkerType { added, removed }
+
+class _GitGutterPainter extends StatelessWidget {
+  const _GitGutterPainter({
+    required this.markers,
+    required this.lineHeight,
+    required this.scrollOffset,
+  });
+
+  final Map<int, _GutterMarkerType> markers;
+  final double lineHeight;
+  final double scrollOffset;
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (_, constraints) => CustomPaint(
+        size: Size(3, constraints.maxHeight),
+        painter: _GutterPaint(
+          markers: markers,
+          lineHeight: lineHeight,
+          scrollOffset: scrollOffset,
+        ),
+      ),
+    );
+  }
+}
+
+class _GutterPaint extends CustomPainter {
+  const _GutterPaint({
+    required this.markers,
+    required this.lineHeight,
+    required this.scrollOffset,
+  });
+
+  final Map<int, _GutterMarkerType> markers;
+  final double lineHeight;
+  final double scrollOffset;
+
+  static const _added = Color(0xFF00FF9F);   // neon green
+  static const _removed = Color(0xFFFF4F6A); // neon red
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final addedPaint = Paint()..color = _added;
+    final removedPaint = Paint()..color = _removed;
+
+    for (final entry in markers.entries) {
+      final lineIndex = entry.key - 1; // 0-indexed
+      final top = lineIndex * lineHeight - scrollOffset;
+      final bottom = top + lineHeight;
+      if (bottom < 0 || top > size.height) continue;
+      canvas.drawRect(
+        Rect.fromLTRB(0, top.clamp(0, size.height), 3, bottom.clamp(0, size.height)),
+        entry.value == _GutterMarkerType.added ? addedPaint : removedPaint,
+      );
+    }
+  }
+
+  @override
+  bool shouldRepaint(_GutterPaint old) =>
+      old.scrollOffset != scrollOffset || old.markers != markers || old.lineHeight != lineHeight;
 }
 
 // ── Editor toolbar ───────────────────────────────────────────────────────────

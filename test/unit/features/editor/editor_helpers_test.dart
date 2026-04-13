@@ -3,6 +3,8 @@
 /// - _commentPrefix (per language)
 /// - _parseSymbols (Dart/JS/TS/Python outline parsing)
 /// - _lineRange helper logic
+/// - _closingBracket (auto-pairs)
+/// - _parseDiffMarkers (git gutter)
 ///
 /// Because the helpers are private (file-scoped), we re-implement
 /// them here as package-visible equivalents that are 1-to-1 copies,
@@ -316,6 +318,146 @@ class Animal:
       // pos at exactly the start of line 2 (index 9)
       final r = lineRange(text, 9);
       expect(text.substring(r.start, r.end), 'line two');
+    });
+  });
+
+  _autoPairsTests();
+  _gitGutterTests();
+}
+
+String? closingBracket(String ch) => switch (ch) {
+      '(' => ')',
+      '[' => ']',
+      '{' => '}',
+      _ => null,
+    };
+
+// ── Git gutter diff parser ────────────────────────────────────────────────────
+
+enum GutterMarkerType { added, removed }
+
+Map<int, GutterMarkerType> parseDiffMarkers(String diff) {
+  final result = <int, GutterMarkerType>{};
+  int newLine = 0;
+
+  for (final line in diff.split('\n')) {
+    if (line.startsWith('@@')) {
+      final match = RegExp(r'\+(\d+)').firstMatch(line);
+      if (match != null) newLine = int.parse(match.group(1)!) - 1;
+    } else if (line.startsWith('+') && !line.startsWith('+++')) {
+      newLine++;
+      result[newLine] = GutterMarkerType.added;
+    } else if (line.startsWith('-') && !line.startsWith('---')) {
+      final nextLine = newLine + 1;
+      if (!result.containsKey(nextLine)) {
+        result[nextLine] = GutterMarkerType.removed;
+      }
+    } else if (!line.startsWith('\\')) {
+      newLine++;
+    }
+  }
+  return result;
+}
+
+// ── Auto-pairs tests ──────────────────────────────────────────────────────────
+
+void _autoPairsTests() {
+  group('closingBracket', () {
+    test('( returns )', () => expect(closingBracket('('), ')'));
+    test('[ returns ]', () => expect(closingBracket('['), ']'));
+    test('{ returns }', () => expect(closingBracket('{'), '}'));
+    test('other chars return null', () {
+      for (final ch in ['"', "'", '`', 'a', ' ', '\n']) {
+        expect(closingBracket(ch), isNull, reason: 'char: $ch');
+      }
+    });
+  });
+}
+
+// ── Git gutter tests ──────────────────────────────────────────────────────────
+
+void _gitGutterTests() {
+  group('parseDiffMarkers', () {
+    test('empty diff returns empty map', () {
+      expect(parseDiffMarkers(''), isEmpty);
+    });
+
+    test('added lines are marked as added', () {
+      const diff = '''
+--- a/foo.dart
++++ b/foo.dart
+@@ -1,3 +1,4 @@
+ line1
++newLine
+ line2
+ line3
+''';
+      final markers = parseDiffMarkers(diff);
+      expect(markers[2], GutterMarkerType.added);
+    });
+
+    test('removed lines mark next line as removed', () {
+      const diff = '''
+--- a/foo.dart
++++ b/foo.dart
+@@ -1,4 +1,3 @@
+ line1
+-oldLine
+ line2
+ line3
+''';
+      final markers = parseDiffMarkers(diff);
+      expect(markers[2], GutterMarkerType.removed);
+    });
+
+    test('added lines are not overwritten by removed markers', () {
+      // When a line is both added and had a removal before it, added wins.
+      const diff = '''
+--- a/foo.dart
++++ b/foo.dart
+@@ -1,2 +1,2 @@
+-old
++new
+ context
+''';
+      final markers = parseDiffMarkers(diff);
+      // Line 1 should be added (the + line)
+      expect(markers[1], GutterMarkerType.added);
+    });
+
+    test('multiple hunks parsed correctly', () {
+      const diff = '''
+--- a/foo.dart
++++ b/foo.dart
+@@ -1,2 +1,3 @@
+ same
++added1
+ same2
+@@ -10,2 +11,3 @@
+ other
++added2
+ end
+''';
+      final markers = parseDiffMarkers(diff);
+      expect(markers.values, contains(GutterMarkerType.added));
+      // Should have at least 2 added markers
+      final addedCount =
+          markers.values.where((v) => v == GutterMarkerType.added).length;
+      expect(addedCount, greaterThanOrEqualTo(2));
+    });
+
+    test('handles no-newline-at-end markers', () {
+      const diff = '''
+--- a/foo.dart
++++ b/foo.dart
+@@ -1,1 +1,1 @@
+-old
+\\ No newline at end of file
++new
+\\ No newline at end of file
+''';
+      // Should not throw
+      expect(() => parseDiffMarkers(diff), returnsNormally);
     });
   });
 }
