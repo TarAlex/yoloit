@@ -250,14 +250,14 @@ jobs:
 
       # ── Upload artifact ──────────────────────────────────────────────────────
       - name: Upload DMG artifact
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v4
         with:
           name: YoLoIT-macos
           path: ${{ steps.package.outputs.dmg_name }}
           retention-days: 14
 
       # ── GitHub Release ───────────────────────────────────────────────────────
-      - name: Create GitHub Release
+      - name: Create or update GitHub Release
         if: github.event.inputs.create_release == 'true'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -272,15 +272,21 @@ jobs:
             SIGN_NOTE=" (unsigned build)"
           fi
 
-          printf 'macOS build %s run #${{ github.run_number }}%s\n\nArchitecture: **%s**\n\n## Installation\nDownload the DMG, open it and drag YoLoIT.app to Applications.\n' \
-            "$RELEASE_TAG" "$SIGN_NOTE" "$ARCH_LABEL" > release-notes.md
+          if gh release view "$RELEASE_TAG" &>/dev/null; then
+            echo "Release $RELEASE_TAG already exists — uploading macOS asset..."
+            gh release upload "$RELEASE_TAG" "$DMG_NAME" --clobber
+            echo "✅ Uploaded $DMG_NAME to existing release $RELEASE_TAG"
+          else
+            printf 'YoLoIT %s run #${{ github.run_number }}%s\n\nArchitecture: **%s**\n\n## Installation\n- **macOS**: Download the DMG, open it and drag YoLoIT.app to Applications.\n- **Linux**: Download tar.gz, extract and run the `bundle/yoloit` binary.\n- **Windows**: Download zip, extract and run `yoloit.exe`.\n' \
+              "$RELEASE_TAG" "$SIGN_NOTE" "$ARCH_LABEL" > release-notes.md
 
-          gh release delete "$RELEASE_TAG" --yes 2>/dev/null || true
-          gh release create "$RELEASE_TAG" \
-            --title "YoLoIT macOS $RELEASE_TAG" \
-            --notes-file release-notes.md \
-            --latest \
-            "$DMG_NAME"
+            gh release create "$RELEASE_TAG" \
+              --title "YoLoIT $RELEASE_TAG" \
+              --notes-file release-notes.md \
+              --latest \
+              "$DMG_NAME"
+            echo "✅ Created release $RELEASE_TAG with $DMG_NAME"
+          fi
 
       # ── Cleanup ──────────────────────────────────────────────────────────────
       - name: Cleanup keychain

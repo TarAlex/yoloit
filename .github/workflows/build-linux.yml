@@ -1,0 +1,143 @@
+name: Build Linux Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version (e.g. v0.0.2) or "latest" to upload to latest release'
+        required: false
+        default: 'latest'
+      create_release:
+        description: 'Create GitHub Release'
+        required: false
+        default: 'true'
+        type: choice
+        options:
+          - 'true'
+          - 'false'
+
+jobs:
+  build-linux:
+    name: Build Linux App
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # needed to upload release assets
+
+    steps:
+      # ── Checkout ─────────────────────────────────────────────────────────────
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ── System dependencies ──────────────────────────────────────────────────
+      - name: Install Linux system dependencies
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y \
+            clang cmake ninja-build pkg-config \
+            libgtk-3-dev liblzma-dev \
+            libsecret-1-dev libjsoncpp-dev \
+            libglib2.0-dev libpango1.0-dev \
+            libx11-dev libxext-dev libxrender-dev \
+            libxrandr-dev libxi-dev libxcursor-dev \
+            libxdamage-dev libxinerama-dev \
+            libutil-dev
+
+      # ── Flutter ──────────────────────────────────────────────────────────────
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.35.3'
+          channel: 'stable'
+          cache: true
+
+      - name: Enable Linux desktop
+        run: flutter config --enable-linux-desktop
+
+      - name: Install Flutter dependencies
+        run: flutter pub get
+
+      # ── Version ─────────────────────────────────────────────────────────────
+      - name: Derive build version
+        id: version
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          INPUT="${{ github.event.inputs.version }}"
+          if [ -z "$INPUT" ] || [ "$INPUT" = "latest" ]; then
+            # Use the latest existing release tag
+            LATEST=$(gh release list --limit 10 --json tagName \
+              --jq '[.[] | select(.tagName | test("^v[0-9]+\\.[0-9]+\\.[0-9]+$"))] | first | .tagName' 2>/dev/null || echo "")
+            if [ -z "$LATEST" ]; then
+              TAG="v0.0.1"
+              echo "No existing release found — using $TAG"
+            else
+              TAG="$LATEST"
+              echo "Using latest release tag: $TAG"
+            fi
+          else
+            TAG="$INPUT"
+            [[ "$TAG" != v* ]] && TAG="v$TAG"
+            echo "Using manual version: $TAG"
+          fi
+          VERSION_CLEAN="${TAG#v}"
+          echo "version=$VERSION_CLEAN" >> $GITHUB_OUTPUT
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+
+      # ── Build ────────────────────────────────────────────────────────────────
+      - name: Build Linux release
+        env:
+          BUILD_NUMBER: ${{ github.run_number }}
+          BUILD_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          flutter build linux --release \
+            --build-name="$BUILD_VERSION" \
+            --build-number="$BUILD_NUMBER"
+          echo "Build output:"
+          ls -lh build/linux/x64/release/bundle/
+
+      # ── Package as tar.gz ────────────────────────────────────────────────────
+      - name: Package as tar.gz
+        id: package
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          BUNDLE="build/linux/x64/release/bundle"
+          TAR_NAME="yoloit-linux-x64-${VERSION}.tar.gz"
+
+          tar -czf "$TAR_NAME" -C "$(dirname $BUNDLE)" "$(basename $BUNDLE)"
+
+          echo "Packaged: $TAR_NAME ($(du -sh $TAR_NAME | cut -f1))"
+          echo "tar_name=$TAR_NAME" >> $GITHUB_OUTPUT
+
+      # ── Upload artifact ──────────────────────────────────────────────────────
+      - name: Upload tar.gz artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: YoLoIT-linux
+          path: ${{ steps.package.outputs.tar_name }}
+          retention-days: 14
+
+      # ── GitHub Release ───────────────────────────────────────────────────────
+      - name: Upload to GitHub Release
+        if: github.event.inputs.create_release == 'true'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.version.outputs.version }}
+          RELEASE_TAG: ${{ steps.version.outputs.tag }}
+          TAR_NAME: ${{ steps.package.outputs.tar_name }}
+        run: |
+          # Check if release already exists
+          if gh release view "$RELEASE_TAG" &>/dev/null; then
+            echo "Release $RELEASE_TAG already exists — uploading Linux asset..."
+            # Remove old Linux asset if present (re-upload)
+            gh release delete-asset "$RELEASE_TAG" "$TAR_NAME" 2>/dev/null || true
+            gh release upload "$RELEASE_TAG" "$TAR_NAME" --clobber
+            echo "✅ Uploaded $TAR_NAME to existing release $RELEASE_TAG"
+          else
+            echo "Creating new release $RELEASE_TAG with Linux build..."
+            gh release create "$RELEASE_TAG" \
+              --title "YoLoIT $RELEASE_TAG" \
+              --notes "Linux build $RELEASE_TAG (run #${{ github.run_number }})" \
+              "$TAR_NAME"
+            echo "✅ Created release $RELEASE_TAG with $TAR_NAME"
+          fi

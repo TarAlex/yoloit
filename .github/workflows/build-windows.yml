@@ -1,0 +1,130 @@
+name: Build Windows Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version (e.g. v0.0.2) or "latest" to upload to latest release'
+        required: false
+        default: 'latest'
+      create_release:
+        description: 'Create GitHub Release'
+        required: false
+        default: 'true'
+        type: choice
+        options:
+          - 'true'
+          - 'false'
+
+jobs:
+  build-windows:
+    name: Build Windows App
+    runs-on: windows-latest
+    permissions:
+      contents: write   # needed to upload release assets
+
+    steps:
+      # ── Checkout ─────────────────────────────────────────────────────────────
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ── Flutter ──────────────────────────────────────────────────────────────
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.35.3'
+          channel: 'stable'
+          cache: true
+
+      - name: Enable Windows desktop
+        run: flutter config --enable-windows-desktop
+
+      - name: Install Flutter dependencies
+        run: flutter pub get
+
+      # ── Version ─────────────────────────────────────────────────────────────
+      - name: Derive build version
+        id: version
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          INPUT="${{ github.event.inputs.version }}"
+          if [ -z "$INPUT" ] || [ "$INPUT" = "latest" ]; then
+            LATEST=$(gh release list --limit 10 --json tagName \
+              --jq '[.[] | select(.tagName | test("^v[0-9]+\\.[0-9]+\\.[0-9]+$"))] | first | .tagName' 2>/dev/null || echo "")
+            if [ -z "$LATEST" ]; then
+              TAG="v0.0.1"
+              echo "No existing release found — using $TAG"
+            else
+              TAG="$LATEST"
+              echo "Using latest release tag: $TAG"
+            fi
+          else
+            TAG="$INPUT"
+            [[ "$TAG" != v* ]] && TAG="v$TAG"
+            echo "Using manual version: $TAG"
+          fi
+          VERSION_CLEAN="${TAG#v}"
+          echo "version=$VERSION_CLEAN" >> $GITHUB_OUTPUT
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+
+      # ── Build ────────────────────────────────────────────────────────────────
+      - name: Build Windows release
+        env:
+          BUILD_NUMBER: ${{ github.run_number }}
+          BUILD_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          flutter build windows --release `
+            --build-name="$env:BUILD_VERSION" `
+            --build-number="$env:BUILD_NUMBER"
+          Write-Host "Build output:"
+          Get-ChildItem build/windows/x64/runner/Release/ | Select-Object Name, Length
+
+      # ── Package as zip ───────────────────────────────────────────────────────
+      - name: Package as zip
+        id: package
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        shell: pwsh
+        run: |
+          $RELEASE_DIR = "build/windows/x64/runner/Release"
+          $ZIP_NAME = "yoloit-windows-x64-$env:VERSION.zip"
+
+          Compress-Archive -Path "$RELEASE_DIR\*" -DestinationPath $ZIP_NAME -Force
+
+          $size = (Get-Item $ZIP_NAME).Length / 1MB
+          Write-Host "Packaged: $ZIP_NAME ($([math]::Round($size, 1)) MB)"
+          echo "zip_name=$ZIP_NAME" >> $env:GITHUB_OUTPUT
+
+      # ── Upload artifact ──────────────────────────────────────────────────────
+      - name: Upload zip artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: YoLoIT-windows
+          path: ${{ steps.package.outputs.zip_name }}
+          retention-days: 14
+
+      # ── GitHub Release ───────────────────────────────────────────────────────
+      - name: Upload to GitHub Release
+        if: github.event.inputs.create_release == 'true'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.version.outputs.version }}
+          RELEASE_TAG: ${{ steps.version.outputs.tag }}
+          ZIP_NAME: ${{ steps.package.outputs.zip_name }}
+        shell: bash
+        run: |
+          if gh release view "$RELEASE_TAG" &>/dev/null; then
+            echo "Release $RELEASE_TAG already exists — uploading Windows asset..."
+            gh release delete-asset "$RELEASE_TAG" "$ZIP_NAME" 2>/dev/null || true
+            gh release upload "$RELEASE_TAG" "$ZIP_NAME" --clobber
+            echo "✅ Uploaded $ZIP_NAME to existing release $RELEASE_TAG"
+          else
+            echo "Creating new release $RELEASE_TAG with Windows build..."
+            gh release create "$RELEASE_TAG" \
+              --title "YoLoIT $RELEASE_TAG" \
+              --notes "Windows build $RELEASE_TAG (run #${{ github.run_number }})" \
+              "$ZIP_NAME"
+            echo "✅ Created release $RELEASE_TAG with $ZIP_NAME"
+          fi
