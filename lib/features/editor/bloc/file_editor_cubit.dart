@@ -228,12 +228,15 @@ class FileEditorCubit extends Cubit<FileEditorState> {
 
   Future<void> _writeToDisk(String filePath, String content) async {
     try {
-      // Safety guard: never overwrite a non-empty file with empty content.
-      // This can happen if a controller is synced with null content accidentally.
+      // Safety guard: never overwrite a file with empty content unless the
+      // file was already empty. Guards against: editor firing onChange("") during
+      // initialization before originalContent has been set (still loading).
       if (content.isEmpty) {
         final tab = state.tabs.firstWhere((t) => t.filePath == filePath,
             orElse: () => EditorTab(filePath: filePath));
-        if (tab.originalContent?.isNotEmpty ?? false) return;
+        // originalContent == null  → file still loading, abort
+        // originalContent.isNotEmpty → file had content, abort
+        if (tab.originalContent == null || tab.originalContent!.isNotEmpty) return;
       }
       await File(filePath).writeAsString(content);
       _updateTab(filePath, (t) => t.copyWith(originalContent: content));
