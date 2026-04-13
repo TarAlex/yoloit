@@ -91,7 +91,16 @@ jobs:
           $RELEASE_DIR = "build/windows/x64/runner/Release"
           $ZIP_NAME = "yoloit-windows-x64-$env:VERSION.zip"
 
-          Compress-Archive -Path "$RELEASE_DIR\*" -DestinationPath $ZIP_NAME -Force
+          # Diagnostics: list all files that will be packaged
+          Write-Host "=== Release directory contents ==="
+          Get-ChildItem -Path $RELEASE_DIR -Recurse | Select-Object FullName
+          Write-Host "=================================="
+
+          # Use 7-Zip (always available on GitHub-hosted Windows runners)
+          # to reliably archive all files including subdirectories and plugin DLLs
+          $sevenZip = "C:\Program Files\7-Zip\7z.exe"
+          & $sevenZip a -tzip $ZIP_NAME "$RELEASE_DIR\*" -r
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
           $size = (Get-Item $ZIP_NAME).Length / 1MB
           Write-Host "Packaged: $ZIP_NAME ($([math]::Round($size, 1)) MB)"
