@@ -3,6 +3,7 @@ enum AgentType {
   claude('Claude', 'claude', 'claude'),
   gemini('Gemini', 'gemini', 'gemini'),
   cursor('Cursor', 'cursor', 'cursor-agent'),
+  pi('Pi', 'pi', 'pi'),
   terminal('Terminal', 'shell', '');
 
   const AgentType(this.displayName, this.command, this.launchCommand);
@@ -22,6 +23,8 @@ enum AgentType {
         return '✦';
       case AgentType.cursor:
         return '◈';
+      case AgentType.pi:
+        return 'π';
       case AgentType.terminal:
         return '>_';
     }

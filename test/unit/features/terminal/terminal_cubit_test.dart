@@ -53,18 +53,21 @@ void main() {
     test('AgentType displayName is correct', () {
       expect(AgentType.copilot.displayName, 'Copilot');
       expect(AgentType.claude.displayName, 'Claude');
+      expect(AgentType.pi.displayName, 'Pi');
       expect(AgentType.terminal.displayName, 'Terminal');
     });
 
     test('AgentType command is correct', () {
       expect(AgentType.copilot.command, 'copilot');
       expect(AgentType.claude.command, 'claude');
+      expect(AgentType.pi.command, 'pi');
       expect(AgentType.terminal.command, 'shell');
     });
 
     test('AgentType launchCommand includes --allow-all for copilot', () {
       expect(AgentType.copilot.launchCommand, 'copilot --allow-all');
       expect(AgentType.claude.launchCommand, 'claude');
+      expect(AgentType.pi.launchCommand, 'pi');
       expect(AgentType.terminal.launchCommand, isEmpty);
     });
 
