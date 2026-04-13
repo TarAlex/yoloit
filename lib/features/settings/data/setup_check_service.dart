@@ -81,11 +81,14 @@ class SetupCheckResult {
 class SetupCheckService {
   const SetupCheckService._();
 
+  // ── Platform helpers ─────────────────────────────────────────────────────
+
+  static bool get _isWindows => Platform.isWindows;
+  static bool get _isMacOS => Platform.isMacOS;
+
   // ── Extended PATH ────────────────────────────────────────────────────────
 
-  /// Builds an extended PATH that includes common macOS tool locations which
-  /// are not present in the GUI app's minimal process environment.
-  static String _buildExtendedPath() {
+  static String _buildExtendedPathMacOS() {
     final current = Platform.environment['PATH'] ?? '';
     final home = Platform.environment['HOME'] ?? '';
 
@@ -137,11 +140,76 @@ class SetupCheckService {
     return merged.join(':');
   }
 
-  static String? _extendedPath;
-  static String get _path => _extendedPath ??= _buildExtendedPath();
+  static String _buildExtendedPathWindows() {
+    final current = Platform.environment['PATH'] ?? '';
+    final appData = Platform.environment['APPDATA'] ?? '';
+    final localAppData = Platform.environment['LOCALAPPDATA'] ?? '';
+    final programFiles = Platform.environment['ProgramFiles'] ?? r'C:\Program Files';
+    final programFilesX86 =
+        Platform.environment['ProgramFiles(x86)'] ?? r'C:\Program Files (x86)';
+    final userProfile = Platform.environment['USERPROFILE'] ?? '';
 
-  static Map<String, String> get _env =>
-      Map<String, String>.from(Platform.environment)..['PATH'] = _path;
+    final candidates = <String>[
+      r'C:\Windows\System32',
+      r'C:\Windows',
+      r'C:\Windows\System32\Wbem',
+      '$programFiles\\Git\\bin',
+      '$programFiles\\Git\\cmd',
+      '$programFiles\\Git\\usr\\bin',
+      '$programFiles\\nodejs',
+      '$programFilesX86\\nodejs',
+      if (appData.isNotEmpty) '$appData\\npm',
+      if (localAppData.isNotEmpty) '$localAppData\\Microsoft\\WinGet\\Links',
+      if (userProfile.isNotEmpty) '$userProfile\\AppData\\Local\\Microsoft\\WinGet\\Links',
+      if (userProfile.isNotEmpty) '$userProfile\\.cargo\\bin',
+      if (userProfile.isNotEmpty) '$userProfile\\AppData\\Local\\Programs\\Python\\Python3\\Scripts',
+    ];
+
+    final existing = current.split(';').where((p) => p.isNotEmpty).toSet();
+    final merged = <String>[
+      ...candidates.where((c) => !existing.contains(c)),
+      ...current.split(';').where((p) => p.isNotEmpty),
+    ];
+    return merged.join(';');
+  }
+
+  static String _buildExtendedPathLinux() {
+    final current = Platform.environment['PATH'] ?? '';
+    final home = Platform.environment['HOME'] ?? '';
+
+    final candidates = <String>[
+      '/usr/local/bin',
+      '/usr/bin',
+      '/bin',
+      '/usr/sbin',
+      '/sbin',
+      if (home.isNotEmpty) '$home/.local/bin',
+      if (home.isNotEmpty) '$home/.cargo/bin',
+      if (home.isNotEmpty) '$home/.nvm/versions/node/current/bin',
+      if (home.isNotEmpty) '$home/.volta/bin',
+    ];
+
+    final existing = current.split(':').where((p) => p.isNotEmpty).toSet();
+    final merged = <String>[
+      ...candidates.where((c) => !existing.contains(c)),
+      ...current.split(':').where((p) => p.isNotEmpty),
+    ];
+    return merged.join(':');
+  }
+
+  static String? _extendedPath;
+  static String get _path {
+    if (_extendedPath != null) return _extendedPath!;
+    if (_isWindows) return _extendedPath = _buildExtendedPathWindows();
+    if (_isMacOS) return _extendedPath = _buildExtendedPathMacOS();
+    return _extendedPath = _buildExtendedPathLinux();
+  }
+
+  static Map<String, String> get _env {
+    final env = Map<String, String>.from(Platform.environment);
+    env['PATH'] = _path;
+    return env;
+  }
 
   // ── Check ────────────────────────────────────────────────────────────────
 
@@ -150,23 +218,160 @@ class SetupCheckService {
     return _checkAll();
   }
 
-  static Future<SetupCheckResult> _checkAll() async {
-    // Order matters: Homebrew first (other deps may use it to install)
+  static Future<SetupCheckResult> _checkAll() {
+    return _isWindows ? _checkAllWindows() : _checkAllUnix();
+  }
+
+  // ── macOS / Linux dependency lists ───────────────────────────────────────
+
+  static Future<SetupCheckResult> _checkAllUnix() async {
+    final depFutures = _isMacOS
+        ? _macOSDeps()
+        : _linuxDeps();
+
+    final agentFutures = _commonAgents(winget: false);
+
+    final deps = await Future.wait(depFutures);
+    final agents = await Future.wait(agentFutures);
+    return SetupCheckResult(deps: deps, agents: agents);
+  }
+
+  static List<Future<DependencyStatus>> _macOSDeps() => [
+    _checkTool(
+      id: 'brew',
+      name: 'Homebrew',
+      description: 'macOS package manager — needed to install other dependencies',
+      command: 'brew',
+      versionArgs: ['--version'],
+      installHint:
+          r'/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"',
+      installUrl: 'https://brew.sh',
+      isRequired: false,
+      installAction: const InstallAction(
+        executable: '/bin/bash',
+        args: [],
+        requiresInteractiveTerminal: true,
+        interactiveScript:
+            r'/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"',
+      ),
+    ),
+    _checkTool(
+      id: 'git',
+      name: 'git',
+      description: 'Version control — required for file tree, diff, branches',
+      command: 'git',
+      versionArgs: ['--version'],
+      installHint: 'brew install git',
+      installUrl: 'https://git-scm.com/downloads',
+      isRequired: true,
+      installAction: const InstallAction(executable: 'brew', args: ['install', 'git']),
+    ),
+    _checkTool(
+      id: 'node',
+      name: 'Node.js',
+      description: 'Required for npm-based AI agents (Copilot, Claude, Gemini)',
+      command: 'node',
+      versionArgs: ['--version'],
+      installHint: 'brew install node',
+      installUrl: 'https://nodejs.org',
+      isRequired: false,
+      installAction: const InstallAction(executable: 'brew', args: ['install', 'node']),
+    ),
+    _checkTool(
+      id: 'tmux',
+      name: 'tmux',
+      description: 'Terminal multiplexer — required for persistent agent sessions',
+      command: 'tmux',
+      versionArgs: ['-V'],
+      installHint: 'brew install tmux',
+      installUrl: 'https://github.com/tmux/tmux',
+      isRequired: true,
+      installAction: const InstallAction(executable: 'brew', args: ['install', 'tmux']),
+    ),
+    _checkTool(
+      id: 'bash',
+      name: 'bash',
+      description: 'Shell used for running commands in terminal sessions',
+      command: 'bash',
+      versionArgs: ['--version'],
+      installHint: 'brew install bash',
+      isRequired: true,
+      installAction: const InstallAction(executable: 'brew', args: ['install', 'bash']),
+    ),
+  ];
+
+  static List<Future<DependencyStatus>> _linuxDeps() => [
+    _checkTool(
+      id: 'git',
+      name: 'git',
+      description: 'Version control — required for file tree, diff, branches',
+      command: 'git',
+      versionArgs: ['--version'],
+      installHint: 'sudo apt install git',
+      installUrl: 'https://git-scm.com/downloads',
+      isRequired: true,
+      installAction: const InstallAction(
+        executable: 'bash',
+        args: ['-c', 'sudo apt-get install -y git'],
+      ),
+    ),
+    _checkTool(
+      id: 'node',
+      name: 'Node.js',
+      description: 'Required for npm-based AI agents (Copilot, Claude, Gemini)',
+      command: 'node',
+      versionArgs: ['--version'],
+      installHint: 'sudo apt install nodejs npm',
+      installUrl: 'https://nodejs.org',
+      isRequired: false,
+      installAction: const InstallAction(
+        executable: 'bash',
+        args: ['-c', 'sudo apt-get install -y nodejs npm'],
+      ),
+    ),
+    _checkTool(
+      id: 'tmux',
+      name: 'tmux',
+      description: 'Terminal multiplexer — required for persistent agent sessions',
+      command: 'tmux',
+      versionArgs: ['-V'],
+      installHint: 'sudo apt install tmux',
+      installUrl: 'https://github.com/tmux/tmux',
+      isRequired: true,
+      installAction: const InstallAction(
+        executable: 'bash',
+        args: ['-c', 'sudo apt-get install -y tmux'],
+      ),
+    ),
+    _checkTool(
+      id: 'bash',
+      name: 'bash',
+      description: 'Shell used for running commands in terminal sessions',
+      command: 'bash',
+      versionArgs: ['--version'],
+      installHint: 'sudo apt install bash',
+      isRequired: true,
+    ),
+  ];
+
+  // ── Windows dependency list ──────────────────────────────────────────────
+
+  static Future<SetupCheckResult> _checkAllWindows() async {
     final depFutures = [
       _checkTool(
-        id: 'brew',
-        name: 'Homebrew',
-        description: 'macOS package manager — needed to install other dependencies',
-        command: 'brew',
+        id: 'winget',
+        name: 'WinGet',
+        description: 'Windows package manager — used to install dependencies',
+        command: 'winget',
         versionArgs: ['--version'],
-        installHint: '/bin/bash -c "\$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"',
-        installUrl: 'https://brew.sh',
+        installHint: 'Install "App Installer" from the Microsoft Store',
+        installUrl: 'https://aka.ms/getwinget',
         isRequired: false,
         installAction: const InstallAction(
-          executable: '/bin/bash',
-          args: [],
+          executable: 'start',
+          args: ['ms-windows-store://pdp/?productid=9NBLGGH4NNS1'],
           requiresInteractiveTerminal: true,
-          interactiveScript: r'/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"',
+          interactiveScript: 'ms-windows-store://pdp/?productid=9NBLGGH4NNS1',
         ),
       ),
       _checkTool(
@@ -175,10 +380,13 @@ class SetupCheckService {
         description: 'Version control — required for file tree, diff, branches',
         command: 'git',
         versionArgs: ['--version'],
-        installHint: 'brew install git',
+        installHint: 'winget install Git.Git',
         installUrl: 'https://git-scm.com/downloads',
         isRequired: true,
-        installAction: const InstallAction(executable: 'brew', args: ['install', 'git']),
+        installAction: const InstallAction(
+          executable: 'winget',
+          args: ['install', '--id', 'Git.Git', '-e', '--source', 'winget'],
+        ),
       ),
       _checkTool(
         id: 'node',
@@ -186,119 +394,137 @@ class SetupCheckService {
         description: 'Required for npm-based AI agents (Copilot, Claude, Gemini)',
         command: 'node',
         versionArgs: ['--version'],
-        installHint: 'brew install node',
+        installHint: 'winget install OpenJS.NodeJS.LTS',
         installUrl: 'https://nodejs.org',
         isRequired: false,
-        installAction: const InstallAction(executable: 'brew', args: ['install', 'node']),
+        installAction: const InstallAction(
+          executable: 'winget',
+          args: ['install', '--id', 'OpenJS.NodeJS.LTS', '-e', '--source', 'winget'],
+        ),
       ),
       _checkTool(
-        id: 'tmux',
-        name: 'tmux',
-        description: 'Terminal multiplexer — required for persistent agent sessions',
-        command: 'tmux',
-        versionArgs: ['-V'],
-        installHint: 'brew install tmux',
-        installUrl: 'https://github.com/tmux/tmux',
-        isRequired: true,
-        installAction: const InstallAction(executable: 'brew', args: ['install', 'tmux']),
-      ),
-      _checkTool(
-        id: 'bash',
-        name: 'bash',
+        id: 'powershell',
+        name: 'PowerShell',
         description: 'Shell used for running commands in terminal sessions',
-        command: 'bash',
-        versionArgs: ['--version'],
-        installHint: 'brew install bash',
+        command: 'powershell',
+        versionArgs: ['-Command', r'$PSVersionTable.PSVersion.ToString()'],
+        installHint: 'winget install Microsoft.PowerShell',
         isRequired: true,
-        installAction: const InstallAction(executable: 'brew', args: ['install', 'bash']),
+      ),
+      _checkTool(
+        id: 'wt',
+        name: 'Windows Terminal',
+        description: 'Modern terminal — recommended for agent sessions',
+        command: 'wt',
+        versionArgs: ['--version'],
+        installHint: 'winget install Microsoft.WindowsTerminal',
+        installUrl: 'https://aka.ms/terminal',
+        isRequired: false,
+        installAction: const InstallAction(
+          executable: 'winget',
+          args: ['install', '--id', 'Microsoft.WindowsTerminal', '-e', '--source', 'winget'],
+        ),
       ),
     ];
 
-    final agentFutures = [
-      _checkTool(
-        id: 'copilot',
-        name: 'GitHub Copilot',
-        description: 'AI coding agent by GitHub — autonomous agentic CLI with --allow-all',
-        command: 'copilot',
-        versionArgs: ['--version'],
-        installHint: 'npm install -g @github/copilot',
-        installUrl: 'https://www.npmjs.com/package/@github/copilot',
-        isRequired: false,
-        installAction: const InstallAction(
-          executable: 'npm',
-          args: ['install', '-g', '@github/copilot'],
-        ),
-      ),
-      _checkTool(
-        id: 'claude',
-        name: 'Claude Code',
-        description: 'AI coding agent by Anthropic',
-        command: 'claude',
-        versionArgs: ['--version'],
-        installHint: 'npm install -g @anthropic-ai/claude-code',
-        installUrl: 'https://claude.ai/code',
-        isRequired: false,
-        installAction: const InstallAction(
-          executable: 'npm',
-          args: ['install', '-g', '@anthropic-ai/claude-code'],
-        ),
-      ),
-      _checkTool(
-        id: 'gemini',
-        name: 'Gemini CLI',
-        description: 'AI coding agent by Google',
-        command: 'gemini',
-        versionArgs: ['--version'],
-        installHint: 'npm install -g @google/gemini-cli',
-        installUrl: 'https://gemini.google.com/cli',
-        isRequired: false,
-        installAction: const InstallAction(
-          executable: 'npm',
-          args: ['install', '-g', '@google/gemini-cli'],
-        ),
-      ),
-      _checkTool(
-        id: 'cursor',
-        name: 'Cursor Agent',
-        description: 'AI-first code editor with agent mode',
-        command: 'cursor',
-        versionArgs: ['--version'],
-        installHint: 'Download from cursor.com',
-        installUrl: 'https://cursor.com',
-        isRequired: false,
-      ),
-      _checkTool(
-        id: 'aider',
-        name: 'Aider',
-        description: 'AI pair programming in your terminal',
-        command: 'aider',
-        versionArgs: ['--version'],
-        installHint: 'pip install aider-chat',
-        installUrl: 'https://aider.chat',
-        isRequired: false,
-        installAction: const InstallAction(
-          executable: 'pip',
-          args: ['install', 'aider-chat'],
-        ),
-      ),
-    ];
+    final agentFutures = _commonAgents(winget: true);
 
     final deps = await Future.wait(depFutures);
     final agents = await Future.wait(agentFutures);
     return SetupCheckResult(deps: deps, agents: agents);
   }
 
+  // ── Common agent checks (macOS + Linux = npm, Windows adds winget) ───────
+
+  static List<Future<DependencyStatus>> _commonAgents({required bool winget}) => [
+    _checkTool(
+      id: 'copilot',
+      name: 'GitHub Copilot',
+      description: 'AI coding agent by GitHub — autonomous agentic CLI',
+      command: 'copilot',
+      versionArgs: ['--version'],
+      installHint: winget ? 'winget install GitHub.Copilot' : 'npm install -g @github/copilot',
+      installUrl: 'https://github.com/github/copilot-cli',
+      isRequired: false,
+      installAction: winget
+          ? const InstallAction(
+              executable: 'winget',
+              args: ['install', '--id', 'GitHub.Copilot', '-e', '--source', 'winget'],
+            )
+          : const InstallAction(
+              executable: 'npm',
+              args: ['install', '-g', '@github/copilot'],
+            ),
+    ),
+    _checkTool(
+      id: 'claude',
+      name: 'Claude Code',
+      description: 'AI coding agent by Anthropic',
+      command: 'claude',
+      versionArgs: ['--version'],
+      installHint: 'npm install -g @anthropic-ai/claude-code',
+      installUrl: 'https://claude.ai/code',
+      isRequired: false,
+      installAction: const InstallAction(
+        executable: 'npm',
+        args: ['install', '-g', '@anthropic-ai/claude-code'],
+      ),
+    ),
+    _checkTool(
+      id: 'gemini',
+      name: 'Gemini CLI',
+      description: 'AI coding agent by Google',
+      command: 'gemini',
+      versionArgs: ['--version'],
+      installHint: 'npm install -g @google/gemini-cli',
+      installUrl: 'https://gemini.google.com/cli',
+      isRequired: false,
+      installAction: const InstallAction(
+        executable: 'npm',
+        args: ['install', '-g', '@google/gemini-cli'],
+      ),
+    ),
+    _checkTool(
+      id: 'cursor',
+      name: 'Cursor Agent',
+      description: 'AI-first code editor with agent mode',
+      command: 'cursor',
+      versionArgs: ['--version'],
+      installHint: winget ? 'winget install Anysphere.Cursor' : 'Download from cursor.com',
+      installUrl: 'https://cursor.com',
+      isRequired: false,
+      installAction: winget
+          ? const InstallAction(
+              executable: 'winget',
+              args: ['install', '--id', 'Anysphere.Cursor', '-e', '--source', 'winget'],
+            )
+          : null,
+    ),
+    _checkTool(
+      id: 'aider',
+      name: 'Aider',
+      description: 'AI pair programming in your terminal',
+      command: 'aider',
+      versionArgs: ['--version'],
+      installHint: 'pip install aider-chat',
+      installUrl: 'https://aider.chat',
+      isRequired: false,
+      installAction: const InstallAction(
+        executable: 'pip',
+        args: ['install', 'aider-chat'],
+      ),
+    ),
+  ];
+
   // ── Install (streaming) ──────────────────────────────────────────────────
 
   /// Runs the install action and streams output lines.
-  /// Yields lines from stdout and stderr interleaved, then a final status line.
   static Stream<String> install(InstallAction action) {
     final controller = StreamController<String>();
 
     () async {
       try {
         if (action.requiresInteractiveTerminal) {
-          // Open a Terminal window with the install script
           await _openInTerminal(action.displayCommand);
           controller.add('ℹ️  Opened Terminal to run the installer.');
           controller.add('   Please follow the instructions there, then click Re-check.');
@@ -306,24 +532,13 @@ class SetupCheckService {
           return;
         }
 
-        // Resolve the executable through bash so our extended PATH is used
-        final resolvedExec = await () async {
-          try {
-            final r = await Process.run(
-              '/bin/bash', ['-c', 'which "${action.executable}" 2>/dev/null'],
-              environment: _env,
-            );
-            final out = (r.stdout as String).trim();
-            return (r.exitCode == 0 && out.isNotEmpty) ? out : action.executable;
-          } catch (_) {
-            return action.executable;
-          }
-        }();
+        final resolvedExec = await _findExecutable(action.executable);
 
         final process = await Process.start(
           resolvedExec,
           action.args,
           environment: _env,
+          runInShell: _isWindows, // winget needs shell on Windows
         );
 
         final outSub = process.stdout
@@ -356,12 +571,40 @@ class SetupCheckService {
     return controller.stream;
   }
 
-  /// Opens a new Terminal window running the given shell command.
   static Future<void> _openInTerminal(String command) async {
     await PlatformLauncher.instance.openTerminal(command);
   }
 
   // ── Internal check helper ────────────────────────────────────────────────
+
+  /// Find the absolute path of [cmd] using `where` (Windows) or `which` (Unix).
+  static Future<String?> _findPath(String cmd) async {
+    try {
+      ProcessResult r;
+      if (_isWindows) {
+        r = await Process.run(
+          'where',
+          [cmd],
+          environment: _env,
+          runInShell: true,
+        ).timeout(const Duration(seconds: 5));
+      } else {
+        r = await Process.run(
+          '/bin/bash',
+          ['-c', 'which "$cmd" 2>/dev/null'],
+          environment: _env,
+        ).timeout(const Duration(seconds: 5));
+      }
+      final out = (r.stdout as String).trim().split('\n').first.trim();
+      return (r.exitCode == 0 && out.isNotEmpty) ? out : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  static Future<String> _findExecutable(String exe) async {
+    return await _findPath(exe) ?? exe;
+  }
 
   static Future<DependencyStatus> _checkTool({
     required String id,
@@ -378,30 +621,16 @@ class SetupCheckService {
   }) async {
     final env = _env;
 
-    /// Find the absolute path of [cmd] by running `bash -c 'which cmd'` with
-    /// our extended PATH. Using bash instead of the bare `which` binary ensures
-    /// the PATH variable we inject is actually honoured by the shell search.
-    Future<String?> findPath(String cmd) async {
-      try {
-        final r = await Process.run(
-          '/bin/bash', ['-c', 'which "$cmd" 2>/dev/null'],
-          environment: env,
-        ).timeout(const Duration(seconds: 5));
-        final out = (r.stdout as String).trim();
-        return (r.exitCode == 0 && out.isNotEmpty) ? out : null;
-      } catch (_) {
-        return null;
-      }
-    }
-
     Future<DependencyStatus?> tryCommand(String cmd, List<String> verArgs) async {
       try {
-        final resolvedPath = await findPath(cmd);
+        final resolvedPath = await _findPath(cmd);
         if (resolvedPath == null) return null;
 
-        // Run the resolved absolute path so we don't depend on PATH again
         final versionResult = await Process.run(
-          resolvedPath, verArgs, environment: env,
+          resolvedPath,
+          verArgs,
+          environment: env,
+          runInShell: _isWindows,
         ).timeout(const Duration(seconds: 5));
 
         final versionOutput =
@@ -453,3 +682,5 @@ class SetupCheckService {
         : raw.length > 40 ? raw.substring(0, 40) : raw;
   }
 }
+
+/// Describes how to install a dependency.
