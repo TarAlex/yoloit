@@ -27,11 +27,17 @@ jobs:
       # ── Checkout ────────────────────────────────────────────────────────────
       - name: Checkout repository (fast local mirror)
         run: |
-          LOCAL_REPO="$HOME/git/yoloit/yoloit"
-          if [ -d "$LOCAL_REPO/.git" ]; then
-            echo "Using fast local mirror rsync..."
-            # Clean workspace completely (including stale .git)
-            rm -rf "$GITHUB_WORKSPACE/.git"
+          # Try multiple possible local repo paths
+          LOCAL_REPO=""
+          for candidate in "$HOME/git/yoloit/yoloit" "/Users/Uladzimir_Klyshevich/git/yoloit/yoloit" "/Users/uladzimir_klyshevich/git/yoloit/yoloit"; do
+            if [ -d "$candidate/.git" ]; then
+              LOCAL_REPO="$candidate"
+              break
+            fi
+          done
+
+          if [ -n "$LOCAL_REPO" ]; then
+            echo "Using fast local mirror: $LOCAL_REPO"
             rsync -a --delete \
               --exclude='build/' \
               --exclude='.dart_tool/' \
@@ -39,9 +45,13 @@ jobs:
             echo "Synced from local repo at commit:"
             git -C "$GITHUB_WORKSPACE" log -1 --oneline
           else
-            echo "No local mirror found, falling back to GitHub checkout..."
-            git clone --depth=1 https://github.com/IstiN/yoloit.git "$GITHUB_WORKSPACE" || true
-            echo "Checked out: $(git -C $GITHUB_WORKSPACE log -1 --oneline)"
+            echo "No local mirror found — cloning from GitHub..."
+            # Clean workspace for fresh clone
+            rm -rf "$GITHUB_WORKSPACE"
+            mkdir -p "$GITHUB_WORKSPACE"
+            git clone --depth=1 https://github.com/IstiN/yoloit.git "$GITHUB_WORKSPACE"
+            echo "Cloned at commit:"
+            git -C "$GITHUB_WORKSPACE" log -1 --oneline
           fi
 
       # ── Environment ─────────────────────────────────────────────────────────
