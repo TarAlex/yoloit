@@ -97,10 +97,14 @@ jobs:
           Write-Host "=================================="
 
           # Use 7-Zip (always available on GitHub-hosted Windows runners)
-          # to reliably archive all files including subdirectories and plugin DLLs
+          # cd into the Release dir so zip root = exe root (no deep path nesting)
+          $absRelease = (Resolve-Path $RELEASE_DIR).Path
+          $absZip = (Join-Path (Get-Location) $ZIP_NAME)
           $sevenZip = "C:\Program Files\7-Zip\7z.exe"
-          & $sevenZip a -tzip $ZIP_NAME "$RELEASE_DIR\*" -r
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Push-Location $absRelease
+          & $sevenZip a -tzip $absZip ".\*" -r
+          if ($LASTEXITCODE -ne 0) { Pop-Location; exit $LASTEXITCODE }
+          Pop-Location
 
           $size = (Get-Item $ZIP_NAME).Length / 1MB
           Write-Host "Packaged: $ZIP_NAME ($([math]::Round($size, 1)) MB)"
