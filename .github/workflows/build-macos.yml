@@ -1,6 +1,18 @@
 name: Build macOS Release
 
 on:
+  workflow_call:
+    inputs:
+      version:
+        description: 'Release version tag (e.g. v0.0.17)'
+        required: false
+        default: 'auto'
+        type: string
+      create_release:
+        description: 'Upload asset to GitHub Release'
+        required: false
+        default: 'true'
+        type: string
   workflow_dispatch:
     inputs:
       version:
@@ -81,7 +93,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          INPUT="${{ github.event.inputs.version }}"
+          INPUT="${{ inputs.version }}"
           if [ -z "$INPUT" ] || [ "$INPUT" = "auto" ]; then
             # Find latest release tag and increment patch version
             LATEST=$(gh release list --limit 10 --json tagName \
@@ -258,7 +270,7 @@ jobs:
 
       # ── GitHub Release ───────────────────────────────────────────────────────
       - name: Create or update GitHub Release
-        if: github.event.inputs.create_release == 'true'
+        if: inputs.create_release == 'true'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ steps.version.outputs.version }}

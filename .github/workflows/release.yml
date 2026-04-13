@@ -1,0 +1,107 @@
+name: Release All Platforms
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version (e.g. v0.0.17) or "auto" to increment patch'
+        required: false
+        default: 'auto'
+
+jobs:
+  # ── Step 1: Determine the version and create the GitHub Release ─────────────
+  prepare-release:
+    name: Prepare Release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+      version: ${{ steps.version.outputs.version }}
+
+    steps:
+      - name: Derive version tag
+        id: version
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          INPUT="${{ github.event.inputs.version }}"
+          if [ -z "$INPUT" ] || [ "$INPUT" = "auto" ]; then
+            LATEST=$(gh release list --repo "${{ github.repository }}" --limit 10 --json tagName \
+              --jq '[.[] | select(.tagName | test("^v[0-9]+\\.[0-9]+\\.[0-9]+$"))] | first | .tagName' 2>/dev/null || echo "")
+            if [ -z "$LATEST" ]; then
+              TAG="v0.0.1"
+              echo "No previous release — starting at $TAG"
+            else
+              MAJOR=$(echo "$LATEST" | sed 's/v\([0-9]*\)\.\([0-9]*\)\.\([0-9]*\)/\1/')
+              MINOR=$(echo "$LATEST" | sed 's/v\([0-9]*\)\.\([0-9]*\)\.\([0-9]*\)/\2/')
+              PATCH=$(echo "$LATEST" | sed 's/v\([0-9]*\)\.\([0-9]*\)\.\([0-9]*\)/\3/')
+              PATCH=$((PATCH + 1))
+              TAG="v${MAJOR}.${MINOR}.${PATCH}"
+              echo "Previous: $LATEST → auto-increment to $TAG"
+            fi
+          else
+            TAG="$INPUT"
+            [[ "$TAG" != v* ]] && TAG="v$TAG"
+            echo "Using manual version: $TAG"
+          fi
+          VERSION_CLEAN="${TAG#v}"
+          echo "version=$VERSION_CLEAN" >> $GITHUB_OUTPUT
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+
+      - name: Create GitHub Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ steps.version.outputs.tag }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          if gh release view "$RELEASE_TAG" --repo "${{ github.repository }}" &>/dev/null; then
+            echo "Release $RELEASE_TAG already exists — will add assets to it."
+          else
+            cat > release-notes.md << 'EOF'
+## Installation
+
+| Platform | Asset | Instructions |
+|----------|-------|--------------|
+| **macOS** | `.dmg` | Open the DMG and drag YoLoIT.app to Applications |
+| **Windows** | `.zip` | Extract the zip and run `yoloit.exe` |
+| **Linux** | `.tar.gz` | Extract, then run `bundle/yoloit` |
+
+EOF
+            gh release create "$RELEASE_TAG" \
+              --repo "${{ github.repository }}" \
+              --title "YoLoIT $RELEASE_TAG" \
+              --notes-file release-notes.md \
+              --latest
+            echo "✅ Created release $RELEASE_TAG"
+          fi
+
+  # ── Step 2a: Build macOS ────────────────────────────────────────────────────
+  build-macos:
+    name: Build macOS
+    needs: prepare-release
+    uses: ./.github/workflows/build-macos.yml
+    with:
+      version: ${{ needs.prepare-release.outputs.tag }}
+      create_release: 'true'
+    secrets: inherit
+
+  # ── Step 2b: Build Windows ──────────────────────────────────────────────────
+  build-windows:
+    name: Build Windows
+    needs: prepare-release
+    uses: ./.github/workflows/build-windows.yml
+    with:
+      version: ${{ needs.prepare-release.outputs.tag }}
+      create_release: 'true'
+    secrets: inherit
+
+  # ── Step 2c: Build Linux ────────────────────────────────────────────────────
+  build-linux:
+    name: Build Linux
+    needs: prepare-release
+    uses: ./.github/workflows/build-linux.yml
+    with:
+      version: ${{ needs.prepare-release.outputs.tag }}
+      create_release: 'true'
+    secrets: inherit

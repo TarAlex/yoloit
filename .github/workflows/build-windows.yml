@@ -1,6 +1,18 @@
 name: Build Windows Release
 
 on:
+  workflow_call:
+    inputs:
+      version:
+        description: 'Release version tag (e.g. v0.0.17)'
+        required: false
+        default: 'latest'
+        type: string
+      create_release:
+        description: 'Upload asset to GitHub Release'
+        required: false
+        default: 'true'
+        type: string
   workflow_dispatch:
     inputs:
       version:
@@ -49,7 +61,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: bash
         run: |
-          INPUT="${{ github.event.inputs.version }}"
+          INPUT="${{ inputs.version }}"
           if [ -z "$INPUT" ] || [ "$INPUT" = "latest" ]; then
             LATEST=$(gh release list --limit 10 --json tagName \
               --jq '[.[] | select(.tagName | test("^v[0-9]+\\.[0-9]+\\.[0-9]+$"))] | first | .tagName' 2>/dev/null || echo "")
@@ -107,7 +119,7 @@ jobs:
 
       # ── GitHub Release ───────────────────────────────────────────────────────
       - name: Upload to GitHub Release
-        if: github.event.inputs.create_release == 'true'
+        if: inputs.create_release == 'true'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ steps.version.outputs.version }}
