@@ -98,6 +98,7 @@ class DiffService {
         path: s.path,
         status: status,
         isStaged: s.isStaged,
+        repoPath: workspacePath,
       );
     }).toList();
   }

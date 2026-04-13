@@ -47,6 +47,7 @@ class FileChange extends Equatable {
     this.isStaged = false,
     this.addedLines = 0,
     this.removedLines = 0,
+    this.repoPath,
   });
 
   final String path;
@@ -54,14 +55,18 @@ class FileChange extends Equatable {
   final bool isStaged;
   final int addedLines;
   final int removedLines;
+  /// Absolute path of the git repository root this file belongs to.
+  final String? repoPath;
 
   String get fileName => path.split('/').last;
+  String get repoName => repoPath != null ? repoPath!.split('/').last : '';
 
   FileChange copyWith({
     FileChangeStatus? status,
     bool? isStaged,
     int? addedLines,
     int? removedLines,
+    String? repoPath,
   }) {
     return FileChange(
       path: path,
@@ -69,11 +74,12 @@ class FileChange extends Equatable {
       isStaged: isStaged ?? this.isStaged,
       addedLines: addedLines ?? this.addedLines,
       removedLines: removedLines ?? this.removedLines,
+      repoPath: repoPath ?? this.repoPath,
     );
   }
 
   @override
-  List<Object?> get props => [path, status, isStaged, addedLines, removedLines];
+  List<Object?> get props => [path, status, isStaged, addedLines, removedLines, repoPath];
 }
 
 class PrCheck extends Equatable {

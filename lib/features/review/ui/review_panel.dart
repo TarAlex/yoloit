@@ -343,33 +343,53 @@ class _GitChangesSection extends StatelessWidget {
       );
     }
 
+    // Group files by repoPath, preserving insertion order.
+    Map<String?, List<FileChange>> _groupByRepo(List<FileChange> files) {
+      final map = <String?, List<FileChange>>{};
+      for (final f in files) {
+        (map[f.repoPath] ??= []).add(f);
+      }
+      return map;
+    }
+
+    final stagedByRepo = _groupByRepo(staged);
+    final unstagedByRepo = _groupByRepo(unstaged);
+    final multipleRepos = state.fileTree.length > 1;
+
+    Widget buildGroup(
+      String label,
+      IconData icon,
+      Color iconColor,
+      Map<String?, List<FileChange>> byRepo,
+    ) {
+      final items = <Widget>[];
+      items.add(_ChangesSectionHeader(
+        label: label,
+        count: byRepo.values.fold(0, (s, l) => s + l.length),
+        icon: icon,
+        iconColor: iconColor,
+      ));
+      for (final entry in byRepo.entries) {
+        if (multipleRepos && entry.key != null) {
+          items.add(_RepoGroupHeader(repoName: entry.key!.split('/').last));
+        }
+        for (final f in entry.value) {
+          items.add(_ChangedFileTile(file: f, workspacePath: entry.key));
+        }
+      }
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: items,
+      );
+    }
+
     return ListView(
       padding: EdgeInsets.zero,
       children: [
-        if (staged.isNotEmpty) ...[
-          _ChangesSectionHeader(
-            label: 'STAGED',
-            count: staged.length,
-            icon: Icons.check_circle_outline,
-            iconColor: AppColors.neonGreen,
-          ),
-          ...staged.map((f) => _ChangedFileTile(
-                file: f,
-                workspacePath: state.fileTree.isNotEmpty ? state.fileTree.first.path : null,
-              )),
-        ],
-        if (unstaged.isNotEmpty) ...[
-          _ChangesSectionHeader(
-            label: 'CHANGES',
-            count: unstaged.length,
-            icon: Icons.edit_outlined,
-            iconColor: AppColors.neonOrange,
-          ),
-          ...unstaged.map((f) => _ChangedFileTile(
-                file: f,
-                workspacePath: state.fileTree.isNotEmpty ? state.fileTree.first.path : null,
-              )),
-        ],
+        if (staged.isNotEmpty)
+          buildGroup('STAGED', Icons.check_circle_outline, AppColors.neonGreen, stagedByRepo),
+        if (unstaged.isNotEmpty)
+          buildGroup('CHANGES', Icons.edit_outlined, AppColors.neonOrange, unstagedByRepo),
       ],
     );
   }
@@ -411,6 +431,33 @@ class _ChangesSectionHeader extends StatelessWidget {
             style: const TextStyle(
               color: AppColors.textMuted,
               fontSize: 10,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+
+class _RepoGroupHeader extends StatelessWidget {
+  const _RepoGroupHeader({required this.repoName});
+  final String repoName;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(20, 6, 12, 2),
+      child: Row(
+        children: [
+          const Icon(Icons.folder_outlined, size: 11, color: AppColors.textMuted),
+          const SizedBox(width: 5),
+          Text(
+            repoName,
+            style: const TextStyle(
+              color: AppColors.textMuted,
+              fontSize: 10,
+              fontWeight: FontWeight.w600,
             ),
           ),
         ],
