@@ -6,8 +6,8 @@
     {
       "layers" : [
         {
-          "image-name" : "yoloit_icon.svg",
-          "name" : "yoloit_icon"
+          "image-name" : "yoloit_foreground.png",
+          "name" : "yoloit_foreground"
         }
       ],
       "shadow" : {
