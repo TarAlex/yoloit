@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
@@ -478,6 +480,7 @@ class _TerminalWidget extends StatefulWidget {
 class _TerminalWidgetState extends State<_TerminalWidget> {
   final _controller = TerminalController();
   final _focusNode = FocusNode();
+  Timer? _focusRetryTimer;
   double _fontSize = 13.0;
   double _scaleBase = 13.0;
   Size _terminalSize = Size.zero;
@@ -514,6 +517,13 @@ class _TerminalWidgetState extends State<_TerminalWidget> {
   void _requestFocusAfterFrame() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _focusNode.requestFocus();
+    });
+    // Retry after dialog dismiss animation (e.g. NewAgentSessionDialog pop).
+    _focusRetryTimer?.cancel();
+    _focusRetryTimer = Timer(const Duration(milliseconds: 300), () {
+      if (mounted && widget.isActive && !_focusNode.hasFocus) {
+        _focusNode.requestFocus();
+      }
     });
   }
 
@@ -703,6 +713,7 @@ class _TerminalWidgetState extends State<_TerminalWidget> {
 
   @override
   void dispose() {
+    _focusRetryTimer?.cancel();
     HardwareKeyboard.instance.removeHandler(_handleHardwareKey);
     widget.session.terminal.onOutput = null;
     widget.session.terminal.onResize = null;
