@@ -27,12 +27,21 @@ jobs:
       # ── Checkout ────────────────────────────────────────────────────────────
       - name: Checkout repository (fast local mirror)
         run: |
+          # Debug: show HOME and check paths
+          echo "HOME=$HOME"
+          echo "GITHUB_WORKSPACE=$GITHUB_WORKSPACE"
+
           # Try multiple possible local repo paths
           LOCAL_REPO=""
           for candidate in "$HOME/git/yoloit/yoloit" "/Users/Uladzimir_Klyshevich/git/yoloit/yoloit" "/Users/uladzimir_klyshevich/git/yoloit/yoloit"; do
+            echo "Checking: $candidate"
             if [ -d "$candidate/.git" ]; then
               LOCAL_REPO="$candidate"
+              echo "  → Found!"
               break
+            else
+              echo "  → Not found (or no .git)"
+              ls -la "$candidate" 2>/dev/null | head -3 || echo "  → Path does not exist"
             fi
           done
 
@@ -46,7 +55,8 @@ jobs:
             git -C "$GITHUB_WORKSPACE" log -1 --oneline
           else
             echo "No local mirror found — cloning from GitHub..."
-            # Clean workspace for fresh clone
+            # Clean workspace contents (not the dir itself — shell CWD)
+            cd /tmp
             rm -rf "$GITHUB_WORKSPACE"
             mkdir -p "$GITHUB_WORKSPACE"
             git clone --depth=1 https://github.com/IstiN/yoloit.git "$GITHUB_WORKSPACE"
