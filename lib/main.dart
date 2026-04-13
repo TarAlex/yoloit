@@ -40,8 +40,10 @@ void main() async {
     size: Size(1400, 900),
     minimumSize: Size(900, 600),
     center: true,
-    title: 'yoloit',
+    title: 'YoLoIT',
     titleBarStyle: TitleBarStyle.hidden,
+    // On macOS, window buttons (traffic lights) are shown natively in hidden mode.
+    // On Windows/Linux, we render our own controls in _WindowControls widget.
     windowButtonVisibility: true,
   );
   await windowManager.waitUntilReadyToShow(options, () async {

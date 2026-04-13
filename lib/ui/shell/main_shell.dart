@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
@@ -753,6 +754,8 @@ class _TitleBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.appColors;
+    final isWindows = Platform.isWindows;
+    final isLinux = Platform.isLinux;
     return GestureDetector(
       onPanStart: (_) => windowManager.startDragging(),
       child: Container(
@@ -760,7 +763,9 @@ class _TitleBar extends StatelessWidget {
         color: colors.surface,
         child: Row(
           children: [
-            const SizedBox(width: 82), // space for macOS traffic lights + gap
+            // macOS: reserve space for native traffic lights (close/min/max)
+            // Windows/Linux: small left margin only
+            SizedBox(width: isWindows || isLinux ? 12 : 82),
             // Left panel toggle buttons (fixed, left-anchored)
             _PanelToggleButton(
               icon: Icons.view_sidebar,
@@ -806,7 +811,7 @@ class _TitleBar extends StatelessWidget {
                           ),
                           const SizedBox(width: 8),
                           Text(
-                            '⌘O',
+                            isWindows ? 'Ctrl+O' : '⌘O',
                             style: TextStyle(color: AppColors.textMuted.withAlpha(120), fontSize: 12),
                           ),
                         ],
@@ -844,7 +849,13 @@ class _TitleBar extends StatelessWidget {
               active: false,
               onTap: onSettings,
             ),
-            const SizedBox(width: 12),
+            // Windows / Linux: show custom minimize/maximize/close buttons
+            // because TitleBarStyle.hidden removes native window controls.
+            if (isWindows || isLinux) ...[
+              const SizedBox(width: 8),
+              const _WindowControls(),
+            ] else
+              const SizedBox(width: 12),
           ],
         ),
       ),
@@ -892,6 +903,121 @@ class _PanelToggleButton extends StatelessWidget {
               size: 16,
               color: active ? colors.primary : AppColors.textMuted,
               semanticLabel: tooltip,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ── Windows / Linux window controls ──────────────────────────────────────────
+
+/// Custom minimize / maximize / close buttons for platforms where
+/// [TitleBarStyle.hidden] removes the native window chrome (Windows, Linux).
+class _WindowControls extends StatefulWidget {
+  const _WindowControls();
+
+  @override
+  State<_WindowControls> createState() => _WindowControlsState();
+}
+
+class _WindowControlsState extends State<_WindowControls> with WindowListener {
+  bool _isMaximized = false;
+
+  @override
+  void initState() {
+    super.initState();
+    windowManager.addListener(this);
+    windowManager.isMaximized().then((v) {
+      if (mounted) setState(() => _isMaximized = v);
+    });
+  }
+
+  @override
+  void dispose() {
+    windowManager.removeListener(this);
+    super.dispose();
+  }
+
+  @override
+  void onWindowMaximize() => setState(() => _isMaximized = true);
+  @override
+  void onWindowUnmaximize() => setState(() => _isMaximized = false);
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        _WinBtn(
+          icon: Icons.remove,
+          tooltip: 'Minimize',
+          onTap: () => windowManager.minimize(),
+        ),
+        _WinBtn(
+          icon: _isMaximized ? Icons.filter_none : Icons.crop_square,
+          tooltip: _isMaximized ? 'Restore' : 'Maximize',
+          onTap: () async {
+            if (await windowManager.isMaximized()) {
+              await windowManager.unmaximize();
+            } else {
+              await windowManager.maximize();
+            }
+          },
+        ),
+        _WinBtn(
+          icon: Icons.close,
+          tooltip: 'Close',
+          isClose: true,
+          onTap: () => windowManager.close(),
+        ),
+      ],
+    );
+  }
+}
+
+class _WinBtn extends StatefulWidget {
+  const _WinBtn({
+    required this.icon,
+    required this.tooltip,
+    required this.onTap,
+    this.isClose = false,
+  });
+
+  final IconData icon;
+  final String tooltip;
+  final VoidCallback onTap;
+  final bool isClose;
+
+  @override
+  State<_WinBtn> createState() => _WinBtnState();
+}
+
+class _WinBtnState extends State<_WinBtn> {
+  bool _hovered = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final hoverColor =
+        widget.isClose ? const Color(0xFFE81123) : AppColors.textMuted.withAlpha(40);
+    return Tooltip(
+      message: widget.tooltip,
+      child: MouseRegion(
+        onEnter: (_) => setState(() => _hovered = true),
+        onExit: (_) => setState(() => _hovered = false),
+        child: GestureDetector(
+          onTap: widget.onTap,
+          child: Container(
+            width: 46,
+            height: 44,
+            color: _hovered ? hoverColor : Colors.transparent,
+            child: Icon(
+              widget.icon,
+              size: 14,
+              color: _hovered && widget.isClose
+                  ? Colors.white
+                  : AppColors.textSecondary,
             ),
           ),
         ),
