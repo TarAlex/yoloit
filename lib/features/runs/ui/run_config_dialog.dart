@@ -1,7 +1,12 @@
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:path/path.dart' as p;
 import 'package:yoloit/core/theme/app_color_scheme.dart';
 import 'package:yoloit/core/theme/app_colors.dart';
 import 'package:yoloit/features/runs/models/run_config.dart';
+import 'package:yoloit/features/workspaces/bloc/workspace_cubit.dart';
+import 'package:yoloit/features/workspaces/bloc/workspace_state.dart';
 
 class RunConfigDialog extends StatefulWidget {
   const RunConfigDialog({super.key, this.initial});
@@ -114,11 +119,7 @@ class _RunConfigDialogState extends State<RunConfigDialog> {
                 fontFamily: 'monospace',
               ),
               const SizedBox(height: 12),
-              _Field(
-                label: 'Working Directory',
-                controller: _workingDirCtrl,
-                hint: 'Leave empty to use workspace root',
-              ),
+              _WorkingDirField(controller: _workingDirCtrl),
               const SizedBox(height: 16),
               Row(
                 children: [
@@ -223,6 +224,137 @@ class _RunConfigDialogState extends State<RunConfigDialog> {
     );
   }
 }
+
+class _WorkingDirField extends StatelessWidget {
+  const _WorkingDirField({required this.controller});
+
+  final TextEditingController controller;
+
+  Future<void> _browse(BuildContext context) async {
+    final dir = await FilePicker.platform.getDirectoryPath(
+      dialogTitle: 'Select Working Directory',
+    );
+    if (dir != null) controller.text = dir;
+  }
+
+  List<String> _workspacePaths(BuildContext context) {
+    final state = context.read<WorkspaceCubit>().state;
+    if (state is! WorkspaceLoaded) return [];
+    final active = state.activeWorkspace;
+    return active?.paths ?? [];
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.appColors;
+    final paths = _workspacePaths(context);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          'Working Directory',
+          style: TextStyle(
+              color: AppColors.textMuted,
+              fontSize: 11,
+              fontWeight: FontWeight.w500),
+        ),
+        const SizedBox(height: 4),
+        Row(
+          children: [
+            Expanded(
+              child: TextField(
+                controller: controller,
+                style: const TextStyle(
+                  color: AppColors.textPrimary,
+                  fontSize: 12,
+                  fontFamily: 'monospace',
+                ),
+                decoration: InputDecoration(
+                  hintText: 'Leave empty to use workspace root',
+                  hintStyle:
+                      const TextStyle(color: AppColors.textMuted, fontSize: 12),
+                  filled: true,
+                  fillColor: colors.surface,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(4),
+                    borderSide: BorderSide(color: colors.border),
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(4),
+                    borderSide: BorderSide(color: colors.border),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(4),
+                    borderSide: BorderSide(color: colors.primary),
+                  ),
+                  contentPadding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                  isDense: true,
+                ),
+              ),
+            ),
+            const SizedBox(width: 6),
+            Tooltip(
+              message: 'Browse for directory',
+              child: InkWell(
+                onTap: () => _browse(context),
+                borderRadius: BorderRadius.circular(4),
+                child: Container(
+                  padding: const EdgeInsets.all(7),
+                  decoration: BoxDecoration(
+                    color: colors.surface,
+                    borderRadius: BorderRadius.circular(4),
+                    border: Border.all(color: colors.border),
+                  ),
+                  child: Icon(Icons.folder_open_rounded,
+                      size: 16, color: colors.primary),
+                ),
+              ),
+            ),
+          ],
+        ),
+        if (paths.isNotEmpty) ...[
+          const SizedBox(height: 6),
+          Wrap(
+            spacing: 6,
+            runSpacing: 4,
+            children: paths.map((path) {
+              final label = p.basename(path);
+              final isSelected = controller.text == path;
+              return GestureDetector(
+                onTap: () => controller.text = path,
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 120),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: isSelected
+                        ? colors.primary.withAlpha(30)
+                        : colors.surface,
+                    borderRadius: BorderRadius.circular(4),
+                    border: Border.all(
+                      color: isSelected ? colors.primary : colors.border,
+                    ),
+                  ),
+                  child: Text(
+                    label,
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: isSelected ? colors.primary : AppColors.textMuted,
+                      fontFamily: 'monospace',
+                    ),
+                  ),
+                ),
+              );
+            }).toList(),
+          ),
+        ],
+      ],
+    );
+  }
+}
+
 
 class _Field extends StatelessWidget {
   const _Field({
