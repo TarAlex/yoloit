@@ -93,7 +93,7 @@ class RunService {
     _sessionTmux[sessionId] = name;
     final log = await logPath(configId);
     await _tailLog(
-      sessionId: sessionId, log: log, fromStart: false,
+      sessionId: sessionId, log: log, fromStart: true,
       onOutput: onOutput, onExit: onExit,
     );
     return true;
