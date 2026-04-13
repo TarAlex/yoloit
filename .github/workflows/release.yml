@@ -25,7 +25,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          INPUT="${{ github.event.inputs.version }}"
+          INPUT="${{ inputs.version }}"
           if [ -z "$INPUT" ] || [ "$INPUT" = "auto" ]; then
             LATEST=$(gh release list --repo "${{ github.repository }}" --limit 10 --json tagName \
               --jq '[.[] | select(.tagName | test("^v[0-9]+\\.[0-9]+\\.[0-9]+$"))] | first | .tagName' 2>/dev/null || echo "")
@@ -58,16 +58,8 @@ jobs:
           if gh release view "$RELEASE_TAG" --repo "${{ github.repository }}" &>/dev/null; then
             echo "Release $RELEASE_TAG already exists — will add assets to it."
           else
-            cat > release-notes.md << 'EOF'
-## Installation
-
-| Platform | Asset | Instructions |
-|----------|-------|--------------|
-| **macOS** | `.dmg` | Open the DMG and drag YoLoIT.app to Applications |
-| **Windows** | `.zip` | Extract the zip and run `yoloit.exe` |
-| **Linux** | `.tar.gz` | Extract, then run `bundle/yoloit` |
-
-EOF
+            NOTES="## Installation\n\n| Platform | Asset | Instructions |\n|----------|-------|---------------|\n| **macOS** | \`.dmg\` | Open the DMG and drag YoLoIT.app to Applications |\n| **Windows** | \`.zip\` | Extract the zip and run \`yoloit.exe\` |\n| **Linux** | \`.tar.gz\` | Extract, then run \`bundle/yoloit\` |"
+            printf '%b\n' "$NOTES" > release-notes.md
             gh release create "$RELEASE_TAG" \
               --repo "${{ github.repository }}" \
               --title "YoLoIT $RELEASE_TAG" \
