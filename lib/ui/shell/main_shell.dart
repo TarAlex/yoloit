@@ -252,9 +252,7 @@ class _MainShellState extends State<MainShell> with WindowListener {
                 if (_pendingUpdate != null)
                   UpdateBanner(
                     info: _pendingUpdate!,
-                    onDownload: () => UpdateService.openRelease(_pendingUpdate!),
-                    onDismiss: () async {
-                      await UpdateService.skipVersion(_pendingUpdate!.version);
+                    onDismiss: () {
                       if (mounted) setState(() => _pendingUpdate = null);
                     },
                   ),
