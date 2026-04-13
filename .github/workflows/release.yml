@@ -9,17 +9,17 @@ on:
         default: 'auto'
 
 jobs:
-  # ── Step 1: Determine the version and create the GitHub Release ─────────────
-  prepare-release:
-    name: Prepare Release
+  release:
+    name: Create Release & Trigger All Builds
     runs-on: ubuntu-latest
     permissions:
       contents: write
-    outputs:
-      tag: ${{ steps.version.outputs.tag }}
-      version: ${{ steps.version.outputs.version }}
+      actions: write   # needed to trigger other workflows
 
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
       - name: Derive version tag
         id: version
         env:
@@ -38,7 +38,7 @@ jobs:
               PATCH=$(echo "$LATEST" | sed 's/v\([0-9]*\)\.\([0-9]*\)\.\([0-9]*\)/\3/')
               PATCH=$((PATCH + 1))
               TAG="v${MAJOR}.${MINOR}.${PATCH}"
-              echo "Previous: $LATEST → auto-increment to $TAG"
+              echo "Previous: $LATEST => auto-increment to $TAG"
             fi
           else
             TAG="$INPUT"
@@ -49,51 +49,68 @@ jobs:
           echo "version=$VERSION_CLEAN" >> $GITHUB_OUTPUT
           echo "tag=$TAG" >> $GITHUB_OUTPUT
 
-      - name: Create GitHub Release
+      - name: Create unified GitHub Release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_TAG: ${{ steps.version.outputs.tag }}
-          VERSION: ${{ steps.version.outputs.version }}
         run: |
           if gh release view "$RELEASE_TAG" --repo "${{ github.repository }}" &>/dev/null; then
-            echo "Release $RELEASE_TAG already exists — will add assets to it."
+            echo "Release $RELEASE_TAG already exists — builds will upload assets to it."
           else
-            NOTES="## Installation\n\n| Platform | Asset | Instructions |\n|----------|-------|---------------|\n| **macOS** | \`.dmg\` | Open the DMG and drag YoLoIT.app to Applications |\n| **Windows** | \`.zip\` | Extract the zip and run \`yoloit.exe\` |\n| **Linux** | \`.tar.gz\` | Extract, then run \`bundle/yoloit\` |"
+            NOTES="## YoLoIT $RELEASE_TAG\n\n## Installation\n\n| Platform | File | How to install |\n|----------|------|----------------|\n| **macOS** | \`.dmg\` | Open and drag YoLoIT.app to Applications |\n| **Windows** | \`.zip\` | Extract and run \`yoloit.exe\` |\n| **Linux** | \`.tar.gz\` | Extract and run \`bundle/yoloit\` |"
             printf '%b\n' "$NOTES" > release-notes.md
             gh release create "$RELEASE_TAG" \
               --repo "${{ github.repository }}" \
               --title "YoLoIT $RELEASE_TAG" \
               --notes-file release-notes.md \
               --latest
-            echo "✅ Created release $RELEASE_TAG"
+            echo "Release $RELEASE_TAG created."
           fi
 
-  # ── Step 2a: Build macOS ────────────────────────────────────────────────────
-  build-macos:
-    name: Build macOS
-    needs: prepare-release
-    uses: ./.github/workflows/build-macos.yml
-    with:
-      version: ${{ needs.prepare-release.outputs.tag }}
-      create_release: 'true'
-    secrets: inherit
+      - name: Trigger macOS build
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          gh workflow run build-macos.yml \
+            --repo "${{ github.repository }}" \
+            --ref main \
+            --field version="$RELEASE_TAG" \
+            --field create_release=true
+          echo "macOS build triggered."
 
-  # ── Step 2b: Build Windows ──────────────────────────────────────────────────
-  build-windows:
-    name: Build Windows
-    needs: prepare-release
-    uses: ./.github/workflows/build-windows.yml
-    with:
-      version: ${{ needs.prepare-release.outputs.tag }}
-      create_release: 'true'
-    secrets: inherit
+      - name: Trigger Windows build
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          gh workflow run build-windows.yml \
+            --repo "${{ github.repository }}" \
+            --ref main \
+            --field version="$RELEASE_TAG" \
+            --field create_release=true
+          echo "Windows build triggered."
 
-  # ── Step 2c: Build Linux ────────────────────────────────────────────────────
-  build-linux:
-    name: Build Linux
-    needs: prepare-release
-    uses: ./.github/workflows/build-linux.yml
-    with:
-      version: ${{ needs.prepare-release.outputs.tag }}
-      create_release: 'true'
-    secrets: inherit
+      - name: Trigger Linux build
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          gh workflow run build-linux.yml \
+            --repo "${{ github.repository }}" \
+            --ref main \
+            --field version="$RELEASE_TAG" \
+            --field create_release=true
+          echo "Linux build triggered."
+
+      - name: Summary
+        env:
+          RELEASE_TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          echo "## Release $RELEASE_TAG" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "All 3 platform builds have been triggered in parallel." >> $GITHUB_STEP_SUMMARY
+          echo "They will upload assets to the unified release as they complete." >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "View release: https://github.com/${{ github.repository }}/releases/tag/$RELEASE_TAG" >> $GITHUB_STEP_SUMMARY
+

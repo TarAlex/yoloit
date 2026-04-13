@@ -1,18 +1,6 @@
 name: Build Windows Release
 
 on:
-  workflow_call:
-    inputs:
-      version:
-        description: 'Release version tag (e.g. v0.0.17)'
-        required: false
-        default: 'latest'
-        type: string
-      create_release:
-        description: 'Upload asset to GitHub Release'
-        required: false
-        default: 'true'
-        type: string
   workflow_dispatch:
     inputs:
       version:
