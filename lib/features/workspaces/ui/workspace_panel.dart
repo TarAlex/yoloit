@@ -123,15 +123,26 @@ class WorkspacePanelState extends State<WorkspacePanel> {
 
   Widget _buildThemePicker() {
     const themes = AppThemePreset.values;
+    final current = ThemeManager.instance.current;
     return Container(
       padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
       child: Column(
         children: themes.map((t) {
+          final isActive = t == current;
           return InkWell(
-            onTap: () => ThemeManager.instance.setTheme(t),
+            onTap: () {
+              ThemeManager.instance.setTheme(t);
+              setState(() {});
+            },
             borderRadius: BorderRadius.circular(4),
-            child: Padding(
+            child: Container(
               padding: const EdgeInsets.symmetric(vertical: 5, horizontal: 4),
+              decoration: isActive
+                  ? BoxDecoration(
+                      color: t.color.withAlpha(25),
+                      borderRadius: BorderRadius.circular(4),
+                    )
+                  : null,
               child: Row(
                 children: [
                   Container(
@@ -140,13 +151,25 @@ class WorkspacePanelState extends State<WorkspacePanel> {
                     decoration: BoxDecoration(
                       color: t.color,
                       shape: BoxShape.circle,
+                      border: isActive
+                          ? Border.all(color: t.color, width: 2)
+                          : null,
                     ),
                   ),
                   const SizedBox(width: 8),
-                  Text(
-                    t.label,
-                    style: const TextStyle(color: AppColors.textSecondary, fontSize: 12),
+                  Expanded(
+                    child: Text(
+                      t.label,
+                      style: TextStyle(
+                        color: isActive ? t.color : AppColors.textSecondary,
+                        fontSize: 12,
+                        fontWeight:
+                            isActive ? FontWeight.w600 : FontWeight.normal,
+                      ),
+                    ),
                   ),
+                  if (isActive)
+                    Icon(Icons.check, size: 12, color: t.color),
                 ],
               ),
             ),
