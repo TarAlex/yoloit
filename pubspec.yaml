@@ -36,7 +36,8 @@ dependencies:
   bloc: ^9.0.0
   equatable: ^2.0.7
   flutter_pty: ^0.4.2
-  xterm: ^4.0.0
+  xterm:
+    path: packages/xterm
   window_manager: ^0.4.3
   file_picker: ^9.2.1
   path: ^1.9.1
