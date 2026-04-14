@@ -460,6 +460,7 @@ class _FourPaneLayoutState extends State<_FourPaneLayout> {
                       child: Focus(
                         focusNode: widget.terminalFocusNode,
                         child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
                             Expanded(
                               child: PanelShell(
@@ -499,6 +500,7 @@ class _FourPaneLayoutState extends State<_FourPaneLayout> {
                     SizedBox(
                       width: _editorWidth,
                       child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
                           Expanded(
                             child: PanelShell(
@@ -521,6 +523,7 @@ class _FourPaneLayoutState extends State<_FourPaneLayout> {
                   else
                     Expanded(
                       child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
                           Expanded(
                             child: PanelShell(
@@ -573,6 +576,7 @@ class _FourPaneLayoutState extends State<_FourPaneLayout> {
                         ? SizedBox(
                             width: _reviewWidth,
                             child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
                               children: [
                                 Expanded(
                                   child: PanelShell(
