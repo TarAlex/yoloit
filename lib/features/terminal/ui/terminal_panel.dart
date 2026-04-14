@@ -479,7 +479,9 @@ class _TerminalWidget extends StatefulWidget {
 }
 
 class _TerminalWidgetState extends State<_TerminalWidget> {
-  final _controller = TerminalController();
+  final _controller = TerminalController(
+    pointerInputs: const PointerInputs.none(),
+  );
   final _focusNode = FocusNode();
   final _terminalViewKey = GlobalKey<TerminalViewState>();
   Timer? _focusRetryTimer;
@@ -498,6 +500,13 @@ class _TerminalWidgetState extends State<_TerminalWidget> {
   final _activePointers = <int, Offset>{};
   double _pinchStartDistance = 0;
   double _pinchStartFontSize = 0;
+
+  // Search overlay state
+  bool _isSearching = false;
+  final _searchController = TextEditingController();
+  final _searchFocusNode = FocusNode();
+  List<CellOffset> _searchHits = [];
+  int _currentHitIndex = -1;
 
   @override
   void initState() {
@@ -647,6 +656,12 @@ class _TerminalWidgetState extends State<_TerminalWidget> {
       return true;
     }
 
+    // Cmd+F → open search
+    if (isCmd && key == LogicalKeyboardKey.keyF) {
+      _openSearch();
+      return true;
+    }
+
     // Cmd+= → increase font size
     if (isCmd && !isCtrl && !isAlt && key == LogicalKeyboardKey.equal) {
       setState(() => _fontSize = (_fontSize + 1).clamp(8.0, 32.0));
@@ -764,6 +779,16 @@ class _TerminalWidgetState extends State<_TerminalWidget> {
           ]),
         ),
       ],
+      const PopupMenuDivider(height: 1),
+      const PopupMenuItem(
+        value: _TermCtxAction.search,
+        height: 36,
+        child: Row(children: [
+          Icon(Icons.search, size: 14, color: AppColors.textSecondary),
+          SizedBox(width: 8),
+          Text('Find', style: TextStyle(fontSize: 13, color: AppColors.textPrimary)),
+        ]),
+      ),
     ];
 
     final action = await showMenu<_TermCtxAction>(
@@ -792,6 +817,8 @@ class _TerminalWidgetState extends State<_TerminalWidget> {
         await _pasteAsFileRef();
       case _TermCtxAction.clearSelection:
         _controller.clearSelection();
+      case _TermCtxAction.search:
+        _openSearch();
       case null:
         break;
     }
@@ -805,7 +832,112 @@ class _TerminalWidgetState extends State<_TerminalWidget> {
     widget.session.terminal.onResize = null;
     _controller.dispose();
     _focusNode.dispose();
+    _searchController.dispose();
+    _searchFocusNode.dispose();
     super.dispose();
+  }
+
+  void _openSearch() {
+    setState(() {
+      _isSearching = true;
+      _searchHits = [];
+      _currentHitIndex = -1;
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _searchFocusNode.requestFocus();
+    });
+  }
+
+  void _closeSearch() {
+    setState(() {
+      _isSearching = false;
+      _searchHits = [];
+      _currentHitIndex = -1;
+      _searchController.clear();
+    });
+    _controller.clearSelection();
+    _focusNode.requestFocus();
+  }
+
+  void _performSearch(String query) {
+    if (query.isEmpty) {
+      setState(() {
+        _searchHits = [];
+        _currentHitIndex = -1;
+      });
+      _controller.clearSelection();
+      return;
+    }
+
+    final terminal = widget.session.terminal;
+    final buffer = terminal.buffer;
+    final lowerQuery = query.toLowerCase();
+    final hits = <CellOffset>[];
+
+    for (int row = 0; row < buffer.lines.length; row++) {
+      final line = buffer.lines[row];
+      final text = line.getText().toLowerCase();
+      int idx = 0;
+      while (true) {
+        idx = text.indexOf(lowerQuery, idx);
+        if (idx == -1) break;
+        hits.add(CellOffset(idx, row));
+        idx += 1;
+      }
+    }
+
+    setState(() {
+      _searchHits = hits;
+      _currentHitIndex = hits.isNotEmpty ? 0 : -1;
+    });
+
+    if (hits.isNotEmpty) {
+      _highlightHit(0);
+    } else {
+      _controller.clearSelection();
+    }
+  }
+
+  void _highlightHit(int index) {
+    if (_searchHits.isEmpty || index < 0 || index >= _searchHits.length) return;
+    final hit = _searchHits[index];
+    final queryLen = _searchController.text.length;
+    final state = _terminalViewKey.currentState;
+    if (state == null) return;
+
+    final terminal = widget.session.terminal;
+    final buffer = terminal.buffer;
+    final rt = state.renderTerminal;
+
+    // Convert buffer row to visible row
+    final visRow = hit.y - buffer.scrollBack;
+    if (visRow < 0 || visRow >= terminal.viewHeight) {
+      // Hit is in scrollback — not visible, just update counter
+      return;
+    }
+
+    final cellW = (_terminalSize.width - 16) / terminal.viewWidth;
+    final cellH = (_terminalSize.height - 16) / terminal.viewHeight;
+    final startOffset = Offset(hit.x * cellW + 8, visRow * cellH + cellH / 2 + 8);
+    final endOffset = Offset((hit.x + queryLen) * cellW + 8, visRow * cellH + cellH / 2 + 8);
+    rt.selectCharacters(startOffset, endOffset);
+  }
+
+  void _nextHit() {
+    if (_searchHits.isEmpty) return;
+    setState(() {
+      _currentHitIndex = (_currentHitIndex + 1) % _searchHits.length;
+    });
+    _highlightHit(_currentHitIndex);
+  }
+
+  void _prevHit() {
+    if (_searchHits.isEmpty) return;
+    setState(() {
+      _currentHitIndex =
+          (_currentHitIndex - 1 + _searchHits.length) % _searchHits.length;
+    });
+    _highlightHit(_currentHitIndex);
   }
 
   @override
@@ -814,7 +946,9 @@ class _TerminalWidgetState extends State<_TerminalWidget> {
     return LayoutBuilder(
       builder: (context, constraints) {
         _terminalSize = Size(constraints.maxWidth, constraints.maxHeight);
-        return Listener(
+        return Stack(
+          children: [
+            Listener(
           behavior: HitTestBehavior.opaque,
           onPointerDown: (event) {
             if (!_focusNode.hasFocus) _focusNode.requestFocus();
@@ -923,8 +1057,104 @@ class _TerminalWidgetState extends State<_TerminalWidget> {
               padding: const EdgeInsets.all(8),
             ),
           ),
+        ),
+            // Search overlay
+            if (_isSearching)
+              Positioned(
+                top: 8,
+                right: 8,
+                child: _buildSearchBar(colors),
+              ),
+          ],
         );
       },
+    );
+  }
+
+  Widget _buildSearchBar(dynamic colors) {
+    final hitCount = _searchHits.length;
+    final hitLabel = hitCount == 0
+        ? 'No results'
+        : '${_currentHitIndex + 1} of $hitCount';
+
+    return Material(
+      color: Colors.transparent,
+      child: Container(
+        width: 320,
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+        decoration: BoxDecoration(
+          color: const Color(0xFF1A1A2E),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: AppColors.textMuted.withAlpha(80)),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withAlpha(80),
+              blurRadius: 8,
+              offset: const Offset(0, 2),
+            ),
+          ],
+        ),
+        child: Row(
+          children: [
+            Expanded(
+              child: KeyboardListener(
+                focusNode: FocusNode(skipTraversal: true),
+                onKeyEvent: (event) {
+                  if (event is KeyDownEvent &&
+                      event.logicalKey == LogicalKeyboardKey.escape) {
+                    _closeSearch();
+                  }
+                },
+                child: TextField(
+                controller: _searchController,
+                focusNode: _searchFocusNode,
+                style: const TextStyle(
+                  fontSize: 13,
+                  color: AppColors.textPrimary,
+                ),
+                decoration: InputDecoration(
+                  hintText: 'Find in terminal…',
+                  hintStyle: TextStyle(
+                    fontSize: 13,
+                    color: AppColors.textMuted,
+                  ),
+                  isDense: true,
+                  contentPadding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                  border: InputBorder.none,
+                ),
+                onChanged: _performSearch,
+                onSubmitted: (_) => _nextHit(),
+              ),
+              ),
+            ),
+            if (_searchController.text.isNotEmpty) ...[
+              Text(
+                hitLabel,
+                style: TextStyle(
+                  fontSize: 11,
+                  color: AppColors.textMuted,
+                ),
+              ),
+              const SizedBox(width: 4),
+              _searchIconBtn(Icons.keyboard_arrow_up, _prevHit),
+              _searchIconBtn(Icons.keyboard_arrow_down, _nextHit),
+            ],
+            _searchIconBtn(Icons.close, _closeSearch),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _searchIconBtn(IconData icon, VoidCallback onTap) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(4),
+      child: Padding(
+        padding: const EdgeInsets.all(4),
+        child: Icon(icon, size: 16, color: AppColors.textSecondary),
+      ),
     );
   }
 }
@@ -1389,4 +1619,4 @@ class _WorkspaceColorPickerDialogState
   }
 }
 
-enum _TermCtxAction { copy, paste, clearSelection }
+enum _TermCtxAction { copy, paste, clearSelection, search }

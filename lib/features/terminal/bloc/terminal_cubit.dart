@@ -27,6 +27,9 @@ class TerminalCubit extends Cubit<TerminalState> {
   final List<AgentSession> _allSessions = [];
   String? _activeWorkspaceId;
 
+  /// Remembers the active tab index per workspace so switching back restores it.
+  final Map<String, int> _activeIndexPerWorkspace = {};
+
   List<AgentSession> get _workspaceSessions =>
       _allSessions.where((s) => s.workspaceId == _activeWorkspaceId).toList();
 
@@ -54,12 +57,21 @@ class TerminalCubit extends Cubit<TerminalState> {
     required String workspaceId,
     required String workspacePath,
   }) async {
+    // Save current workspace's active index before switching
+    final prevWsId = _activeWorkspaceId;
+    final prevState = _loaded;
+    if (prevWsId != null && prevState != null) {
+      _activeIndexPerWorkspace[prevWsId] = prevState.activeIndex;
+    }
+
     _activeWorkspaceId = workspaceId;
 
     // Show workspace sessions that are already running in memory.
     final running = _workspaceSessions;
     if (running.isNotEmpty) {
-      _emitLoaded(running, 0);
+      final savedIdx = (_activeIndexPerWorkspace[workspaceId] ?? 0)
+          .clamp(0, running.length - 1);
+      _emitLoaded(running, savedIdx);
       return;
     }
 
@@ -170,6 +182,9 @@ class TerminalCubit extends Cubit<TerminalState> {
     if (current == null) return;
     if (index < 0 || index >= current.sessions.length) return;
     emit(current.copyWith(activeIndex: index, allSessions: List.unmodifiable(_allSessions)));
+    if (_activeWorkspaceId != null) {
+      _activeIndexPerWorkspace[_activeWorkspaceId!] = index;
+    }
     unawaited(SessionPrefs.saveActiveTerminalIdx(index));
   }
 
