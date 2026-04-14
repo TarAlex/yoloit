@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
@@ -480,10 +481,17 @@ class _TerminalWidget extends StatefulWidget {
 class _TerminalWidgetState extends State<_TerminalWidget> {
   final _controller = TerminalController();
   final _focusNode = FocusNode();
+  final _terminalViewKey = GlobalKey<TerminalViewState>();
   Timer? _focusRetryTimer;
   double _fontSize = 13.0;
   Size _terminalSize = Size.zero;
   Offset? _clickDownPosition;
+
+  // Manual drag-to-select: xterm 4.x's PanGestureRecognizer fails to win the
+  // gesture arena in our widget tree, so we implement selection directly via
+  // raw Listener pointer events — these always fire regardless of arena.
+  bool _isDragSelecting = false;
+  Offset? _dragStartGlobal;
 
   // Pinch-to-zoom tracked via raw pointer events (avoids gesture arena
   // conflict with xterm's internal pan recogniser used for text selection).
@@ -716,6 +724,79 @@ class _TerminalWidgetState extends State<_TerminalWidget> {
     PtyService.instance.write(widget.session.id, path);
   }
 
+  // ── Selection helpers ───────────────────────────────────────────────
+
+
+  /// Shows a right-click context menu with Copy (if selection) and Paste.
+  Future<void> _showTerminalContextMenu(BuildContext context, Offset globalPos) async {
+    final selection = _controller.selection;
+    final hasSelection = selection != null;
+
+    final items = <PopupMenuEntry<_TermCtxAction>>[
+      if (hasSelection)
+        const PopupMenuItem(
+          value: _TermCtxAction.copy,
+          height: 36,
+          child: Row(children: [
+            Icon(Icons.copy, size: 14, color: AppColors.textSecondary),
+            SizedBox(width: 8),
+            Text('Copy', style: TextStyle(fontSize: 13, color: AppColors.textPrimary)),
+          ]),
+        ),
+      const PopupMenuItem(
+        value: _TermCtxAction.paste,
+        height: 36,
+        child: Row(children: [
+          Icon(Icons.content_paste, size: 14, color: AppColors.textSecondary),
+          SizedBox(width: 8),
+          Text('Paste', style: TextStyle(fontSize: 13, color: AppColors.textPrimary)),
+        ]),
+      ),
+      if (hasSelection) ...[
+        const PopupMenuDivider(height: 1),
+        const PopupMenuItem(
+          value: _TermCtxAction.clearSelection,
+          height: 36,
+          child: Row(children: [
+            Icon(Icons.clear, size: 14, color: AppColors.textSecondary),
+            SizedBox(width: 8),
+            Text('Clear selection', style: TextStyle(fontSize: 13, color: AppColors.textPrimary)),
+          ]),
+        ),
+      ],
+    ];
+
+    final action = await showMenu<_TermCtxAction>(
+      context: context,
+      position: RelativeRect.fromLTRB(
+        globalPos.dx, globalPos.dy, globalPos.dx + 1, globalPos.dy + 1,
+      ),
+      items: items,
+      color: const Color(0xFF1A1A2E),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(8),
+        side: BorderSide(color: AppColors.textMuted.withAlpha(60)),
+      ),
+    );
+
+    if (!mounted) return;
+
+    switch (action) {
+      case _TermCtxAction.copy:
+        if (selection != null) {
+          final text = widget.session.terminal.buffer.getText(selection);
+          _controller.clearSelection();
+          await Clipboard.setData(ClipboardData(text: text));
+        }
+      case _TermCtxAction.paste:
+        await _pasteAsFileRef();
+      case _TermCtxAction.clearSelection:
+        _controller.clearSelection();
+      case null:
+        break;
+    }
+  }
+
   @override
   void dispose() {
     _focusRetryTimer?.cancel();
@@ -737,7 +818,15 @@ class _TerminalWidgetState extends State<_TerminalWidget> {
           behavior: HitTestBehavior.opaque,
           onPointerDown: (event) {
             if (!_focusNode.hasFocus) _focusNode.requestFocus();
+            // Right-click → context menu
+            if (event.buttons == kSecondaryMouseButton) {
+              _showTerminalContextMenu(context, event.position);
+              return;
+            }
+            if (event.buttons != kPrimaryButton) return;
             _clickDownPosition = event.localPosition;
+            _dragStartGlobal = event.position;
+            _isDragSelecting = false;
             _activePointers[event.pointer] = event.localPosition;
             if (_activePointers.length == 2) {
               final positions = _activePointers.values.toList();
@@ -754,24 +843,53 @@ class _TerminalWidgetState extends State<_TerminalWidget> {
                   .clamp(8.0, 48.0);
               setState(() => _fontSize = newSize);
               SessionPrefs.saveTerminalFontSize(newSize);
+              return;
             }
+            // Drag-to-select: bypass xterm's gesture arena entirely.
+            final startGlobal = _dragStartGlobal;
+            if (startGlobal == null || _activePointers.length != 1) return;
+            final dist = (event.position - startGlobal).distance;
+            if (dist < 4.0) return;
+            final state = _terminalViewKey.currentState;
+            if (state == null) return;
+            final rt = state.renderTerminal;
+            if (!_isDragSelecting) {
+              _isDragSelecting = true;
+              _controller.clearSelection();
+            }
+            final localStart = rt.globalToLocal(startGlobal);
+            final localCurrent = rt.globalToLocal(event.position);
+            rt.selectCharacters(localStart, localCurrent);
           },
           onPointerUp: (event) {
             _activePointers.remove(event.pointer);
+            final wasDragging = _isDragSelecting;
+            _isDragSelecting = false;
+            _dragStartGlobal = null;
             final down = _clickDownPosition;
             _clickDownPosition = null;
+            if (wasDragging) {
+              return; // keep selection
+            }
             if (down == null) return;
-            // Only treat as a click if pointer didn't move much (no drag/selection)
             if ((event.localPosition - down).distance > 6.0) return;
+            // Single tap clears any existing selection
+            if (_controller.selection != null) {
+              _controller.clearSelection();
+              return;
+            }
             _handleTerminalClick(event.localPosition);
           },
           onPointerCancel: (event) {
             _activePointers.remove(event.pointer);
+            _isDragSelecting = false;
+            _dragStartGlobal = null;
           },
           child: MouseRegion(
             cursor: SystemMouseCursors.text,
             child: TerminalView(
               widget.session.terminal,
+              key: _terminalViewKey,
               controller: _controller,
               focusNode: _focusNode,
               autofocus: widget.isActive,
@@ -1270,3 +1388,5 @@ class _WorkspaceColorPickerDialogState
     );
   }
 }
+
+enum _TermCtxAction { copy, paste, clearSelection }
