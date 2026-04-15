@@ -2,7 +2,9 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:flutter_code_editor/flutter_code_editor.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:yoloit/core/theme/app_theme.dart';
 import 'package:yoloit/features/editor/bloc/file_editor_cubit.dart';
 import 'package:yoloit/features/editor/bloc/file_editor_state.dart';
@@ -26,32 +28,49 @@ FileEditorState _dartTab({
   String name = 'main.dart',
   String content = 'class Foo {}',
   bool isVisible = true,
-}) =>
-    FileEditorState(
-      isVisible: isVisible,
-      activeIndex: 0,
-      tabs: [EditorTab(filePath: '/workspace/$name', content: content, originalContent: content)],
-    );
+}) => FileEditorState(
+  isVisible: isVisible,
+  activeIndex: 0,
+  tabs: [
+    EditorTab(
+      filePath: '/workspace/$name',
+      content: content,
+      originalContent: content,
+    ),
+  ],
+);
 
 /// A state with two open tabs.
-FileEditorState _twoTabs() => FileEditorState(
-      isVisible: true,
-      activeIndex: 1,
-      tabs: [
-        const EditorTab(filePath: '/ws/a.dart', content: 'class A {}', originalContent: 'class A {}'),
-        const EditorTab(filePath: '/ws/b.dart', content: 'class B {}', originalContent: 'class B {}'),
-      ],
-    );
+FileEditorState _twoTabs() => const FileEditorState(
+  isVisible: true,
+  activeIndex: 1,
+  tabs: [
+    EditorTab(
+      filePath: '/ws/a.dart',
+      content: 'class A {}',
+      originalContent: 'class A {}',
+    ),
+    EditorTab(
+      filePath: '/ws/b.dart',
+      content: 'class B {}',
+      originalContent: 'class B {}',
+    ),
+  ],
+);
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
+  setUp(() => SharedPreferences.setMockInitialValues({}));
+
   // ── Hidden state ────────────────────────────────────────────────────────────
   group('FileEditorPanel — hidden state', () {
     testWidgets('renders panel widget when invisible', (tester) async {
-      await tester.pumpWidget(_buildEditor(const FileEditorState(isVisible: false)));
+      await tester.pumpWidget(
+        _buildEditor(const FileEditorState(isVisible: false)),
+      );
       await tester.pump();
       expect(find.byType(FileEditorPanel), findsOneWidget);
     });
@@ -119,9 +138,15 @@ void main() {
     });
 
     testWidgets('dirty tab still shows file name', (tester) async {
-      final state = FileEditorState(
+      const state = FileEditorState(
         isVisible: true,
-        tabs: [const EditorTab(filePath: '/ws/dirty.dart', content: 'new', originalContent: 'old')],
+        tabs: [
+          EditorTab(
+            filePath: '/ws/dirty.dart',
+            content: 'new',
+            originalContent: 'old',
+          ),
+        ],
       );
       await tester.pumpWidget(_buildEditor(state));
       await tester.pump();
@@ -226,8 +251,12 @@ void main() {
       expect(find.text('Outline'), findsNothing);
     });
 
-    testWidgets('Outline panel appears after tapping outline toggle', (tester) async {
-      await tester.pumpWidget(_buildEditor(_dartTab(content: 'class MyWidget {}')));
+    testWidgets('Outline panel appears after tapping outline toggle', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        _buildEditor(_dartTab(content: 'class MyWidget {}')),
+      );
       await tester.pump();
 
       await tester.tap(find.byIcon(Icons.account_tree_outlined));
@@ -237,7 +266,9 @@ void main() {
     });
 
     testWidgets('Outline shows parsed class name', (tester) async {
-      await tester.pumpWidget(_buildEditor(_dartTab(content: 'class FancyWidget {}')));
+      await tester.pumpWidget(
+        _buildEditor(_dartTab(content: 'class FancyWidget {}')),
+      );
       await tester.pump();
 
       await tester.tap(find.byIcon(Icons.account_tree_outlined));
@@ -319,9 +350,9 @@ void main() {
   // ── Loading / error states ────────────────────────────────────────────────
   group('FileEditorPanel — loading and error states', () {
     testWidgets('loading indicator shown while tab is loading', (tester) async {
-      final state = FileEditorState(
+      const state = FileEditorState(
         isVisible: true,
-        tabs: [const EditorTab(filePath: '/ws/loading.dart', isLoading: true)],
+        tabs: [EditorTab(filePath: '/ws/loading.dart', isLoading: true)],
       );
       await tester.pumpWidget(_buildEditor(state));
       await tester.pump();
@@ -329,14 +360,91 @@ void main() {
     });
 
     testWidgets('error message shown when tab has error', (tester) async {
-      final state = FileEditorState(
+      const state = FileEditorState(
         isVisible: true,
-        tabs: [const EditorTab(filePath: '/ws/bad.dart', error: 'Cannot read file')],
+        tabs: [EditorTab(filePath: '/ws/bad.dart', error: 'Cannot read file')],
       );
       await tester.pumpWidget(_buildEditor(state));
       await tester.pump();
       expect(find.textContaining('Cannot read file'), findsAtLeastNWidgets(1));
     });
+
+    testWidgets('does not build a CodeField while content is still loading', (
+      tester,
+    ) async {
+      final cubit = FileEditorCubit()
+        ..emit(
+          const FileEditorState(
+            isVisible: true,
+            tabs: [EditorTab(filePath: '/ws/loading.dart', isLoading: true)],
+          ),
+        );
+      addTearDown(cubit.close);
+
+      await tester.pumpWidget(
+        BlocProvider<FileEditorCubit>.value(
+          value: cubit,
+          child: MaterialApp(
+            theme: AppThemePreset.neonPurple.theme,
+            home: const Scaffold(body: FileEditorPanel()),
+          ),
+        ),
+      );
+      await tester.pump();
+
+      expect(find.byType(CircularProgressIndicator), findsAtLeastNWidgets(1));
+      expect(find.byType(CodeField), findsNothing);
+    });
+
+    testWidgets(
+      'creates the CodeField with hydrated content after loading finishes',
+      (tester) async {
+        final cubit = FileEditorCubit()
+          ..emit(
+            const FileEditorState(
+              isVisible: true,
+              tabs: [
+                EditorTab(
+                  filePath: '/ws/analysis_options.yaml',
+                  isLoading: true,
+                ),
+              ],
+            ),
+          );
+        addTearDown(cubit.close);
+
+        await tester.pumpWidget(
+          BlocProvider<FileEditorCubit>.value(
+            value: cubit,
+            child: MaterialApp(
+              theme: AppThemePreset.neonPurple.theme,
+              home: const Scaffold(body: FileEditorPanel()),
+            ),
+          ),
+        );
+        await tester.pump();
+        await tester.pump();
+
+        cubit.emit(
+          const FileEditorState(
+            isVisible: true,
+            tabs: [
+              EditorTab(
+                filePath: '/ws/analysis_options.yaml',
+                content: 'include: package:flutter_lints/flutter.yaml',
+                originalContent: 'include: package:flutter_lints/flutter.yaml',
+              ),
+            ],
+          ),
+        );
+        await tester.pump();
+
+        final codeField = tester.widget<CodeField>(find.byType(CodeField));
+        expect(
+          codeField.controller.text,
+          'include: package:flutter_lints/flutter.yaml',
+        );
+      },
+    );
   });
 }
-

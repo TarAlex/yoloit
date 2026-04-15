@@ -27,7 +27,9 @@ class FileEditorCubit extends Cubit<FileEditorState> {
   /// restores the previously open files for [workspaceId].
   Future<void> setWorkspace(String workspaceId) async {
     _workspaceId = workspaceId;
-    for (final t in _saveTimers.values) t.cancel();
+    for (final t in _saveTimers.values) {
+      t.cancel();
+    }
     _saveTimers.clear();
 
     final saved = await SessionPrefs.loadEditorTabs(workspaceId);
@@ -38,34 +40,51 @@ class FileEditorCubit extends Cubit<FileEditorState> {
     }
 
     // Show placeholders while loading.
-    final placeholders = paths.map((path) => EditorTab(filePath: path, isLoading: true)).toList();
+    final placeholders = paths
+        .map((path) => EditorTab(filePath: path, isLoading: true))
+        .toList();
     final activeIndex = saved.activeIndex.clamp(0, placeholders.length - 1);
-    emit(FileEditorState(tabs: placeholders, activeIndex: activeIndex, isVisible: true));
-
-    // Load all files in parallel.
-    final loadedTabs = await Future.wait(paths.map((path) async {
-      if (_isImagePath(path)) return EditorTab(filePath: path);
-      try {
-        final content = await File(path).readAsString();
-        return EditorTab(filePath: path, content: content, originalContent: content);
-      } catch (e) {
-        return EditorTab(filePath: path, error: 'Cannot read file: $e');
-      }
-    }));
-
-    if (!isClosed) {
-      emit(FileEditorState(
-        tabs: loadedTabs,
+    emit(
+      FileEditorState(
+        tabs: placeholders,
         activeIndex: activeIndex,
         isVisible: true,
-      ));
+      ),
+    );
+
+    // Load all files in parallel.
+    final loadedTabs = await Future.wait(
+      paths.map((path) async {
+        if (_isImagePath(path)) return EditorTab(filePath: path);
+        try {
+          final content = await File(path).readAsString();
+          return EditorTab(
+            filePath: path,
+            content: content,
+            originalContent: content,
+          );
+        } catch (e) {
+          return EditorTab(filePath: path, error: 'Cannot read file: $e');
+        }
+      }),
+    );
+
+    if (!isClosed) {
+      emit(
+        FileEditorState(
+          tabs: loadedTabs,
+          activeIndex: activeIndex,
+          isVisible: true,
+        ),
+      );
     }
   }
 
   /// Opens [absolutePath] in a new tab; switches to it if already open.
   Future<void> openFile(String absolutePath) async {
-    final existingIndex =
-        state.tabs.indexWhere((t) => t.filePath == absolutePath);
+    final existingIndex = state.tabs.indexWhere(
+      (t) => t.filePath == absolutePath,
+    );
     if (existingIndex != -1) {
       emit(state.copyWith(activeIndex: existingIndex, isVisible: true));
       _saveTabsToPrefs();
@@ -75,7 +94,13 @@ class FileEditorCubit extends Cubit<FileEditorState> {
     // Image files don't need content loaded — handled as visual preview.
     if (_isImagePath(absolutePath)) {
       final newTabs = [...state.tabs, EditorTab(filePath: absolutePath)];
-      emit(state.copyWith(tabs: newTabs, activeIndex: newTabs.length - 1, isVisible: true));
+      emit(
+        state.copyWith(
+          tabs: newTabs,
+          activeIndex: newTabs.length - 1,
+          isVisible: true,
+        ),
+      );
       _saveTabsToPrefs();
       return;
     }
@@ -108,7 +133,7 @@ class FileEditorCubit extends Cubit<FileEditorState> {
   /// schedules a debounced auto-save (800 ms after last change).
   void updateContent(String content) {
     final tab = state.activeTab;
-    if (tab == null) return;
+    if (tab == null || tab.isLoading || tab.error != null) return;
     _updateTab(tab.filePath, (t) => t.copyWith(content: content));
     _scheduleAutoSave(tab.filePath, content);
   }
@@ -160,7 +185,10 @@ class FileEditorCubit extends Cubit<FileEditorState> {
     try {
       final onDisk = await File(tab.filePath).readAsString();
       if (onDisk != tab.content) {
-        _updateTab(tab.filePath, (t) => t.copyWith(content: onDisk, originalContent: onDisk));
+        _updateTab(
+          tab.filePath,
+          (t) => t.copyWith(content: onDisk, originalContent: onDisk),
+        );
       }
     } catch (_) {
       // File deleted or unreadable — ignore silently.
@@ -176,9 +204,19 @@ class FileEditorCubit extends Cubit<FileEditorState> {
       return;
     }
 
-    final placeholder = EditorTab(filePath: tabPath, isLoading: true, workspacePath: workspacePath);
+    final placeholder = EditorTab(
+      filePath: tabPath,
+      isLoading: true,
+      workspacePath: workspacePath,
+    );
     final newTabs = [...state.tabs, placeholder];
-    emit(state.copyWith(tabs: newTabs, activeIndex: newTabs.length - 1, isVisible: true));
+    emit(
+      state.copyWith(
+        tabs: newTabs,
+        activeIndex: newTabs.length - 1,
+        isVisible: true,
+      ),
+    );
 
     try {
       final hunks = await DiffService.instance.getDiff(workspacePath, filePath);
@@ -212,7 +250,10 @@ class FileEditorCubit extends Cubit<FileEditorState> {
         );
       }
     } catch (e) {
-      _updateTab(tabPath, (t) => t.copyWith(isLoading: false, error: 'Cannot load diff: $e'));
+      _updateTab(
+        tabPath,
+        (t) => t.copyWith(isLoading: false, error: 'Cannot load diff: $e'),
+      );
     }
   }
 
@@ -228,15 +269,14 @@ class FileEditorCubit extends Cubit<FileEditorState> {
 
   Future<void> _writeToDisk(String filePath, String content) async {
     try {
-      // Safety guard: never overwrite a file with empty content unless the
-      // file was already empty. Guards against: editor firing onChange("") during
-      // initialization before originalContent has been set (still loading).
-      if (content.isEmpty) {
-        final tab = state.tabs.firstWhere((t) => t.filePath == filePath,
-            orElse: () => EditorTab(filePath: filePath));
-        // originalContent == null  → file still loading, abort
-        // originalContent.isNotEmpty → file had content, abort
-        if (tab.originalContent == null || tab.originalContent!.isNotEmpty) return;
+      final tabIndex = state.tabs.indexWhere((t) => t.filePath == filePath);
+      if (tabIndex == -1) return;
+      final tab = state.tabs[tabIndex];
+      // Never write before the initial on-disk content has been hydrated into
+      // state. This blocks phantom "" writes during restore/open while still
+      // allowing users to intentionally clear a loaded file to empty content.
+      if (tab.isLoading || tab.error != null || tab.originalContent == null) {
+        return;
       }
       await File(filePath).writeAsString(content);
       _updateTab(filePath, (t) => t.copyWith(originalContent: content));
@@ -255,7 +295,15 @@ class FileEditorCubit extends Cubit<FileEditorState> {
 
   static bool _isImagePath(String path) {
     final ext = path.split('.').last.toLowerCase();
-    return const {'png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'ico'}.contains(ext);
+    return const {
+      'png',
+      'jpg',
+      'jpeg',
+      'gif',
+      'webp',
+      'bmp',
+      'ico',
+    }.contains(ext);
   }
 
   void _saveTabsToPrefs() {
@@ -265,7 +313,10 @@ class FileEditorCubit extends Cubit<FileEditorState> {
         .where((t) => !t.isDiff)
         .map((t) => t.filePath)
         .toList();
-    final active = state.activeIndex.clamp(0, paths.isEmpty ? 0 : paths.length - 1);
+    final active = state.activeIndex.clamp(
+      0,
+      paths.isEmpty ? 0 : paths.length - 1,
+    );
     SessionPrefs.saveEditorTabs(id, paths, active);
   }
 }

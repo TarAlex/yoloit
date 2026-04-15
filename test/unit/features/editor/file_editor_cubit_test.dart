@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:bloc_test/bloc_test.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:yoloit/features/editor/bloc/file_editor_cubit.dart';
 import 'package:yoloit/features/editor/bloc/file_editor_state.dart';
 
@@ -11,6 +12,7 @@ void main() {
   late Directory tmpDir;
 
   setUp(() async {
+    SharedPreferences.setMockInitialValues({});
     tmpDir = await Directory.systemTemp.createTemp('editor_test_');
   });
 
@@ -20,7 +22,7 @@ void main() {
 
   // ── Helpers ─────────────────────────────────────────────────────────────────
 
-  Future<File> _write(String name, String content) async {
+  Future<File> writeFile(String name, String content) async {
     final f = File('${tmpDir.path}/$name');
     await f.writeAsString(content);
     return f;
@@ -37,13 +39,71 @@ void main() {
     });
   });
 
+  // ── setWorkspace ────────────────────────────────────────────────────────────
+  group('setWorkspace', () {
+    test(
+      'restores saved tabs, emits placeholders first, and keeps active index',
+      () async {
+        final a = await writeFile('a.dart', 'class A {}');
+        final b = await writeFile('b.dart', 'class B {}');
+        SharedPreferences.setMockInitialValues({
+          'editor.tabs.ws-1': [a.path, b.path],
+          'editor.active.ws-1': 1,
+        });
+
+        final cubit = FileEditorCubit();
+        final emitted = <FileEditorState>[];
+        final sub = cubit.stream.listen(emitted.add);
+        addTearDown(() async {
+          await sub.cancel();
+          await cubit.close();
+        });
+
+        await cubit.setWorkspace('ws-1');
+        await Future<void>.delayed(Duration.zero);
+
+        expect(emitted, isNotEmpty);
+        expect(emitted.first.isVisible, true);
+        expect(emitted.first.activeIndex, 1);
+        expect(emitted.first.tabs, hasLength(2));
+        expect(emitted.first.tabs.every((tab) => tab.isLoading), true);
+
+        expect(cubit.state.isVisible, true);
+        expect(cubit.state.activeIndex, 1);
+        expect(cubit.state.tabs, hasLength(2));
+        expect(cubit.state.tabs[0].content, 'class A {}');
+        expect(cubit.state.tabs[1].content, 'class B {}');
+        expect(cubit.state.tabs.every((tab) => !tab.isLoading), true);
+      },
+    );
+
+    test(
+      'filters out missing files and hides panel when nothing can be restored',
+      () async {
+        SharedPreferences.setMockInitialValues({
+          'editor.tabs.ws-2': ['/missing/a.dart', '/missing/b.dart'],
+          'editor.active.ws-2': 1,
+        });
+
+        final cubit = FileEditorCubit();
+        addTearDown(cubit.close);
+
+        await cubit.setWorkspace('ws-2');
+
+        expect(cubit.state.tabs, isEmpty);
+        expect(cubit.state.activeIndex, 0);
+        expect(cubit.state.isVisible, false);
+      },
+    );
+  });
+
   // ── openFile ────────────────────────────────────────────────────────────────
   group('openFile', () {
     blocTest<FileEditorCubit, FileEditorState>(
       'loads file content and shows panel',
       build: () => FileEditorCubit(),
       act: (cubit) async {
-        final file = await _write('hello.dart', 'void main() {}');
+        final file = await writeFile('hello.dart', 'void main() {}');
         await cubit.openFile(file.path);
       },
       verify: (cubit) {
@@ -60,7 +120,7 @@ void main() {
       'switches to existing tab without duplicating',
       build: () => FileEditorCubit(),
       act: (cubit) async {
-        final file = await _write('a.dart', 'a');
+        final file = await writeFile('a.dart', 'a');
         await cubit.openFile(file.path);
         await cubit.openFile(file.path); // second open
       },
@@ -74,8 +134,8 @@ void main() {
       'opens multiple files as separate tabs',
       build: () => FileEditorCubit(),
       act: (cubit) async {
-        final a = await _write('a.dart', 'A');
-        final b = await _write('b.dart', 'B');
+        final a = await writeFile('a.dart', 'A');
+        final b = await writeFile('b.dart', 'B');
         await cubit.openFile(a.path);
         await cubit.openFile(b.path);
       },
@@ -108,7 +168,7 @@ void main() {
       'updates content in active tab',
       build: () => FileEditorCubit(),
       act: (cubit) async {
-        final file = await _write('f.dart', 'original');
+        final file = await writeFile('f.dart', 'original');
         await cubit.openFile(file.path);
         cubit.updateContent('modified');
       },
@@ -129,7 +189,7 @@ void main() {
       'updateContent marks tab as dirty before auto-save fires',
       build: () => FileEditorCubit(),
       act: (cubit) async {
-        final file = await _write('f.dart', 'original');
+        final file = await writeFile('f.dart', 'original');
         await cubit.openFile(file.path);
         cubit.updateContent('auto-saved');
         // verify dirty immediately — auto-save hasn't fired yet
@@ -154,6 +214,42 @@ void main() {
       expect(diskContent, 'auto-saved-content');
       await cubit.close();
     });
+
+    test('ignores updates while the active tab is still loading', () async {
+      final file = await writeFile('loading.dart', 'original');
+      final cubit = FileEditorCubit()
+        ..emit(
+          FileEditorState(
+            isVisible: true,
+            tabs: [EditorTab(filePath: file.path, isLoading: true)],
+          ),
+        );
+      addTearDown(cubit.close);
+
+      cubit.updateContent('');
+      await Future<void>.delayed(const Duration(milliseconds: 1000));
+
+      expect(cubit.state.activeTab?.content, isNull);
+      expect(await file.readAsString(), 'original');
+    });
+
+    test(
+      'auto-save can intentionally clear a loaded file to empty content',
+      () async {
+        final file = await writeFile('clear-me.dart', 'original');
+        final cubit = FileEditorCubit();
+        addTearDown(cubit.close);
+
+        await cubit.openFile(file.path);
+        cubit.updateContent('');
+        await Future<void>.delayed(const Duration(milliseconds: 1000));
+
+        expect(await file.readAsString(), '');
+        expect(cubit.state.activeTab?.content, '');
+        expect(cubit.state.activeTab?.originalContent, '');
+        expect(cubit.state.activeTab?.isDirty, false);
+      },
+    );
   });
 
   // ── saveFile ─────────────────────────────────────────────────────────────────
@@ -162,7 +258,7 @@ void main() {
       'writes content to disk immediately',
       build: () => FileEditorCubit(),
       act: (cubit) async {
-        final file = await _write('save.dart', 'original');
+        final file = await writeFile('save.dart', 'original');
         await cubit.openFile(file.path);
         cubit.updateContent('updated');
         await cubit.saveFile();
@@ -179,6 +275,57 @@ void main() {
       await expectLater(cubit.saveFile(), completes);
       cubit.close();
     });
+
+    test('allows clearing a loaded file to empty content', () async {
+      final file = await writeFile('clear-on-save.dart', 'original');
+      final cubit = FileEditorCubit();
+      addTearDown(cubit.close);
+
+      await cubit.openFile(file.path);
+      cubit.updateContent('');
+      await cubit.saveFile();
+
+      expect(await file.readAsString(), '');
+      expect(cubit.state.activeTab?.originalContent, '');
+      expect(cubit.state.activeTab?.isDirty, false);
+    });
+  });
+
+  // ── reloadActiveIfUnchanged ─────────────────────────────────────────────────
+  group('reloadActiveIfUnchanged', () {
+    test(
+      'reloads the active file from disk when it has no local changes',
+      () async {
+        final file = await writeFile('reload.dart', 'before');
+        final cubit = FileEditorCubit();
+        addTearDown(cubit.close);
+
+        await cubit.openFile(file.path);
+        await file.writeAsString('after');
+
+        await cubit.reloadActiveIfUnchanged();
+
+        expect(cubit.state.activeTab?.content, 'after');
+        expect(cubit.state.activeTab?.originalContent, 'after');
+        expect(cubit.state.activeTab?.isDirty, false);
+      },
+    );
+
+    test('keeps local content when the active file is dirty', () async {
+      final file = await writeFile('dirty.dart', 'before');
+      final cubit = FileEditorCubit();
+      addTearDown(cubit.close);
+
+      await cubit.openFile(file.path);
+      cubit.updateContent('local change');
+      await file.writeAsString('external change');
+
+      await cubit.reloadActiveIfUnchanged();
+
+      expect(cubit.state.activeTab?.content, 'local change');
+      expect(cubit.state.activeTab?.originalContent, 'before');
+      expect(cubit.state.activeTab?.isDirty, true);
+    });
   });
 
   // ── closeTab ─────────────────────────────────────────────────────────────────
@@ -187,7 +334,7 @@ void main() {
       'removes tab and hides panel when last tab closed',
       build: () => FileEditorCubit(),
       act: (cubit) async {
-        final f = await _write('a.dart', 'a');
+        final f = await writeFile('a.dart', 'a');
         await cubit.openFile(f.path);
         cubit.closeTab(0);
       },
@@ -201,8 +348,8 @@ void main() {
       'closes tab at index and adjusts activeIndex',
       build: () => FileEditorCubit(),
       act: (cubit) async {
-        final a = await _write('a.dart', 'a');
-        final b = await _write('b.dart', 'b');
+        final a = await writeFile('a.dart', 'a');
+        final b = await writeFile('b.dart', 'b');
         await cubit.openFile(a.path);
         await cubit.openFile(b.path);
         cubit.closeTab(0); // close first
@@ -218,7 +365,7 @@ void main() {
       'out-of-bounds index is ignored',
       build: () => FileEditorCubit(),
       act: (cubit) async {
-        final f = await _write('a.dart', 'a');
+        final f = await writeFile('a.dart', 'a');
         await cubit.openFile(f.path);
         cubit.closeTab(99);
       },
@@ -234,8 +381,8 @@ void main() {
       'changes activeIndex',
       build: () => FileEditorCubit(),
       act: (cubit) async {
-        final a = await _write('a.dart', 'a');
-        final b = await _write('b.dart', 'b');
+        final a = await writeFile('a.dart', 'a');
+        final b = await writeFile('b.dart', 'b');
         await cubit.openFile(a.path);
         await cubit.openFile(b.path);
         cubit.switchTab(0);
@@ -250,7 +397,7 @@ void main() {
       'ignores invalid index',
       build: () => FileEditorCubit(),
       act: (cubit) async {
-        final f = await _write('a.dart', 'a');
+        final f = await writeFile('a.dart', 'a');
         await cubit.openFile(f.path);
         cubit.switchTab(-1);
         cubit.switchTab(99);
@@ -316,7 +463,12 @@ void main() {
         await cubit.openDiff('lib/main.dart', Directory.current.path);
       },
       verify: (cubit) {
-        expect(cubit.state.tabs.where((t) => t.filePath == 'diff:lib/main.dart').length, 1);
+        expect(
+          cubit.state.tabs
+              .where((t) => t.filePath == 'diff:lib/main.dart')
+              .length,
+          1,
+        );
       },
     );
   });
@@ -327,8 +479,8 @@ void main() {
       'closes active tab',
       build: () => FileEditorCubit(),
       act: (cubit) async {
-        final a = await _write('a.dart', 'a');
-        final b = await _write('b.dart', 'b');
+        final a = await writeFile('a.dart', 'a');
+        final b = await writeFile('b.dart', 'b');
         await cubit.openFile(a.path);
         await cubit.openFile(b.path);
         cubit.closeFile(); // closes b (active)

@@ -16,6 +16,7 @@ class RunService {
   final Map<String, Timer> _pollers = {};
   final Map<String, RandomAccessFile> _logFiles = {};
   final Map<String, String> _lineBuffers = {};
+  String? _tmuxPath;
 
   static String tmuxName(String configId) =>
       'yoloit_run_${configId.replaceAll(RegExp(r"[^a-zA-Z0-9]"), "_")}';
@@ -32,6 +33,25 @@ class RunService {
         Platform.environment['PATH'] ?? '/usr/bin:/bin',
       );
 
+  /// Resolves the full path to an executable by searching the enriched PATH.
+  /// Falls back to the bare name if not found (preserves existing behaviour on
+  /// Linux where tmux is already in the system PATH, and on Windows where tmux
+  /// is not used).
+  static Future<String> _findExecutable(String name) async {
+    final enrichedPath = _enrichedPath();
+    final sep = Platform.isWindows ? ';' : ':';
+    final ext = Platform.isWindows ? '.exe' : '';
+    for (final dir in enrichedPath.split(sep)) {
+      if (dir.isEmpty) continue;
+      final file = File('$dir${Platform.pathSeparator}$name$ext');
+      if (await file.exists()) return file.path;
+    }
+    return name;
+  }
+
+  /// Returns the cached tmux executable path, resolving it on first call.
+  Future<String> _tmux() async => _tmuxPath ??= await _findExecutable('tmux');
+
   Future<void> start({
     required String sessionId,
     required String configId,
@@ -45,8 +65,10 @@ class RunService {
     final log = await logPath(configId);
     _sessionTmux[sessionId] = name;
 
+    final tmux = await _tmux();
+
     await File(log).writeAsString("");
-    await Process.run("tmux", ["kill-session", "-t", name]);
+    await Process.run(tmux, ["kill-session", "-t", name]);
 
     final envStr = env.entries
         .map((e) => "export ${e.key}=\"${e.value}\"")
@@ -60,7 +82,7 @@ class RunService {
         "echo \"__YOLOIT_EXIT_\$?\" >> \"$log\"";
 
     final result = await Process.run(
-      "tmux",
+      tmux,
       ["new-session", "-d", "-s", name, "-x", "220", "-y", "50",
        "bash", "-c", bash],
       environment: {
@@ -88,7 +110,7 @@ class RunService {
     required ExitCallback onExit,
   }) async {
     final name = tmuxName(configId);
-    final check = await Process.run("tmux", ["has-session", "-t", name]);
+    final check = await Process.run(await _tmux(), ["has-session", "-t", name]);
     if (check.exitCode != 0) return false;
     _sessionTmux[sessionId] = name;
     final log = await logPath(configId);
@@ -161,7 +183,10 @@ class RunService {
 
   void stop(String sessionId) {
     final name = _sessionTmux[sessionId];
-    if (name != null) Process.run("tmux", ["kill-session", "-t", name]);
+    if (name != null) {
+      final tmux = _tmuxPath ?? 'tmux';
+      Process.run(tmux, ["kill-session", "-t", name]);
+    }
     _cleanup(sessionId);
   }
 
@@ -171,7 +196,10 @@ class RunService {
 
   void _sendKeys(String sessionId, String keys) {
     final name = _sessionTmux[sessionId];
-    if (name != null) Process.run("tmux", ["send-keys", "-t", name, keys]);
+    if (name != null) {
+      final tmux = _tmuxPath ?? 'tmux';
+      Process.run(tmux, ["send-keys", "-t", name, keys]);
+    }
   }
 
   bool isRunning(String sessionId) => _pollers.containsKey(sessionId);
