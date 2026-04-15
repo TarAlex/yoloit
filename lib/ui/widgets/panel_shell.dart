@@ -73,6 +73,7 @@ class _PanelHeader extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       height: 28,
+      width: double.infinity,
       decoration: BoxDecoration(
         color: colors.surface,
         border: Border(

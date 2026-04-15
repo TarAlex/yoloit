@@ -167,6 +167,7 @@ class _TerminalHeader extends StatelessWidget {
     final colors = context.appColors;
     return Container(
       height: 36,
+      width: double.infinity,
       decoration: BoxDecoration(
         color: colors.surface,
         border: Border(bottom: BorderSide(color: const Color(0xFF32327A), width: 1)),
