@@ -47,46 +47,26 @@ void main() {
   group('LinuxPlatformInstaller', () {
     const installer = LinuxPlatformInstaller();
 
-    test('supportsInAppInstall is false', () {
-      expect(installer.supportsInAppInstall, isFalse);
+    test('supportsInAppInstall is true', () {
+      expect(installer.supportsInAppInstall, isTrue);
     });
 
     test('getAppVersion returns fallback', () async {
       final version = await installer.getAppVersion(fallback: '9.9.9');
       expect(version, '9.9.9');
     });
-
-    test('install throws UnsupportedError', () async {
-      expect(
-        () => installer.install(
-          downloadUrl: 'https://example.com/update.tar.gz',
-          onProgress: (_, __) {},
-        ),
-        throwsA(isA<UnsupportedError>()),
-      );
-    });
   });
 
   group('WindowsPlatformInstaller', () {
     const installer = WindowsPlatformInstaller();
 
-    test('supportsInAppInstall is false', () {
-      expect(installer.supportsInAppInstall, isFalse);
+    test('supportsInAppInstall is true', () {
+      expect(installer.supportsInAppInstall, isTrue);
     });
 
     test('getAppVersion returns fallback', () async {
       final version = await installer.getAppVersion(fallback: '2.0.0');
       expect(version, '2.0.0');
-    });
-
-    test('install throws UnsupportedError', () async {
-      expect(
-        () => installer.install(
-          downloadUrl: 'https://example.com/update.zip',
-          onProgress: (_, __) {},
-        ),
-        throwsA(isA<UnsupportedError>()),
-      );
     });
   });
 

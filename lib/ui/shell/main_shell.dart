@@ -46,7 +46,13 @@ class _MainShellState extends State<MainShell> with WindowListener {
   PanelVisibility _agentsVis    = PanelVisibility.open;
   PanelVisibility _fileTreeVis  = PanelVisibility.open;
   SessionSnapshot? _sessionSnapshot;
-  UpdateInfo? _pendingUpdate;
+
+  // ── Silent auto-update state ───────────────────────────────────────────────
+  UpdateInfo? _updateInfo;
+  AutoUpdatePhase? _updatePhase;   // null = no banner
+  double? _updateProgress;
+  String  _updateStatus = '';
+  String? _updateLaunchToken;
 
   @override
   void initState() {
@@ -91,8 +97,6 @@ class _MainShellState extends State<MainShell> with WindowListener {
 
   Future<void> _autoCheckForUpdate() async {
     if (!mounted) return;
-
-    // Never auto-check in dev builds (debug/profile mode)
     if (UpdateService.isDevBuild) return;
 
     final autoEnabled = await SessionPrefs.isAutoUpdateCheckEnabled();
@@ -105,10 +109,44 @@ class _MainShellState extends State<MainShell> with WindowListener {
       if (elapsed < const Duration(hours: 24).inMilliseconds) return;
     }
 
-    // force: false → UpdateService will also check isDevBuild (double guard)
     final info = await UpdateService.checkForUpdate();
-    if (mounted && info != null) {
-      setState(() => _pendingUpdate = info);
+    if (!mounted || info == null) return;
+
+    // ── Found an update — start silent download immediately ──────────────────
+    setState(() {
+      _updateInfo  = info;
+      _updatePhase = AutoUpdatePhase.downloading;
+      _updateProgress = null;
+      _updateStatus = '';
+    });
+
+    try {
+      final token = await UpdateService.downloadAndPrepare(
+        info,
+        onProgress: (progress, status) {
+          if (!mounted) return;
+          setState(() {
+            _updateProgress = progress;
+            _updateStatus   = status;
+            _updatePhase = progress == null
+                ? AutoUpdatePhase.installing
+                : AutoUpdatePhase.downloading;
+          });
+        },
+      );
+
+      if (!mounted) return;
+      setState(() {
+        _updateLaunchToken = token;
+        _updatePhase = AutoUpdatePhase.ready;
+      });
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _updateStatus = e.toString().replaceFirst('Exception: ', '');
+          _updatePhase  = AutoUpdatePhase.error;
+        });
+      }
     }
   }
 
@@ -251,11 +289,15 @@ class _MainShellState extends State<MainShell> with WindowListener {
                   },
                   onSearch: _openFileSearch,
                 ),
-                if (_pendingUpdate != null)
-                  UpdateBanner(
-                    info: _pendingUpdate!,
+                if (_updatePhase != null && _updateInfo != null)
+                  AutoUpdateBanner(
+                    info: _updateInfo!,
+                    phase: _updatePhase!,
+                    progress: _updateProgress,
+                    status: _updateStatus,
+                    launchToken: _updateLaunchToken,
                     onDismiss: () {
-                      if (mounted) setState(() => _pendingUpdate = null);
+                      if (mounted) setState(() => _updatePhase = null);
                     },
                   ),
                 Expanded(

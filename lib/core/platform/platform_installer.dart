@@ -13,16 +13,11 @@ typedef ProgressCallback = void Function(double? progress, String status);
 
 /// Platform-aware in-app installer for YoLoIT updates.
 ///
-/// macOS: downloads DMG → mounts → ditto-copies to /Applications → relaunches.
-/// Linux/Windows: stubs that fall back to opening the browser.
+/// Two-phase API:
+///   1. [downloadAndPrepare] — downloads & prepares the update, returns a launch token.
+///   2. [launchAndExit]      — applies the prepared update and exits the current process.
 ///
-/// Usage:
-/// ```dart
-/// await PlatformInstaller.instance.install(
-///   dmgUrl: 'https://…/YoLoIT.dmg',
-///   onProgress: (p, s) { … },
-/// );
-/// ```
+/// This separation lets the caller show a countdown before the restart.
 abstract class PlatformInstaller {
   const PlatformInstaller();
 
@@ -51,16 +46,71 @@ abstract class PlatformInstaller {
   /// Falls back to [fallback] if it cannot be determined.
   Future<String> getAppVersion({String fallback = '0.0.0'});
 
-  /// Downloads and installs the update from [downloadUrl].
-  /// [onProgress] is called with 0.0–1.0 during download, null during install.
+  /// Phase 1 — download and prepare the update.
+  ///
+  /// Returns a *launch token* (an app path on macOS, a helper-script path on
+  /// Windows/Linux) to be passed to [launchAndExit] when the caller is ready.
+  /// [onProgress] is called with 0.0–1.0 during download, null during setup.
   /// Throws on failure.
-  Future<void> install({
+  Future<String> downloadAndPrepare({
     required String downloadUrl,
     required ProgressCallback onProgress,
   });
+
+  /// Phase 2 — apply the prepared update and exit the current process.
+  ///
+  /// On macOS: opens the installed .app and exits.
+  /// On Windows/Linux: launches the helper update script and exits;
+  /// the script waits for this process to finish, copies new files, restarts.
+  Future<void> launchAndExit(String launchToken);
+
+  // ── Legacy convenience ────────────────────────────────────────────────────
+
+  /// Downloads, prepares, and immediately applies the update (old one-shot API).
+  Future<void> install({
+    required String downloadUrl,
+    required ProgressCallback onProgress,
+  }) async {
+    final token = await downloadAndPrepare(
+      downloadUrl: downloadUrl,
+      onProgress: onProgress,
+    );
+    await launchAndExit(token);
+  }
 }
 
-// ── macOS ────────────────────────────────────────────────────────────────────
+// ── helpers ───────────────────────────────────────────────────────────────────
+
+Future<void> _downloadFile(
+  String url,
+  File dest,
+  ProgressCallback onProgress,
+  String label,
+) async {
+  final client = HttpClient();
+  client.connectionTimeout = const Duration(seconds: 15);
+  try {
+    final req = await client.getUrl(Uri.parse(url));
+    req.headers.set(HttpHeaders.userAgentHeader, 'YoLoIT/updater');
+    final resp = await req.close();
+    if (resp.statusCode != 200) {
+      throw Exception('Download failed: HTTP ${resp.statusCode}');
+    }
+    final total = resp.contentLength;
+    var received = 0;
+    final sink = dest.openWrite();
+    await for (final chunk in resp) {
+      sink.add(chunk);
+      received += chunk.length;
+      if (total > 0) onProgress(received / total, label);
+    }
+    await sink.close();
+  } finally {
+    client.close();
+  }
+}
+
+// ── macOS ─────────────────────────────────────────────────────────────────────
 
 class MacosPlatformInstaller extends PlatformInstaller {
   const MacosPlatformInstaller({ProcessRunner? processRunner})
@@ -90,7 +140,7 @@ class MacosPlatformInstaller extends PlatformInstaller {
   }
 
   @override
-  Future<void> install({
+  Future<String> downloadAndPrepare({
     required String downloadUrl,
     required ProgressCallback onProgress,
   }) async {
@@ -98,45 +148,21 @@ class MacosPlatformInstaller extends PlatformInstaller {
     onProgress(0.0, 'Downloading…');
     final tmpDir = Directory.systemTemp.createTempSync('yoloit_update_');
     final dmgFile = File('${tmpDir.path}/YoLoIT.dmg');
-
-    final client = HttpClient();
-    client.connectionTimeout = const Duration(seconds: 15);
-    try {
-      final req = await client.getUrl(Uri.parse(downloadUrl));
-      req.headers.set(HttpHeaders.userAgentHeader, 'YoLoIT/updater');
-      final resp = await req.close();
-      if (resp.statusCode != 200) {
-        throw Exception('Download failed: HTTP ${resp.statusCode}');
-      }
-
-      final total = resp.contentLength;
-      var received = 0;
-      final sink = dmgFile.openWrite();
-      await for (final chunk in resp) {
-        sink.add(chunk);
-        received += chunk.length;
-        if (total > 0) onProgress(received / total, 'Downloading…');
-      }
-      await sink.close();
-    } finally {
-      client.close();
-    }
+    await _downloadFile(downloadUrl, dmgFile, onProgress, 'Downloading…');
 
     // 2. Mount DMG
     onProgress(null, 'Mounting…');
     final mountPoint = '${tmpDir.path}/vol';
     await Directory(mountPoint).create();
     final mount = await _run('hdiutil', [
-      'attach', dmgFile.path,
-      '-nobrowse',
-      '-mountpoint', mountPoint,
+      'attach', dmgFile.path, '-nobrowse', '-mountpoint', mountPoint,
     ]);
     if (mount.exitCode != 0) {
       throw Exception('Mount failed: ${mount.stderr}');
     }
 
     try {
-      // 3. Find .app inside mounted volume
+      // 3. Find .app inside mounted volume and copy to /Applications
       onProgress(null, 'Installing…');
       final volDir = Directory(mountPoint);
       final appEntry = volDir
@@ -147,76 +173,163 @@ class MacosPlatformInstaller extends PlatformInstaller {
             orElse: () => throw Exception('No .app found in DMG'),
           );
 
-      // 4. Copy to /Applications preserving code signature
       final appName = appEntry.path.split('/').last;
       final dest = '/Applications/$appName';
       final ditto = await _run('ditto', [appEntry.path, dest]);
       if (ditto.exitCode != 0) {
-        throw Exception('Copy failed: ${ditto.stderr}');
+        throw Exception('Install failed: ${ditto.stderr}');
       }
-
-      // 5. Relaunch from /Applications
-      onProgress(null, 'Relaunching…');
-      await _run('open', [dest]);
-      await Future.delayed(const Duration(milliseconds: 500));
-      exit(0);
+      return dest; // launch token = installed .app path
     } finally {
       await _run('hdiutil', ['detach', mountPoint, '-force']);
-      try {
-        tmpDir.deleteSync(recursive: true);
-      } catch (_) {}
+      try { tmpDir.deleteSync(recursive: true); } catch (_) {}
     }
+  }
+
+  @override
+  Future<void> launchAndExit(String launchToken) async {
+    await _run('open', [launchToken]);
+    await Future.delayed(const Duration(milliseconds: 500));
+    exit(0);
   }
 }
 
-// ── Linux ────────────────────────────────────────────────────────────────────
+// ── Linux ─────────────────────────────────────────────────────────────────────
 
-/// Linux installer stub — always falls back to opening the browser.
 class LinuxPlatformInstaller extends PlatformInstaller {
   const LinuxPlatformInstaller();
 
   @override
-  bool get supportsInAppInstall => false;
+  bool get supportsInAppInstall => true;
 
   @override
   Future<String> getAppVersion({String fallback = '0.0.0'}) async => fallback;
 
   @override
-  Future<void> install({
+  Future<String> downloadAndPrepare({
     required String downloadUrl,
     required ProgressCallback onProgress,
   }) async {
-    throw UnsupportedError(
-      'In-app install is not supported on Linux. '
-      'Open the release page to download and install manually.',
+    // 1. Download tar.gz
+    onProgress(0.0, 'Downloading…');
+    final tmpDir = Directory.systemTemp.createTempSync('yoloit_update_');
+    final tarFile = File('${tmpDir.path}/yoloit.tar.gz');
+    await _downloadFile(downloadUrl, tarFile, onProgress, 'Downloading…');
+
+    // 2. Extract
+    onProgress(null, 'Extracting…');
+    final extractDir = Directory('${tmpDir.path}/extracted');
+    await extractDir.create();
+    final tar = await Process.run(
+      'tar', ['-xzf', tarFile.path, '-C', extractDir.path],
     );
+    if (tar.exitCode != 0) {
+      throw Exception('Extract failed: ${tar.stderr}');
+    }
+
+    // 3. Find the bundle directory (should contain the yoloit binary)
+    final bundleDir = extractDir
+        .listSync()
+        .whereType<Directory>()
+        .firstWhere(
+          (d) => File('${d.path}/yoloit').existsSync(),
+          orElse: () {
+            // Fallback: look one level deeper
+            final nested = extractDir.listSync().whereType<Directory>().toList();
+            for (final d in nested) {
+              final sub = d.listSync().whereType<Directory>().toList();
+              for (final s in sub) {
+                if (File('${s.path}/yoloit').existsSync()) return s;
+              }
+            }
+            throw Exception('Could not find yoloit binary in extracted archive');
+          },
+        );
+
+    // 4. Determine current install dir and write update script
+    final currentExe = Platform.resolvedExecutable;
+    final currentBundleDir = File(currentExe).parent.path;
+
+    final scriptFile = File('${tmpDir.path}/yoloit_update.sh');
+    await scriptFile.writeAsString('''#!/bin/bash
+sleep 2
+cp -rf "${bundleDir.path}/"* "$currentBundleDir/"
+chmod +x "$currentBundleDir/yoloit"
+"$currentBundleDir/yoloit" &
+''');
+    await Process.run('chmod', ['+x', scriptFile.path]);
+
+    return scriptFile.path;
+  }
+
+  @override
+  Future<void> launchAndExit(String launchToken) async {
+    await Process.start(
+      'bash', [launchToken],
+      mode: ProcessStartMode.detached,
+    );
+    await Future.delayed(const Duration(milliseconds: 300));
+    exit(0);
   }
 }
 
-// ── Windows ──────────────────────────────────────────────────────────────────
+// ── Windows ───────────────────────────────────────────────────────────────────
 
-/// Windows installer stub — always falls back to opening the browser.
 class WindowsPlatformInstaller extends PlatformInstaller {
   const WindowsPlatformInstaller();
 
   @override
-  bool get supportsInAppInstall => false;
+  bool get supportsInAppInstall => true;
 
   @override
-  Future<String> getAppVersion({String fallback = '0.0.0'}) async {
-    // On Windows we could read a version resource from the PE binary,
-    // but for now return the fallback until Windows support is added.
-    return fallback;
-  }
+  Future<String> getAppVersion({String fallback = '0.0.0'}) async => fallback;
 
   @override
-  Future<void> install({
+  Future<String> downloadAndPrepare({
     required String downloadUrl,
     required ProgressCallback onProgress,
   }) async {
-    throw UnsupportedError(
-      'In-app install is not supported on Windows yet. '
-      'Open the release page to download and install manually.',
+    // 1. Download ZIP
+    onProgress(0.0, 'Downloading…');
+    final tmpDir = Directory.systemTemp.createTempSync('yoloit_update_');
+    final zipFile = File('${tmpDir.path}\\yoloit.zip');
+    await _downloadFile(downloadUrl, zipFile, onProgress, 'Downloading…');
+
+    // 2. Extract ZIP using PowerShell
+    onProgress(null, 'Extracting…');
+    final extractDir = '${tmpDir.path}\\extracted';
+    final extract = await Process.run('powershell', [
+      '-NoProfile', '-Command',
+      'Expand-Archive -LiteralPath "${zipFile.path}" -DestinationPath "$extractDir" -Force',
+    ]);
+    if (extract.exitCode != 0) {
+      throw Exception('Extract failed: ${extract.stderr}');
+    }
+
+    // 3. Current install dir
+    final currentExe = Platform.resolvedExecutable;
+    final currentDir = File(currentExe).parent.path;
+    final newExe = File(currentExe).uri.pathSegments.last; // yoloit.exe
+
+    // 4. Write update batch script
+    final scriptFile = File('${tmpDir.path}\\yoloit_update.bat');
+    await scriptFile.writeAsString(
+      '@echo off\r\n'
+      'timeout /t 2 /nobreak > nul\r\n'
+      'robocopy "$extractDir" "$currentDir" /E /IS /IT /R:3 /W:1 > nul\r\n'
+      'start "" "$currentDir\\$newExe"\r\n',
     );
+
+    return scriptFile.path;
+  }
+
+  @override
+  Future<void> launchAndExit(String launchToken) async {
+    await Process.start(
+      'cmd', ['/C', 'start', '/B', '/MIN', launchToken],
+      mode: ProcessStartMode.detached,
+    );
+    await Future.delayed(const Duration(milliseconds: 300));
+    exit(0);
   }
 }

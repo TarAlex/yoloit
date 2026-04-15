@@ -95,6 +95,28 @@ class UpdateService {
     await PlatformLauncher.instance.openUrl(info.releaseUrl);
   }
 
+  /// Downloads the update and prepares it for installation (phase 1).
+  /// Returns a launch token to be passed to [applyUpdate].
+  /// Falls back to [openRelease] if in-app install is not supported.
+  static Future<String?> downloadAndPrepare(
+    UpdateInfo info, {
+    required void Function(double? progress, String status) onProgress,
+  }) async {
+    final installer = PlatformInstaller.instance;
+    if (!installer.supportsInAppInstall || info.downloadUrl == null) {
+      await openRelease(info);
+      return null;
+    }
+    return installer.downloadAndPrepare(
+      downloadUrl: info.downloadUrl!,
+      onProgress: onProgress,
+    );
+  }
+
+  /// Applies a prepared update (phase 2) — exits the process.
+  static Future<void> applyUpdate(String launchToken) =>
+      PlatformInstaller.instance.launchAndExit(launchToken);
+
   /// Downloads the DMG, mounts it, copies the app to /Applications, relaunches.
   /// [onProgress] receives values 0.0–1.0 during download, then null during install steps.
   /// Throws on failure.
@@ -139,14 +161,21 @@ class UpdateService {
       final htmlUrl = json['html_url'] as String? ?? '';
       final notes = json['body'] as String? ?? '';
 
-      // Find first .dmg asset
-      String? dmgUrl;
+      // Pick the platform-specific asset
       final assets = json['assets'] as List<dynamic>? ?? [];
+      String? downloadUrl;
       for (final a in assets) {
         final asset = a as Map<String, dynamic>;
-        final name = asset['name'] as String? ?? '';
-        if (name.endsWith('.dmg')) {
-          dmgUrl = asset['browser_download_url'] as String?;
+        final name = (asset['name'] as String? ?? '').toLowerCase();
+        final url = asset['browser_download_url'] as String?;
+        if (Platform.isMacOS && name.endsWith('.dmg')) {
+          downloadUrl = url;
+          break;
+        } else if (Platform.isWindows && name.endsWith('.zip')) {
+          downloadUrl = url;
+          break;
+        } else if (Platform.isLinux && name.endsWith('.tar.gz')) {
+          downloadUrl = url;
           break;
         }
       }
@@ -156,7 +185,7 @@ class UpdateService {
         tagName: tagName,
         releaseUrl: htmlUrl,
         releaseNotes: notes,
-        downloadUrl: dmgUrl,
+        downloadUrl: downloadUrl,
       );
     } finally {
       client.close();
