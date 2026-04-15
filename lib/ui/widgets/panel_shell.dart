@@ -92,8 +92,8 @@ class _PanelHeader extends StatelessWidget {
             Icon(icon, size: 13, color: AppColors.textMuted),
             const SizedBox(width: 6),
           ],
-          // Title
-          Flexible(
+          // Title — Expanded absorbs all remaining space, pushing buttons to right edge
+          Expanded(
             child: Text(
               title,
               overflow: TextOverflow.ellipsis,
@@ -105,7 +105,6 @@ class _PanelHeader extends StatelessWidget {
               ),
             ),
           ),
-          const Spacer(),
           // Action buttons
           ...actions,
           // Collapse button
