@@ -79,6 +79,7 @@ class _ReviewContentState extends State<_ReviewContent> {
     return Container(
       color: colors.surface,
       child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           _ReviewTabBar(
             state: widget.state,

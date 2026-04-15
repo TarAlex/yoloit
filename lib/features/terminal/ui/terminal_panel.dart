@@ -47,6 +47,7 @@ class _EmptyTerminal extends StatelessWidget {
     return Container(
       color: colors.terminalBackground,
       child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           const _TerminalHeader(sessions: [], activeIndex: 0),
           Expanded(
@@ -131,6 +132,7 @@ class _TerminalViewState extends State<_TerminalView> {
     return Container(
       color: colors.terminalBackground,
       child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           _TerminalHeader(sessions: sessions, activeIndex: activeIndex),
           if (activeSession != null) _SessionInfoBar(session: activeSession),

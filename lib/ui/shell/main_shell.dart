@@ -224,6 +224,7 @@ class _MainShellState extends State<MainShell> with WindowListener {
           child: Scaffold(
             backgroundColor: colors.background,
             body: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 _TitleBar(
                   onSettings: () => SettingsPage.show(context),
