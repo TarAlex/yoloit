@@ -4,6 +4,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:path/path.dart' as p;
 import 'package:yoloit/core/theme/app_color_scheme.dart';
 import 'package:yoloit/core/theme/app_colors.dart';
+import 'package:yoloit/features/review/bloc/review_cubit.dart';
 import 'package:yoloit/features/terminal/bloc/terminal_cubit.dart';
 import 'package:yoloit/features/terminal/bloc/terminal_state.dart';
 import 'package:yoloit/features/terminal/models/agent_session.dart';
@@ -311,20 +312,37 @@ class _SessionCardState extends State<_SessionCard> {
     for (var i = 0; i < paths.length; i++) {
       final repoPath = paths[i];
       final isLast = i == paths.length - 1;
+      final availableWorktrees = widget.worktrees[repoPath] ?? [];
+      final String currentWorktreePath;
       final String branch;
       if (contexts != null && contexts.containsKey(repoPath)) {
-        branch = widget.branchNameResolver(repoPath, contexts[repoPath]!);
+        currentWorktreePath = contexts[repoPath]!;
+        branch = widget.branchNameResolver(repoPath, currentWorktreePath);
       } else {
-        // Fallback to main worktree branch
-        final mainWt = widget.worktrees[repoPath]
-            ?.where((w) => w.isMain)
-            .firstOrNull;
+        final mainWt = availableWorktrees.where((w) => w.isMain).firstOrNull;
+        currentWorktreePath = mainWt?.path ?? repoPath;
         branch = mainWt?.branch ?? 'main';
       }
       rows.add(_SessionRepoBranchRow(
         repoPath: repoPath,
         branch: branch,
         isLast: isLast,
+        availableWorktrees: availableWorktrees,
+        onBranchSelected: (newWorktreePath) {
+          final cubit = context.read<TerminalCubit>();
+          final updated = cubit.updateSessionWorktree(
+            widget.session.id,
+            repoPath,
+            newWorktreePath,
+          );
+          if (updated != null) {
+            final reviewCubit = context.read<ReviewCubit>();
+            reviewCubit.loadSession(
+              updated.worktreeContexts!.values.toList(),
+              updated.id,
+            );
+          }
+        },
       ));
     }
 
@@ -339,11 +357,61 @@ class _SessionRepoBranchRow extends StatelessWidget {
     required this.repoPath,
     required this.branch,
     required this.isLast,
+    required this.availableWorktrees,
+    required this.onBranchSelected,
   });
 
   final String repoPath;
   final String branch;
   final bool isLast;
+  final List<WorktreeEntry> availableWorktrees;
+  final ValueChanged<String> onBranchSelected;
+
+  void _showBranchMenu(BuildContext context, RenderBox box) {
+    final offset = box.localToGlobal(Offset.zero);
+    final size = box.size;
+    showMenu<String>(
+      context: context,
+      color: const Color(0xFF1E2130),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+      position: RelativeRect.fromLTRB(
+        offset.dx,
+        offset.dy + size.height + 4,
+        offset.dx + size.width,
+        offset.dy + size.height + 4 + 200,
+      ),
+      items: availableWorktrees
+          .where((wt) => wt.branch != null)
+          .map(
+            (wt) => PopupMenuItem<String>(
+              value: wt.path,
+              height: 32,
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              child: Row(
+                children: [
+                  if (wt.branch == branch)
+                    const Icon(Icons.check, size: 12, color: AppColors.neonGreen)
+                  else
+                    const SizedBox(width: 12),
+                  const SizedBox(width: 6),
+                  Text(
+                    wt.branch!,
+                    style: TextStyle(
+                      color: wt.branch == branch
+                          ? AppColors.neonBlue
+                          : AppColors.textSecondary,
+                      fontSize: 12,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          )
+          .toList(),
+    ).then((selected) {
+      if (selected != null) onBranchSelected(selected);
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -365,21 +433,36 @@ class _SessionRepoBranchRow extends StatelessWidget {
               overflow: TextOverflow.ellipsis,
             ),
           ),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
-            decoration: BoxDecoration(
-              color: AppColors.neonBlue.withAlpha(30),
-              borderRadius: BorderRadius.circular(4),
-              border: Border.all(color: AppColors.neonBlue.withAlpha(60)),
-            ),
-            child: Text(
-              branch,
-              style: const TextStyle(
-                color: AppColors.neonBlue,
-                fontSize: 9,
-                fontWeight: FontWeight.w500,
+          GestureDetector(
+            onTap: () {
+              final box = context.findRenderObject() as RenderBox?;
+              if (box != null) _showBranchMenu(context, box);
+            },
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+              decoration: BoxDecoration(
+                color: AppColors.neonBlue.withAlpha(30),
+                borderRadius: BorderRadius.circular(4),
+                border: Border.all(color: AppColors.neonBlue.withAlpha(60)),
               ),
-              overflow: TextOverflow.ellipsis,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    branch,
+                    style: const TextStyle(
+                      color: AppColors.neonBlue,
+                      fontSize: 9,
+                      fontWeight: FontWeight.w500,
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  if (availableWorktrees.length > 1) ...[
+                    const SizedBox(width: 2),
+                    const Icon(Icons.arrow_drop_down, size: 10, color: AppColors.neonBlue),
+                  ],
+                ],
+              ),
             ),
           ),
         ],
