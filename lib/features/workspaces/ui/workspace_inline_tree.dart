@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:path/path.dart' as p;
 import 'package:yoloit/core/theme/app_color_scheme.dart';
@@ -138,6 +139,32 @@ class _SessionCard extends StatefulWidget {
 class _SessionCardState extends State<_SessionCard> {
   bool _hovered = false;
   bool _expanded = true;
+  bool _isRenaming = false;
+  late final TextEditingController _renameController = TextEditingController();
+  final FocusNode _renameFocus = FocusNode();
+
+  @override
+  void dispose() {
+    _renameController.dispose();
+    _renameFocus.dispose();
+    super.dispose();
+  }
+
+  void _startRename() {
+    _renameController.text = _label();
+    _renameController.selection = TextSelection(
+      baseOffset: 0,
+      extentOffset: _renameController.text.length,
+    );
+    setState(() => _isRenaming = true);
+    SchedulerBinding.instance.addPostFrameCallback((_) => _renameFocus.requestFocus());
+  }
+
+  void _commitRename(BuildContext context) {
+    final name = _renameController.text.trim();
+    context.read<TerminalCubit>().renameSession(widget.session.id, name);
+    setState(() => _isRenaming = false);
+  }
 
   Color _statusColor() {
     switch (widget.session.status) {
@@ -178,9 +205,11 @@ class _SessionCardState extends State<_SessionCard> {
           // Session header row
           GestureDetector(
             onTap: () {
+              if (_isRenaming) return;
               widget.onActivate();
               setState(() => _expanded = true);
             },
+            onDoubleTap: _startRename,
             child: AnimatedContainer(
               duration: const Duration(milliseconds: 120),
               color: isActive
@@ -188,7 +217,7 @@ class _SessionCardState extends State<_SessionCard> {
                   : _hovered
                       ? colors.surfaceHighlight
                       : Colors.transparent,
-              padding: const EdgeInsets.fromLTRB(12, 4, 8, 4),
+              padding: const EdgeInsets.fromLTRB(12, 8, 8, 8),
               child: Row(
                 children: [
                   // Expand/collapse chevron
@@ -198,15 +227,15 @@ class _SessionCardState extends State<_SessionCard> {
                       _expanded
                           ? Icons.keyboard_arrow_down
                           : Icons.keyboard_arrow_right,
-                      size: 13,
+                      size: 14,
                       color: AppColors.textMuted,
                     ),
                   ),
-                  const SizedBox(width: 4),
+                  const SizedBox(width: 5),
                   // Status dot
                   Container(
-                    width: 6,
-                    height: 6,
+                    width: 8,
+                    height: 8,
                     margin: const EdgeInsets.only(right: 6),
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
@@ -216,32 +245,49 @@ class _SessionCardState extends State<_SessionCard> {
                   // Agent icon
                   Text(
                     widget.session.type.iconLabel,
-                    style: const TextStyle(color: AppColors.textMuted, fontSize: 10),
+                    style: const TextStyle(color: AppColors.textMuted, fontSize: 11),
                   ),
-                  const SizedBox(width: 4),
-                  // Session label
+                  const SizedBox(width: 5),
+                  // Session label (or rename field)
                   Expanded(
-                    child: Text(
-                      _label(),
-                      style: TextStyle(
-                        color: isActive
-                            ? AppColors.textPrimary
-                            : AppColors.textSecondary,
-                        fontSize: 11,
-                        fontWeight: isActive
-                            ? FontWeight.w600
-                            : FontWeight.normal,
-                      ),
-                      overflow: TextOverflow.ellipsis,
-                    ),
+                    child: _isRenaming
+                        ? TextField(
+                            controller: _renameController,
+                            focusNode: _renameFocus,
+                            style: const TextStyle(
+                              color: AppColors.textPrimary,
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                            ),
+                            decoration: const InputDecoration(
+                              isDense: true,
+                              contentPadding: EdgeInsets.zero,
+                              border: InputBorder.none,
+                            ),
+                            onSubmitted: (_) => _commitRename(context),
+                            onTapOutside: (_) => _commitRename(context),
+                          )
+                        : Text(
+                            _label(),
+                            style: TextStyle(
+                              color: isActive
+                                  ? AppColors.textPrimary
+                                  : AppColors.textSecondary,
+                              fontSize: 13,
+                              fontWeight: isActive
+                                  ? FontWeight.w600
+                                  : FontWeight.w500,
+                            ),
+                            overflow: TextOverflow.ellipsis,
+                          ),
                   ),
                   // Close button on hover
-                  if (_hovered)
+                  if (_hovered && !_isRenaming)
                     GestureDetector(
                       onTap: widget.onClose,
                       child: const Icon(
                         Icons.close,
-                        size: 12,
+                        size: 14,
                         color: AppColors.textMuted,
                       ),
                     ),
@@ -364,12 +410,12 @@ class _NewSessionButton extends StatelessWidget {
         worktrees: worktrees,
         onSpawned: onSpawned,
       ),
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(28, 4, 8, 4),
+      child: const Padding(
+        padding: EdgeInsets.fromLTRB(28, 4, 8, 4),
         child: Row(
           children: [
-            const Text('└─ ', style: TextStyle(color: AppColors.textMuted, fontSize: 10)),
-            const Flexible(
+            Text('└─ ', style: TextStyle(color: AppColors.textMuted, fontSize: 10)),
+            Flexible(
               child: Text(
                 '＋ New Agent Session',
                 style: TextStyle(color: AppColors.textMuted, fontSize: 11),
