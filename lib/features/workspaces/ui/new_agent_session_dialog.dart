@@ -143,7 +143,7 @@ class _NewAgentSessionDialogState extends State<NewAgentSessionDialog> {
     if (branch == null) return null;
     // Find existing worktree with that branch
     final existing = widget.worktrees[repoPath]
-        ?.where((wt) => wt.branch == branch || wt.isMain)
+        ?.where((wt) => wt.branch == branch)
         .firstOrNull;
     if (existing != null) return existing.path;
     return _worktreePath(repoPath, branch);

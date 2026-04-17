@@ -160,17 +160,27 @@ class _RepoTree extends StatelessWidget {
 
     for (var i = 0; i < worktrees.length; i++) {
       final wt = worktrees[i];
-      final isLastChild = i == worktrees.length - 1 && !showAddBranch;
-      final hasSession = sessions.any((s) =>
-          s.worktreeContexts != null &&
-          s.worktreeContexts![repoPath] == wt.path);
+      final wtSessions = sessions
+          .where((s) =>
+              s.worktreeContexts != null &&
+              s.worktreeContexts![repoPath] == wt.path)
+          .toList();
+      final isLastWorktree = i == worktrees.length - 1 && !showAddBranch;
       children.add(
         _BranchRow(
           entry: wt,
-          isLast: isLastChild,
-          hasSession: hasSession,
+          isLast: isLastWorktree && wtSessions.isEmpty,
+          hasSession: wtSessions.isNotEmpty,
         ),
       );
+      for (var j = 0; j < wtSessions.length; j++) {
+        children.add(
+          _NestedSessionRow(
+            session: wtSessions[j],
+            isLast: j == wtSessions.length - 1 && isLastWorktree,
+          ),
+        );
+      }
     }
 
     if (showAddBranch) {
@@ -260,6 +270,89 @@ class _BranchRow extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _NestedSessionRow extends StatefulWidget {
+  const _NestedSessionRow({
+    required this.session,
+    required this.isLast,
+  });
+
+  final AgentSession session;
+  final bool isLast;
+
+  @override
+  State<_NestedSessionRow> createState() => _NestedSessionRowState();
+}
+
+class _NestedSessionRowState extends State<_NestedSessionRow> {
+  bool _hovered = false;
+
+  Color _statusColor() {
+    switch (widget.session.status) {
+      case AgentStatus.live:
+        return AppColors.neonGreen;
+      case AgentStatus.idle:
+        return AppColors.textMuted;
+      case AgentStatus.error:
+        return AppColors.neonRed;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.appColors;
+    final label = widget.session.customName?.isNotEmpty == true
+        ? widget.session.customName!
+        : widget.session.type.displayName;
+    return MouseRegion(
+      onEnter: (_) => setState(() => _hovered = true),
+      onExit: (_) => setState(() => _hovered = false),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
+        color: _hovered ? colors.surfaceHighlight : colors.background.withAlpha(0),
+        padding: const EdgeInsets.fromLTRB(44, 1, 8, 1),
+        child: Row(
+          children: [
+            Text(
+              widget.isLast ? '└─ ' : '├─ ',
+              style: const TextStyle(color: AppColors.textMuted, fontSize: 10),
+            ),
+            Container(
+              width: 6,
+              height: 6,
+              margin: const EdgeInsets.only(right: 6),
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: _statusColor(),
+              ),
+            ),
+            Text(
+              widget.session.type.iconLabel,
+              style: const TextStyle(color: AppColors.textMuted, fontSize: 10),
+            ),
+            const SizedBox(width: 4),
+            Expanded(
+              child: Text(
+                label,
+                style: const TextStyle(
+                  color: AppColors.textSecondary,
+                  fontSize: 11,
+                ),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            if (_hovered)
+              GestureDetector(
+                onTap: () =>
+                    context.read<TerminalCubit>().closeSession(widget.session.id),
+                child: const Icon(Icons.close, size: 12, color: AppColors.textMuted),
+              ),
+          ],
+        ),
       ),
     );
   }
@@ -364,8 +457,22 @@ class _SessionsSection extends StatelessWidget {
   String _sessionLabel(AgentSession s) {
     if (s.customName?.isNotEmpty == true) return s.customName!;
     if (s.worktreeContexts != null && s.worktreeContexts!.isNotEmpty) {
-      final branch = s.worktreeContexts!.values.first;
-      final branchName = p.basename(branch);
+      // Look up the actual branch name from the worktrees map using the stored path
+      for (final entry in s.worktreeContexts!.entries) {
+        final wtPath = entry.value;
+        final wt = worktrees[entry.key]?.where((w) => w.path == wtPath).firstOrNull;
+        if (wt?.branch != null) {
+          return '${s.type.displayName} · ${wt!.branch}';
+        }
+      }
+      // Fallback: extract from folder name (format: reponame__branchname)
+      final wtPath = s.worktreeContexts!.values.first;
+      final repoPath = s.worktreeContexts!.keys.first;
+      final folderName = p.basename(wtPath);
+      final prefix = '${p.basename(repoPath)}__';
+      final branchName = folderName.startsWith(prefix)
+          ? folderName.substring(prefix.length)
+          : folderName;
       return '${s.type.displayName} · $branchName';
     }
     return s.type.displayName;
@@ -373,6 +480,19 @@ class _SessionsSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Sessions already shown nested under their branch rows; only show orphan sessions here
+    final matchedIds = <String>{};
+    for (final repoPath in worktrees.keys) {
+      for (final wt in worktrees[repoPath]!) {
+        for (final s in sessions) {
+          if (s.worktreeContexts?[repoPath] == wt.path) {
+            matchedIds.add(s.id);
+          }
+        }
+      }
+    }
+    final orphans = sessions.where((s) => !matchedIds.contains(s.id)).toList();
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -388,8 +508,8 @@ class _SessionsSection extends StatelessWidget {
             ),
           ),
         ),
-        ...sessions.asMap().entries.map((e) {
-          final isLast = e.key == sessions.length - 1;
+        ...orphans.asMap().entries.map((e) {
+          final isLast = e.key == orphans.length - 1;
           return _SessionRow(
             session: e.value,
             label: _sessionLabel(e.value),
