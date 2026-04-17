@@ -6,7 +6,6 @@ import 'package:yoloit/core/theme/app_color_scheme.dart';
 import 'package:yoloit/core/theme/app_colors.dart';
 import 'package:yoloit/features/review/bloc/review_cubit.dart';
 import 'package:yoloit/features/terminal/bloc/terminal_cubit.dart';
-import 'package:yoloit/features/workspaces/ui/session_overview_panel.dart';
 import 'package:yoloit/features/terminal/bloc/terminal_state.dart';
 import 'package:yoloit/features/terminal/models/agent_session.dart';
 import 'package:yoloit/features/workspaces/data/worktree_service.dart';
@@ -283,29 +282,12 @@ class _SessionCardState extends State<_SessionCard> {
                             overflow: TextOverflow.ellipsis,
                           ),
                   ),
-                  // Overview + Close buttons on hover
-                  if (_hovered && !_isRenaming) ...[
-                    GestureDetector(
-                      onTap: () {
-                        final termState = context.read<TerminalCubit>().state;
-                        final allSessions = termState is TerminalLoaded ? termState.sessions : <AgentSession>[];
-                        showSessionOverview(
-                          context,
-                          session: widget.session,
-                          workspace: widget.workspace,
-                          sessions: allSessions,
-                        );
-                      },
-                      child: const Padding(
-                        padding: EdgeInsets.only(right: 4),
-                        child: Icon(Icons.radar, size: 14, color: AppColors.textMuted),
-                      ),
-                    ),
+                  // Close button on hover
+                  if (_hovered && !_isRenaming)
                     GestureDetector(
                       onTap: widget.onClose,
                       child: const Icon(Icons.close, size: 14, color: AppColors.textMuted),
                     ),
-                  ],
                 ],
               ),
             ),
