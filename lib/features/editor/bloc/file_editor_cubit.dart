@@ -26,13 +26,19 @@ class FileEditorCubit extends Cubit<FileEditorState> {
   /// Called when the active workspace changes — clears current tabs and
   /// restores the previously open files for [workspaceId].
   Future<void> setWorkspace(String workspaceId) async {
-    _workspaceId = workspaceId;
+    await setSession(workspaceId);
+  }
+
+  /// Called when the active session changes — saves current tabs then
+  /// restores the tabs previously open in [sessionId].
+  Future<void> setSession(String sessionId) async {
+    _workspaceId = sessionId;
     for (final t in _saveTimers.values) {
       t.cancel();
     }
     _saveTimers.clear();
 
-    final saved = await SessionPrefs.loadEditorTabs(workspaceId);
+    final saved = await SessionPrefs.loadEditorTabs(sessionId);
     final paths = saved.paths.where((path) => File(path).existsSync()).toList();
     if (paths.isEmpty) {
       emit(const FileEditorState(tabs: [], activeIndex: 0, isVisible: false));

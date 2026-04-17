@@ -188,6 +188,16 @@ class TerminalCubit extends Cubit<TerminalState> {
     unawaited(SessionPrefs.saveActiveTerminalIdx(index));
   }
 
+  /// Switches the active session to the one with [sessionId].
+  /// No-op if the session is not in the current workspace or already active.
+  void setActiveSessionById(String sessionId) {
+    final current = _loaded;
+    if (current == null) return;
+    final idx = current.sessions.indexWhere((s) => s.id == sessionId);
+    if (idx == -1 || idx == current.activeIndex) return;
+    switchTab(idx);
+  }
+
   void renameSession(String sessionId, String name) {
     final idx = _allSessions.indexWhere((s) => s.id == sessionId);
     if (idx == -1) return;

@@ -25,6 +25,12 @@ class ReviewCubit extends Cubit<ReviewState> {
     await refresh();
   }
 
+  /// Reloads the file tree with [paths] scoped to [sessionId].
+  /// Called when the active agent session changes.
+  Future<void> loadSession(List<String> paths, String sessionId) async {
+    await loadWorkspace(paths, workspaceId: sessionId);
+  }
+
   Future<void> refresh() async {
     if (_workspacePaths.isEmpty) return;
 

@@ -686,29 +686,65 @@ class _AgentsContent extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return BlocListener<WorkspaceCubit, WorkspaceState>(
-      listenWhen: (prev, curr) {
-        if (curr is! WorkspaceLoaded) return false;
-        if (prev is! WorkspaceLoaded) return true;
-        return prev.activeWorkspaceId != curr.activeWorkspaceId &&
-            curr.activeWorkspaceId != null;
-      },
-      listener: (context, state) {
-        if (state is! WorkspaceLoaded) return;
-        final wsId = state.activeWorkspaceId;
-        if (wsId == null) return;
-        final ws = state.workspaces.firstWhere(
-          (w) => w.id == wsId,
-          orElse: () => state.workspaces.first,
-        );
-        context.read<TerminalCubit>().setActiveWorkspace(
-          workspaceId: wsId,
-          workspacePath: ws.workspaceDir,
-        );
-        context.read<RunCubit>().loadForWorkspace(ws.path);
-        context.read<ReviewCubit>().loadWorkspace(ws.paths, workspaceId: wsId);
-        context.read<FileEditorCubit>().setWorkspace(wsId);
-      },
+    return MultiBlocListener(
+      listeners: [
+        // Workspace switch: reinitialize terminal, run, review, editor
+        BlocListener<WorkspaceCubit, WorkspaceState>(
+          listenWhen: (prev, curr) {
+            if (curr is! WorkspaceLoaded) return false;
+            if (prev is! WorkspaceLoaded) return true;
+            return prev.activeWorkspaceId != curr.activeWorkspaceId &&
+                curr.activeWorkspaceId != null;
+          },
+          listener: (context, state) {
+            if (state is! WorkspaceLoaded) return;
+            final wsId = state.activeWorkspaceId;
+            if (wsId == null) return;
+            final ws = state.workspaces.firstWhere(
+              (w) => w.id == wsId,
+              orElse: () => state.workspaces.first,
+            );
+            context.read<TerminalCubit>().setActiveWorkspace(
+              workspaceId: wsId,
+              workspacePath: ws.workspaceDir,
+            );
+            context.read<RunCubit>().loadForWorkspace(ws.path);
+            context.read<ReviewCubit>().loadWorkspace(ws.paths, workspaceId: wsId);
+            context.read<FileEditorCubit>().setWorkspace(wsId);
+          },
+        ),
+        // Session switch: sync file tree and editor tabs to the active session
+        BlocListener<TerminalCubit, TerminalState>(
+          listenWhen: (prev, curr) {
+            if (curr is! TerminalLoaded) return false;
+            if (prev is! TerminalLoaded) return true;
+            return prev.activeSession?.id != curr.activeSession?.id;
+          },
+          listener: (context, state) {
+            if (state is! TerminalLoaded) return;
+            final session = state.activeSession;
+            if (session == null) return;
+            final wsState = context.read<WorkspaceCubit>().state;
+            // Resolve file tree paths: worktreeContexts values if set, else workspace paths
+            final List<String> paths;
+            if (session.worktreeContexts != null &&
+                session.worktreeContexts!.isNotEmpty) {
+              paths = session.worktreeContexts!.values.toList();
+            } else if (wsState is WorkspaceLoaded &&
+                wsState.activeWorkspaceId != null) {
+              final ws = wsState.workspaces.firstWhere(
+                (w) => w.id == wsState.activeWorkspaceId,
+                orElse: () => wsState.workspaces.first,
+              );
+              paths = ws.paths;
+            } else {
+              paths = [];
+            }
+            context.read<ReviewCubit>().loadSession(paths, session.id);
+            context.read<FileEditorCubit>().setSession(session.id);
+          },
+        ),
+      ],
       child: const TerminalPanel(),
     );
   }
