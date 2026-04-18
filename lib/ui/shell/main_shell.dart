@@ -742,6 +742,11 @@ class _AgentsContent extends StatelessWidget {
             }
             context.read<ReviewCubit>().loadSession(paths, session.id);
             context.read<FileEditorCubit>().setSession(session.id);
+            // Reload run configs for the session's active worktree path so
+            // each session/worktree shows its own configurations and run history.
+            if (paths.isNotEmpty) {
+              context.read<RunCubit>().loadForWorkspace(paths.first);
+            }
           },
         ),
       ],
