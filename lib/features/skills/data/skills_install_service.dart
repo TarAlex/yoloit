@@ -19,10 +19,19 @@ class SkillsInstallService {
   String get _skillsDir => PlatformDirs.instance.skillsDir;
 
   String _claudeSkillsPath(String workspaceDir) =>
-      p.join(workspaceDir, '.agents', 'skills');
+      p.join(workspaceDir, '.claude', 'commands');
 
   String _copilotSkillsPath(String workspaceDir) =>
       p.join(workspaceDir, '.github', 'copilot');
+
+  String _cursorSkillsPath(String workspaceDir) =>
+      p.join(workspaceDir, '.cursor', 'rules');
+
+  String _windsurfSkillsPath(String workspaceDir) =>
+      p.join(workspaceDir, '.windsurf', 'rules');
+
+  String _geminiSkillsPath(String workspaceDir) =>
+      p.join(workspaceDir, '.gemini', 'skills');
 
   // ── Install ─────────────────────────────────────────────────────────────────
 
@@ -96,30 +105,112 @@ class SkillsInstallService {
   }
 
   /// Runs an install script for script-based skills.
-  /// Opens an interactive terminal session since scripts may need TTY.
+  /// Executes the command in a subprocess inside the global skills dir so the
+  /// skill ends up installed at ~/.config/yoloit/skills/{skill-id}/.
   Future<SkillInstallResult> runInstallScript(SkillEntry skill) async {
-    // Return the command for the caller to run in a terminal session.
-    // The actual execution is done via PlatformLauncher to get an interactive shell.
-    return SkillInstallResult.requiresTerminal(skill.id, skill.installCommand ?? '');
+    final command = skill.installCommand ?? '';
+    if (command.isEmpty) {
+      return SkillInstallResult.error(skill.id, 'No install command specified');
+    }
+
+    final skillDir = Directory(p.join(_skillsDir, skill.id));
+    await skillDir.create(recursive: true);
+
+    try {
+      final result = await Process.run(
+        'bash',
+        ['-c', command],
+        workingDirectory: skillDir.path,
+        environment: {
+          ...Platform.environment,
+          'SKILLS_DIR': skillDir.path,
+          'SKILL_ID': skill.id,
+        },
+        runInShell: false,
+      );
+
+      if (result.exitCode != 0) {
+        // Clean up empty dir on failure
+        if (await skillDir.list().isEmpty) await skillDir.delete();
+        return SkillInstallResult.error(
+          skill.id,
+          'Install script failed (exit ${result.exitCode}):\n${result.stderr}',
+        );
+      }
+
+      // Ensure a SKILL.md exists so the skill shows up in the store.
+      final skillMd = File(p.join(skillDir.path, 'SKILL.md'));
+      if (!await skillMd.exists()) {
+        await skillMd.writeAsString('# ${skill.name}\n\n${skill.description}\n');
+      }
+
+      return SkillInstallResult.success(skill.id);
+    } catch (e) {
+      if (await skillDir.list().isEmpty) {
+        try { await skillDir.delete(); } catch (_) {}
+      }
+      return SkillInstallResult.error(skill.id, 'Failed to run install script: $e');
+    }
   }
 
   // ── Workspace symlink management ────────────────────────────────────────────
 
   /// Syncs skill symlinks for a workspace based on its enabledSkills list.
-  /// Creates/removes symlinks in both Claude (.agents/skills/) and Copilot (.github/copilot/) paths.
+  /// Creates/removes symlinks for all supported AI providers.
   Future<void> syncWorkspaceSkills(Workspace workspace) async {
-    final claudePath = _claudeSkillsPath(workspace.workspaceDir);
-    final copilotPath = _copilotSkillsPath(workspace.workspaceDir);
-
     await _syncSkillLinks(
-      skillsDir: claudePath,
+      skillsDir: _claudeSkillsPath(workspace.workspaceDir),
       enabledSkillIds: workspace.enabledSkills,
       globalSkillsDir: _skillsDir,
     );
 
     await _syncSkillLinks(
-      skillsDir: copilotPath,
+      skillsDir: _copilotSkillsPath(workspace.workspaceDir),
       enabledSkillIds: workspace.enabledSkills,
+      globalSkillsDir: _skillsDir,
+      linkStyle: _LinkStyle.copilot,
+    );
+
+    await _syncSkillLinks(
+      skillsDir: _cursorSkillsPath(workspace.workspaceDir),
+      enabledSkillIds: workspace.enabledSkills,
+      globalSkillsDir: _skillsDir,
+    );
+
+    await _syncSkillLinks(
+      skillsDir: _windsurfSkillsPath(workspace.workspaceDir),
+      enabledSkillIds: workspace.enabledSkills,
+      globalSkillsDir: _skillsDir,
+    );
+
+    await _syncSkillLinks(
+      skillsDir: _geminiSkillsPath(workspace.workspaceDir),
+      enabledSkillIds: workspace.enabledSkills,
+      globalSkillsDir: _skillsDir,
+    );
+  }
+
+  /// Syncs skill symlinks into an agent session directory.
+  Future<void> syncSessionSkills({
+    required String sessionDir,
+    required List<String> enabledSkillIds,
+  }) async {
+    for (final skillsDir in [
+      p.join(sessionDir, '.claude', 'commands'),
+      p.join(sessionDir, '.cursor', 'rules'),
+      p.join(sessionDir, '.windsurf', 'rules'),
+      p.join(sessionDir, '.gemini', 'skills'),
+    ]) {
+      await _syncSkillLinks(
+        skillsDir: skillsDir,
+        enabledSkillIds: enabledSkillIds,
+        globalSkillsDir: _skillsDir,
+      );
+    }
+
+    await _syncSkillLinks(
+      skillsDir: p.join(sessionDir, '.github', 'copilot'),
+      enabledSkillIds: enabledSkillIds,
       globalSkillsDir: _skillsDir,
       linkStyle: _LinkStyle.copilot,
     );
@@ -209,8 +300,15 @@ class SkillsInstallService {
   Future<void> uninstallGlobalSkill(String skillId, List<Workspace> workspaces) async {
     // Remove from all workspace symlinks first
     for (final ws in workspaces) {
-      final claudeLink = Link(p.join(_claudeSkillsPath(ws.workspaceDir), skillId));
-      if (await claudeLink.exists()) await claudeLink.delete();
+      for (final skillsPath in [
+        _claudeSkillsPath(ws.workspaceDir),
+        _cursorSkillsPath(ws.workspaceDir),
+        _windsurfSkillsPath(ws.workspaceDir),
+        _geminiSkillsPath(ws.workspaceDir),
+      ]) {
+        final link = Link(p.join(skillsPath, skillId));
+        if (await link.exists()) await link.delete();
+      }
       final copilotDir = Directory(p.join(_copilotSkillsPath(ws.workspaceDir), skillId));
       if (await copilotDir.exists()) await copilotDir.delete(recursive: true);
     }

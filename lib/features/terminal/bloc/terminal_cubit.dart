@@ -5,6 +5,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_pty/flutter_pty.dart';
 import 'package:yoloit/core/session/session_prefs.dart';
 import 'package:yoloit/features/settings/data/agent_config_service.dart';
+import 'package:yoloit/features/skills/data/skills_install_service.dart';
 import 'package:yoloit/features/terminal/bloc/terminal_state.dart';
 import 'package:yoloit/features/terminal/data/logging_service.dart';
 import 'package:yoloit/features/terminal/data/pty_service.dart';
@@ -109,6 +110,7 @@ class TerminalCubit extends Cubit<TerminalState> {
     String? savedSessionId,
     bool isRestore = false,
     Map<String, String>? worktreeContexts,
+    List<String> enabledSkills = const [],
   }) async {
     if (state is! TerminalLoaded) return;
 
@@ -119,6 +121,12 @@ class TerminalCubit extends Cubit<TerminalState> {
     if (worktreeContexts != null && workspaceId != null) {
       effectivePath = await AgentWorkspaceDirService.instance
           .createAgentDir(workspaceId, sessionId, worktreeContexts);
+      if (enabledSkills.isNotEmpty) {
+        unawaited(SkillsInstallService.instance.syncSessionSkills(
+          sessionDir: effectivePath,
+          enabledSkillIds: enabledSkills,
+        ));
+      }
     }
 
     final session = AgentSession(
@@ -232,11 +240,32 @@ class TerminalCubit extends Cubit<TerminalState> {
   void closeSession(String sessionId) {
     final current = _loaded;
     if (current == null) return;
+
+    // Find session before removing it (needed for cleanup).
+    final session = _allSessions.firstWhere(
+      (s) => s.id == sessionId,
+      orElse: () => AgentSession(
+        id: sessionId,
+        type: AgentType.claude,
+        workspacePath: '',
+        status: AgentStatus.live,
+        sessionId: '',
+      ),
+    );
+
     _ptyService.kill(
       sessionId,
       onKillTmux: _tmux.isActive ? _tmux.killSession : null,
     );
     unawaited(_logging.endSession(sessionId));
+
+    // Delete the agent dir if one was created (session had worktree contexts).
+    if (session.worktreeContexts != null && session.workspaceId != null) {
+      unawaited(
+        AgentWorkspaceDirService.instance.deleteAgentDir(session.workspaceId!, sessionId),
+      );
+    }
+
     _allSessions.removeWhere((s) => s.id == sessionId);
     final visible = _workspaceSessions;
     final newIndex = visible.isEmpty ? 0 : current.activeIndex.clamp(0, visible.length - 1);

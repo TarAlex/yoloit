@@ -17,6 +17,10 @@ void main() {
 
   tearDown(() async {
     await AgentWorkspaceDirService.instance.deleteAgentDir(workspaceId, agentId);
+    final wsDir = Directory(
+      p.dirname(p.dirname(AgentWorkspaceDirService.instance.dirForAgent(workspaceId, agentId))),
+    );
+    if (await wsDir.exists()) await wsDir.delete(recursive: true);
   });
 
   group('AgentWorkspaceDirService', () {

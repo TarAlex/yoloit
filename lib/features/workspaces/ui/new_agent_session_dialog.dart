@@ -185,6 +185,7 @@ class _NewAgentSessionDialogState extends State<NewAgentSessionDialog> {
       workspaceId: widget.workspace.id,
       savedSessionId: sessionId,   // sets the ID, isRestore=false so command still runs
       worktreeContexts: contexts.isEmpty ? null : contexts,
+      enabledSkills: widget.workspace.enabledSkills,
     );
     if (name.isNotEmpty) cubit.renameSession(sessionId, name);
     if (!mounted) return;

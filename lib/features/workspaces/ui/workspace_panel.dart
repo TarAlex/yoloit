@@ -1,5 +1,3 @@
-import 'dart:io';
-
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
@@ -10,6 +8,9 @@ import 'package:yoloit/features/review/bloc/review_cubit.dart';
 import 'package:yoloit/features/runs/bloc/run_cubit.dart';
 import 'package:yoloit/features/runs/bloc/run_state.dart';
 import 'package:yoloit/features/runs/models/run_session.dart';
+import 'package:yoloit/features/skills/bloc/skills_cubit.dart';
+import 'package:yoloit/features/skills/bloc/skills_state.dart';
+import 'package:yoloit/features/skills/models/skill_entry.dart';
 import 'package:yoloit/features/terminal/bloc/terminal_cubit.dart';
 import 'package:yoloit/features/terminal/bloc/terminal_state.dart';
 import 'package:yoloit/features/terminal/models/agent_session.dart';
@@ -95,6 +96,7 @@ class WorkspacePanelState extends State<WorkspacePanel> {
           onSecretsOpen: (ws) => _showSecretsDialog(context, ws),
           onAddPath: (ws) => _addPathToWorkspace(context, ws.id),
           onRemovePath: (ws, path) => _confirmRemovePath(context, ws.id, path),
+          onAddSkill: (ws) => _showAddSkillDialog(context, ws),
         );
       },
     );
@@ -312,6 +314,16 @@ class WorkspacePanelState extends State<WorkspacePanel> {
     );
   }
 
+  void _showAddSkillDialog(BuildContext context, Workspace ws) {
+    showDialog<void>(
+      context: context,
+      builder: (_) => BlocProvider.value(
+        value: context.read<SkillsCubit>(),
+        child: _AddSkillToWorkspaceDialog(workspace: ws),
+      ),
+    );
+  }
+
   Future<void> _renameWorkspaceDialog(BuildContext context, Workspace ws) async {
     final controller = TextEditingController(text: ws.name);
     controller.selection = TextSelection(baseOffset: 0, extentOffset: ws.name.length);
@@ -518,6 +530,7 @@ class _WorkspaceList extends StatefulWidget {
     required this.onSecretsOpen,
     required this.onAddPath,
     required this.onRemovePath,
+    required this.onAddSkill,
   });
   final List<Workspace> workspaces;
   final String? activeId;
@@ -530,6 +543,7 @@ class _WorkspaceList extends StatefulWidget {
   final void Function(Workspace) onSecretsOpen;
   final void Function(Workspace) onAddPath;
   final void Function(Workspace, String) onRemovePath;
+  final void Function(Workspace) onAddSkill;
 
   @override
   State<_WorkspaceList> createState() => _WorkspaceListState();
@@ -638,6 +652,7 @@ class _WorkspaceListState extends State<_WorkspaceList> {
               onSecretsOpen: () => widget.onSecretsOpen(ws),
               onAddPath: () => widget.onAddPath(ws),
               onRemovePath: (path) => widget.onRemovePath(ws, path),
+              onAddSkill: () => widget.onAddSkill(ws),
             );
             if (!isActive) return tile;
             return _ActiveWorkspaceCard(
@@ -791,6 +806,7 @@ class _WorkspaceTile extends StatefulWidget {
     required this.onSecretsOpen,
     required this.onAddPath,
     required this.onRemovePath,
+    required this.onAddSkill,
     this.suppressDecoration = false,
   });
 
@@ -804,6 +820,7 @@ class _WorkspaceTile extends StatefulWidget {
   final VoidCallback onSecretsOpen;
   final VoidCallback onAddPath;
   final void Function(String path) onRemovePath;
+  final VoidCallback onAddSkill;
   /// When true the tile renders without its own margin/border/background —
   /// a parent container provides the decoration instead.
   final bool suppressDecoration;
@@ -875,6 +892,15 @@ class _WorkspaceTileState extends State<_WorkspaceTile> {
           ]),
         ),
         PopupMenuItem(
+          value: 'add_skill',
+          height: 36,
+          child: Row(children: [
+            const Icon(Icons.extension_outlined, size: 14, color: Color(0xFFB0B0D0)),
+            const SizedBox(width: 8),
+            const Text('Add Skill', style: TextStyle(color: Color(0xFFB0B0D0), fontSize: 12)),
+          ]),
+        ),
+        PopupMenuItem(
           value: 'secrets',
           height: 36,
           child: Row(children: [
@@ -899,6 +925,8 @@ class _WorkspaceTileState extends State<_WorkspaceTile> {
         widget.onRename();
       } else if (value == 'add_folder') {
         widget.onAddPath();
+      } else if (value == 'add_skill') {
+        widget.onAddSkill();
       } else if (value == 'secrets') {
         widget.onSecretsOpen();
       } else if (value == 'remove') {
@@ -1671,5 +1699,172 @@ class _RunSessionRowState extends State<_RunSessionRow> {
         ),
       ),
     );
+  }
+}
+
+// ─── Add Skill to Workspace Dialog ───────────────────────────────────────────
+
+class _AddSkillToWorkspaceDialog extends StatefulWidget {
+  const _AddSkillToWorkspaceDialog({required this.workspace});
+  final Workspace workspace;
+
+  @override
+  State<_AddSkillToWorkspaceDialog> createState() => _AddSkillToWorkspaceDialogState();
+}
+
+class _AddSkillToWorkspaceDialogState extends State<_AddSkillToWorkspaceDialog> {
+  // Local copy of enabled skills that user is editing.
+  late Set<String> _enabled;
+  bool _saving = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _enabled = Set.of(widget.workspace.enabledSkills);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return BlocBuilder<SkillsCubit, SkillsState>(
+      builder: (context, state) {
+        final installedSkills = state is SkillsLoaded
+            ? state.skills.where((s) => s.isInstalled).toList()
+            : <SkillEntry>[];
+
+        return AlertDialog(
+          backgroundColor: const Color(0xFF16163A),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(10),
+            side: const BorderSide(color: Color(0xFF32327A)),
+          ),
+          title: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Add Skills to Workspace',
+                style: TextStyle(color: Color(0xFFE0E0F0), fontSize: 14, fontWeight: FontWeight.w600),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                widget.workspace.name,
+                style: const TextStyle(color: Color(0xFF7C7CFF), fontSize: 11),
+              ),
+            ],
+          ),
+          content: SizedBox(
+            width: 320,
+            child: installedSkills.isEmpty
+                ? const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 16),
+                    child: Text(
+                      'No skills installed yet.\nInstall skills from the Skills panel first.',
+                      style: TextStyle(color: Color(0xFF8080B0), fontSize: 12),
+                      textAlign: TextAlign.center,
+                    ),
+                  )
+                : ConstrainedBox(
+                    constraints: const BoxConstraints(maxHeight: 320),
+                    child: ListView.builder(
+                      shrinkWrap: true,
+                      itemCount: installedSkills.length,
+                      itemBuilder: (context, i) {
+                        final skill = installedSkills[i];
+                        final isEnabled = _enabled.contains(skill.id);
+                        return InkWell(
+                          onTap: () => setState(() {
+                            if (isEnabled) {
+                              _enabled.remove(skill.id);
+                            } else {
+                              _enabled.add(skill.id);
+                            }
+                          }),
+                          borderRadius: BorderRadius.circular(6),
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
+                            child: Row(
+                              children: [
+                                SizedBox(
+                                  width: 18,
+                                  height: 18,
+                                  child: Checkbox(
+                                    value: isEnabled,
+                                    onChanged: (_) => setState(() {
+                                      if (isEnabled) {
+                                        _enabled.remove(skill.id);
+                                      } else {
+                                        _enabled.add(skill.id);
+                                      }
+                                    }),
+                                    activeColor: const Color(0xFF7C7CFF),
+                                    materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                    visualDensity: VisualDensity.compact,
+                                  ),
+                                ),
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        skill.name,
+                                        style: const TextStyle(color: Color(0xFFE0E0F0), fontSize: 12, fontWeight: FontWeight.w500),
+                                      ),
+                                      if (skill.description.isNotEmpty)
+                                        Text(
+                                          skill.description,
+                                          style: const TextStyle(color: Color(0xFF8080B0), fontSize: 11),
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: _saving ? null : () => Navigator.of(context).pop(),
+              child: const Text('Cancel', style: TextStyle(color: Color(0xFFB0B0D0), fontSize: 12)),
+            ),
+            TextButton(
+              onPressed: _saving ? null : () => _save(context),
+              child: _saving
+                  ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2))
+                  : const Text(
+                      'Apply',
+                      style: TextStyle(color: Color(0xFF7C7CFF), fontSize: 12, fontWeight: FontWeight.w600),
+                    ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Future<void> _save(BuildContext context) async {
+    setState(() => _saving = true);
+    final cubit = context.read<SkillsCubit>();
+    final wsCubit = context.read<WorkspaceCubit>();
+    Workspace updated = widget.workspace;
+
+    final allIds = {...updated.enabledSkills, ..._enabled};
+    for (final skillId in allIds) {
+      final shouldBeEnabled = _enabled.contains(skillId);
+      final result = await cubit.setSkillEnabledForWorkspace(
+        skillId: skillId,
+        workspace: updated,
+        enabled: shouldBeEnabled,
+      );
+      if (result != null) updated = result;
+    }
+
+    await wsCubit.updateWorkspace(updated);
+    if (mounted) Navigator.of(context).pop();
   }
 }

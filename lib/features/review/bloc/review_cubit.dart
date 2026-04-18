@@ -166,15 +166,21 @@ class ReviewCubit extends Cubit<ReviewState> {
     return null;
   }
 
+  Future<void> createFolder(String parentDirPath, String folderName) async {
+    final newDir = Directory(p.join(parentDirPath, folderName));
+    await newDir.create(recursive: true);
+    await refresh();
+  }
+
   Future<List<FileTreeNode>> _buildFileTree(String dirPath) async {
     try {
       final dir = Directory(dirPath);
-      final entities = dir.listSync(followLinks: false)
+      final entities = dir.listSync(followLinks: true)
         ..sort((a, b) {
           final aIsDir = a is Directory;
           final bIsDir = b is Directory;
           if (aIsDir != bIsDir) return aIsDir ? -1 : 1;
-          return a.path.compareTo(b.path);
+          return p.basename(a.path).toLowerCase().compareTo(p.basename(b.path).toLowerCase());
         });
 
       return entities
@@ -199,12 +205,12 @@ class ReviewCubit extends Cubit<ReviewState> {
         if (!node.isExpanded) {
           // Expand: load children
           final dir = Directory(targetPath);
-          final entities = dir.listSync(followLinks: false)
+          final entities = dir.listSync(followLinks: true)
             ..sort((a, b) {
               final aIsDir = a is Directory;
               final bIsDir = b is Directory;
               if (aIsDir != bIsDir) return aIsDir ? -1 : 1;
-              return a.path.compareTo(b.path);
+              return p.basename(a.path).toLowerCase().compareTo(p.basename(b.path).toLowerCase());
             });
           final children = entities
               .where((e) => p.basename(e.path) != '.git')

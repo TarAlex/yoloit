@@ -572,6 +572,60 @@ class _FileTreeNodeWidgetState extends State<_FileTreeNodeWidget> {
     });
   }
 
+  void _showNewFolderDialog(BuildContext context, String parentDirPath) {
+    final ctrl = TextEditingController();
+    final colors = context.appColors;
+    showDialog<void>(
+      context: context,
+      barrierColor: Colors.black45,
+      builder: (dialogContext) => AlertDialog(
+        backgroundColor: colors.surface,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+        title: const Text('New Folder', style: TextStyle(color: AppColors.textPrimary, fontSize: 14, fontWeight: FontWeight.w600)),
+        content: TextField(
+          controller: ctrl,
+          autofocus: true,
+          style: const TextStyle(color: AppColors.textPrimary, fontSize: 13),
+          decoration: InputDecoration(
+            hintText: 'Folder name',
+            hintStyle: const TextStyle(color: AppColors.textMuted, fontSize: 13),
+            isDense: true,
+            contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(4),
+              borderSide: BorderSide(color: colors.primary),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(4),
+              borderSide: BorderSide(color: colors.primary, width: 1.5),
+            ),
+          ),
+          onSubmitted: (value) {
+            final name = value.trim();
+            Navigator.of(dialogContext).pop();
+            if (name.isEmpty) return;
+            context.read<ReviewCubit>().createFolder(parentDirPath, name);
+          },
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('Cancel', style: TextStyle(color: AppColors.textMuted, fontSize: 13)),
+          ),
+          TextButton(
+            onPressed: () {
+              final name = ctrl.text.trim();
+              Navigator.of(dialogContext).pop();
+              if (name.isEmpty) return;
+              context.read<ReviewCubit>().createFolder(parentDirPath, name);
+            },
+            child: Text('Create', style: TextStyle(color: colors.primary, fontSize: 13, fontWeight: FontWeight.w600)),
+          ),
+        ],
+      ),
+    );
+  }
+
   void _commitRename() {
     if (!_renaming) return;
     final newName = _renameCtrl.text.trim();
@@ -600,6 +654,18 @@ class _FileTreeNodeWidgetState extends State<_FileTreeNodeWidget> {
       context: context,
       position: RelativeRect.fromLTRB(position.dx, position.dy, position.dx + 1, position.dy + 1),
       items: [
+        if (node.isDirectory) ...[
+          PopupMenuItem(
+            value: 'new_folder',
+            height: 32,
+            child: Row(children: [
+              Icon(Icons.create_new_folder_outlined, size: 14, color: AppColors.textMuted),
+              const SizedBox(width: 8),
+              const Text('New Folder', style: TextStyle(fontSize: 13)),
+            ]),
+          ),
+          const PopupMenuDivider(height: 1),
+        ],
         PopupMenuItem(
           value: 'copy_path',
           height: 32,
@@ -644,6 +710,8 @@ class _FileTreeNodeWidgetState extends State<_FileTreeNodeWidget> {
     );
     if (!mounted) return;
     switch (result) {
+      case 'new_folder':
+        _showNewFolderDialog(context, node.path);
       case 'copy_path':
         await Clipboard.setData(ClipboardData(text: node.path));
         if (mounted) {
