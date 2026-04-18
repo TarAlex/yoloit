@@ -1,10 +1,8 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/scheduler.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:path/path.dart' as p;
-import 'package:yoloit/core/theme/app_color_scheme.dart';
 import 'package:yoloit/core/theme/app_colors.dart';
-import 'package:yoloit/features/review/bloc/review_cubit.dart';
+import 'package:yoloit/core/theme/app_color_scheme.dart';
 import 'package:yoloit/features/terminal/bloc/terminal_cubit.dart';
 import 'package:yoloit/features/terminal/bloc/terminal_state.dart';
 import 'package:yoloit/features/terminal/models/agent_session.dart';
@@ -23,9 +21,13 @@ class WorkspaceInlineTree extends StatefulWidget {
 }
 
 class _WorkspaceInlineTreeState extends State<WorkspaceInlineTree> {
-  /// repoPath → list of worktrees (used for branch name lookups)
+  /// repoPath → list of worktrees
   Map<String, List<WorktreeEntry>> _worktrees = {};
   bool _loading = true;
+  /// repoPath → true if branch-add field is shown
+  final Map<String, bool> _showAddBranch = {};
+  /// repoPath → controller for branch name input
+  final Map<String, TextEditingController> _branchControllers = {};
 
   @override
   void initState() {
@@ -55,16 +57,28 @@ class _WorkspaceInlineTreeState extends State<WorkspaceInlineTree> {
     }
   }
 
-  /// Resolves the branch name for [repoPath] given the session's [worktreePath].
-  String _branchName(String repoPath, String worktreePath) {
-    final wt = _worktrees[repoPath]
-        ?.where((w) => w.path == worktreePath)
-        .firstOrNull;
-    if (wt?.branch != null) return wt!.branch!;
-    // Fallback: extract from folder name (reponame__branchname convention)
-    final folder = p.basename(worktreePath);
-    final prefix = '${p.basename(repoPath)}__';
-    return folder.startsWith(prefix) ? folder.substring(prefix.length) : folder;
+  Future<void> _addWorktree(String repoPath, String branchName) async {
+    final worktreePath = p.join(
+      p.dirname(repoPath),
+      '${p.basename(repoPath)}__${branchName.replaceAll('/', '-')}',
+    );
+    await WorktreeService.instance.addWorktree(
+      repoPath,
+      worktreePath,
+      branchName,
+      createNewBranch: true,
+    );
+    _branchControllers[repoPath]?.clear();
+    setState(() => _showAddBranch[repoPath] = false);
+    await _loadWorktrees();
+  }
+
+  @override
+  void dispose() {
+    for (final c in _branchControllers.values) {
+      c.dispose();
+    }
+    super.dispose();
   }
 
   @override
@@ -74,35 +88,41 @@ class _WorkspaceInlineTreeState extends State<WorkspaceInlineTree> {
     return BlocBuilder<TerminalCubit, TerminalState>(
       builder: (context, termState) {
         final sessions = termState is TerminalLoaded
-            ? termState.sessions
+            ? termState.allSessions
                 .where((s) => s.workspaceId == widget.workspace.id)
                 .toList()
             : <AgentSession>[];
-        final activeId = termState is TerminalLoaded
-            ? termState.activeSession?.id
-            : null;
 
+        final paths = widget.workspace.paths;
         return Container(
           padding: const EdgeInsets.only(bottom: 8),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              ...sessions.map((session) => _SessionCard(
-                    session: session,
-                    workspace: widget.workspace,
-                    worktrees: _worktrees,
-                    branchNameResolver: _branchName,
-                    isActive: session.id == activeId,
-                    onActivate: () => context
-                        .read<TerminalCubit>()
-                        .setActiveSessionById(session.id),
-                    onClose: () =>
-                        context.read<TerminalCubit>().closeSession(session.id),
-                  )),
-              _NewSessionButton(
+              ...paths.asMap().entries.map((e) {
+                final isLast = e.key == paths.length - 1;
+                return _RepoTree(
+                  repoPath: e.value,
+                  worktrees: _worktrees[e.value] ?? [],
+                  sessions: sessions,
+                  isLast: isLast && sessions.isEmpty,
+                  showAddBranch: _showAddBranch[e.value] ?? false,
+                  branchController: _branchControllers.putIfAbsent(
+                    e.value,
+                    TextEditingController.new,
+                  ),
+                  onToggleAddBranch: () => setState(
+                    () => _showAddBranch[e.value] =
+                        !(_showAddBranch[e.value] ?? false),
+                  ),
+                  onAddBranch: (branch) => _addWorktree(e.value, branch),
+                );
+              }),
+              _SessionsSection(
                 workspace: widget.workspace,
+                sessions: sessions,
                 worktrees: _worktrees,
-                onSpawned: _loadWorktrees,
+                onRefresh: _loadWorktrees,
               ),
             ],
           ),
@@ -112,306 +132,106 @@ class _WorkspaceInlineTreeState extends State<WorkspaceInlineTree> {
   }
 }
 
-// ── Session card ─────────────────────────────────────────────────────────────
-
-class _SessionCard extends StatefulWidget {
-  const _SessionCard({
-    required this.session,
-    required this.workspace,
-    required this.worktrees,
-    required this.branchNameResolver,
-    required this.isActive,
-    required this.onActivate,
-    required this.onClose,
-  });
-
-  final AgentSession session;
-  final Workspace workspace;
-  final Map<String, List<WorktreeEntry>> worktrees;
-  final String Function(String repoPath, String worktreePath) branchNameResolver;
-  final bool isActive;
-  final VoidCallback onActivate;
-  final VoidCallback onClose;
-
-  @override
-  State<_SessionCard> createState() => _SessionCardState();
-}
-
-class _SessionCardState extends State<_SessionCard> {
-  bool _hovered = false;
-  bool _expanded = true;
-  bool _isRenaming = false;
-  late final TextEditingController _renameController = TextEditingController();
-  final FocusNode _renameFocus = FocusNode();
-
-  @override
-  void dispose() {
-    _renameController.dispose();
-    _renameFocus.dispose();
-    super.dispose();
-  }
-
-  void _startRename() {
-    _renameController.text = _label();
-    _renameController.selection = TextSelection(
-      baseOffset: 0,
-      extentOffset: _renameController.text.length,
-    );
-    setState(() => _isRenaming = true);
-    SchedulerBinding.instance.addPostFrameCallback((_) => _renameFocus.requestFocus());
-  }
-
-  void _commitRename(BuildContext context) {
-    final name = _renameController.text.trim();
-    context.read<TerminalCubit>().renameSession(widget.session.id, name);
-    setState(() => _isRenaming = false);
-  }
-
-  Color _statusColor() {
-    switch (widget.session.status) {
-      case AgentStatus.live:
-        return AppColors.neonGreen;
-      case AgentStatus.idle:
-        return AppColors.neonBlue;
-      case AgentStatus.error:
-        return AppColors.neonRed;
-    }
-  }
-
-  String _label() {
-    if (widget.session.customName?.isNotEmpty == true) {
-      return widget.session.customName!;
-    }
-    // Show agent name + primary non-main branch if any
-    final contexts = widget.session.worktreeContexts;
-    if (contexts != null && contexts.isNotEmpty) {
-      final repoPath = contexts.keys.first;
-      final branch = widget.branchNameResolver(repoPath, contexts[repoPath]!);
-      return '${widget.session.type.displayName} · $branch';
-    }
-    return widget.session.type.displayName;
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.appColors;
-    final isActive = widget.isActive;
-
-    return MouseRegion(
-      onEnter: (_) => setState(() => _hovered = true),
-      onExit: (_) => setState(() => _hovered = false),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Session header row
-          GestureDetector(
-            onTap: () {
-              if (_isRenaming) return;
-              widget.onActivate();
-              setState(() => _expanded = true);
-            },
-            onDoubleTap: _startRename,
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 120),
-              color: isActive
-                  ? colors.primary.withAlpha(25)
-                  : _hovered
-                      ? colors.surfaceHighlight
-                      : Colors.transparent,
-              padding: const EdgeInsets.fromLTRB(12, 8, 8, 8),
-              child: Row(
-                children: [
-                  // Expand/collapse chevron
-                  GestureDetector(
-                    onTap: () => setState(() => _expanded = !_expanded),
-                    child: Icon(
-                      _expanded
-                          ? Icons.keyboard_arrow_down
-                          : Icons.keyboard_arrow_right,
-                      size: 14,
-                      color: AppColors.textMuted,
-                    ),
-                  ),
-                  const SizedBox(width: 5),
-                  // Status dot
-                  Container(
-                    width: 8,
-                    height: 8,
-                    margin: const EdgeInsets.only(right: 6),
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: _statusColor(),
-                    ),
-                  ),
-                  // Agent icon
-                  Text(
-                    widget.session.type.iconLabel,
-                    style: const TextStyle(color: AppColors.textMuted, fontSize: 11),
-                  ),
-                  const SizedBox(width: 5),
-                  // Session label (or rename field)
-                  Expanded(
-                    child: _isRenaming
-                        ? TextField(
-                            controller: _renameController,
-                            focusNode: _renameFocus,
-                            style: const TextStyle(
-                              color: AppColors.textPrimary,
-                              fontSize: 13,
-                              fontWeight: FontWeight.w600,
-                            ),
-                            decoration: const InputDecoration(
-                              isDense: true,
-                              contentPadding: EdgeInsets.zero,
-                              border: InputBorder.none,
-                            ),
-                            onSubmitted: (_) => _commitRename(context),
-                            onTapOutside: (_) => _commitRename(context),
-                          )
-                        : Text(
-                            _label(),
-                            style: TextStyle(
-                              color: isActive
-                                  ? AppColors.textPrimary
-                                  : AppColors.textSecondary,
-                              fontSize: 13,
-                              fontWeight: isActive
-                                  ? FontWeight.w600
-                                  : FontWeight.w500,
-                            ),
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                  ),
-                  // Close button on hover
-                  if (_hovered && !_isRenaming)
-                    GestureDetector(
-                      onTap: widget.onClose,
-                      child: const Icon(Icons.close, size: 14, color: AppColors.textMuted),
-                    ),
-                ],
-              ),
-            ),
-          ),
-
-          // Repo/branch rows (collapsible)
-          if (_expanded) _buildRepoBranches(colors),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildRepoBranches(AppColorScheme colors) {
-    final contexts = widget.session.worktreeContexts;
-    final paths = widget.workspace.paths;
-    final rows = <Widget>[];
-
-    for (var i = 0; i < paths.length; i++) {
-      final repoPath = paths[i];
-      final isLast = i == paths.length - 1;
-      final availableWorktrees = widget.worktrees[repoPath] ?? [];
-      final String currentWorktreePath;
-      final String branch;
-      if (contexts != null && contexts.containsKey(repoPath)) {
-        currentWorktreePath = contexts[repoPath]!;
-        branch = widget.branchNameResolver(repoPath, currentWorktreePath);
-      } else {
-        final mainWt = availableWorktrees.where((w) => w.isMain).firstOrNull;
-        currentWorktreePath = mainWt?.path ?? repoPath;
-        branch = mainWt?.branch ?? 'main';
-      }
-      rows.add(_SessionRepoBranchRow(
-        repoPath: repoPath,
-        branch: branch,
-        isLast: isLast,
-        availableWorktrees: availableWorktrees,
-        onBranchSelected: (newWorktreePath) {
-          final cubit = context.read<TerminalCubit>();
-          final updated = cubit.updateSessionWorktree(
-            widget.session.id,
-            repoPath,
-            newWorktreePath,
-          );
-          if (updated != null) {
-            final reviewCubit = context.read<ReviewCubit>();
-            reviewCubit.loadSession(
-              updated.worktreeContexts!.values.toList(),
-              updated.id,
-            );
-          }
-        },
-      ));
-    }
-
-    return Column(children: rows);
-  }
-}
-
-// ── Repo+branch row inside a session card ─────────────────────────────────
-
-class _SessionRepoBranchRow extends StatelessWidget {
-  const _SessionRepoBranchRow({
+class _RepoTree extends StatelessWidget {
+  const _RepoTree({
     required this.repoPath,
-    required this.branch,
+    required this.worktrees,
+    required this.sessions,
     required this.isLast,
-    required this.availableWorktrees,
-    required this.onBranchSelected,
+    required this.showAddBranch,
+    required this.branchController,
+    required this.onToggleAddBranch,
+    required this.onAddBranch,
   });
 
   final String repoPath;
-  final String branch;
+  final List<WorktreeEntry> worktrees;
+  final List<AgentSession> sessions;
   final bool isLast;
-  final List<WorktreeEntry> availableWorktrees;
-  final ValueChanged<String> onBranchSelected;
-
-  void _showBranchMenu(BuildContext context, RenderBox box) {
-    final offset = box.localToGlobal(Offset.zero);
-    final size = box.size;
-    showMenu<String>(
-      context: context,
-      color: const Color(0xFF1E2130),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-      position: RelativeRect.fromLTRB(
-        offset.dx,
-        offset.dy + size.height + 4,
-        offset.dx + size.width,
-        offset.dy + size.height + 4 + 200,
-      ),
-      items: availableWorktrees
-          .where((wt) => wt.branch != null)
-          .map(
-            (wt) => PopupMenuItem<String>(
-              value: wt.path,
-              height: 32,
-              padding: const EdgeInsets.symmetric(horizontal: 12),
-              child: Row(
-                children: [
-                  if (wt.branch == branch)
-                    const Icon(Icons.check, size: 12, color: AppColors.neonGreen)
-                  else
-                    const SizedBox(width: 12),
-                  const SizedBox(width: 6),
-                  Text(
-                    wt.branch!,
-                    style: TextStyle(
-                      color: wt.branch == branch
-                          ? AppColors.neonBlue
-                          : AppColors.textSecondary,
-                      fontSize: 12,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          )
-          .toList(),
-    ).then((selected) {
-      if (selected != null) onBranchSelected(selected);
-    });
-  }
+  final bool showAddBranch;
+  final TextEditingController branchController;
+  final VoidCallback onToggleAddBranch;
+  final ValueChanged<String> onAddBranch;
 
   @override
   Widget build(BuildContext context) {
     final repoName = p.basename(repoPath);
+    final children = <Widget>[];
+
+    for (var i = 0; i < worktrees.length; i++) {
+      final wt = worktrees[i];
+      final isLastChild = i == worktrees.length - 1 && !showAddBranch;
+      final hasSession = sessions.any((s) =>
+          s.worktreeContexts != null &&
+          s.worktreeContexts![repoPath] == wt.path);
+      children.add(
+        _BranchRow(
+          entry: wt,
+          isLast: isLastChild,
+          hasSession: hasSession,
+        ),
+      );
+    }
+
+    if (showAddBranch) {
+      children.add(_AddBranchField(
+        controller: branchController,
+        onSubmit: onAddBranch,
+        onCancel: onToggleAddBranch,
+      ));
+    } else {
+      children.add(_AddBranchButton(onTap: onToggleAddBranch));
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 2, 8, 2),
+          child: Row(
+            children: [
+              Icon(Icons.folder_open, size: 14, color: AppColors.neonBlue.withAlpha(180)),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  repoName,
+                  style: const TextStyle(
+                    color: AppColors.textSecondary,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w500,
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
+          ),
+        ),
+        ...children,
+      ],
+    );
+  }
+}
+
+class _BranchRow extends StatelessWidget {
+  const _BranchRow({
+    required this.entry,
+    required this.isLast,
+    required this.hasSession,
+  });
+
+  final WorktreeEntry entry;
+  final bool isLast;
+  final bool hasSession;
+
+  Color _dotColor() {
+    if (entry.isMain) return AppColors.neonGreen;
+    if (hasSession) return AppColors.neonBlue;
+    return AppColors.textMuted;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final branch = entry.branch ?? entry.commit ?? '(detached)';
     return Padding(
       padding: const EdgeInsets.fromLTRB(28, 1, 8, 1),
       child: Row(
@@ -420,45 +240,23 @@ class _SessionRepoBranchRow extends StatelessWidget {
             isLast ? '└─ ' : '├─ ',
             style: const TextStyle(color: AppColors.textMuted, fontSize: 10),
           ),
-          Icon(Icons.folder_open, size: 11, color: AppColors.neonBlue.withAlpha(160)),
-          const SizedBox(width: 4),
-          Expanded(
-            child: Text(
-              repoName,
-              style: const TextStyle(color: AppColors.textSecondary, fontSize: 11),
-              overflow: TextOverflow.ellipsis,
+          Container(
+            width: 6,
+            height: 6,
+            margin: const EdgeInsets.only(right: 6),
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: _dotColor(),
             ),
           ),
-          GestureDetector(
-            onTap: () {
-              final box = context.findRenderObject() as RenderBox?;
-              if (box != null) _showBranchMenu(context, box);
-            },
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
-              decoration: BoxDecoration(
-                color: AppColors.neonBlue.withAlpha(30),
-                borderRadius: BorderRadius.circular(4),
-                border: Border.all(color: AppColors.neonBlue.withAlpha(60)),
+          Expanded(
+            child: Text(
+              branch,
+              style: const TextStyle(
+                color: AppColors.textSecondary,
+                fontSize: 11,
               ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    branch,
-                    style: const TextStyle(
-                      color: AppColors.neonBlue,
-                      fontSize: 9,
-                      fontWeight: FontWeight.w500,
-                    ),
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  if (availableWorktrees.length > 1) ...[
-                    const SizedBox(width: 2),
-                    const Icon(Icons.arrow_drop_down, size: 10, color: AppColors.neonBlue),
-                  ],
-                ],
-              ),
+              overflow: TextOverflow.ellipsis,
             ),
           ),
         ],
@@ -467,7 +265,243 @@ class _SessionRepoBranchRow extends StatelessWidget {
   }
 }
 
-// ── New Session button ────────────────────────────────────────────────────
+class _AddBranchButton extends StatelessWidget {
+  const _AddBranchButton({required this.onTap});
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(28, 1, 8, 1),
+        child: Row(
+          children: [
+            const Text('└─ ', style: TextStyle(color: AppColors.textMuted, fontSize: 10)),
+            const Flexible(
+              child: Text(
+                '＋ new branch...',
+                style: TextStyle(color: AppColors.textMuted, fontSize: 11),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _AddBranchField extends StatelessWidget {
+  const _AddBranchField({
+    required this.controller,
+    required this.onSubmit,
+    required this.onCancel,
+  });
+
+  final TextEditingController controller;
+  final ValueChanged<String> onSubmit;
+  final VoidCallback onCancel;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.appColors;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(28, 2, 8, 2),
+      child: Row(
+        children: [
+          const Text('└─ ', style: TextStyle(color: AppColors.textMuted, fontSize: 10)),
+          Expanded(
+            child: TextField(
+              controller: controller,
+              autofocus: true,
+              style: TextStyle(color: colors.primary, fontSize: 11),
+              decoration: InputDecoration(
+                hintText: 'branch-name',
+                hintStyle: const TextStyle(color: AppColors.textMuted, fontSize: 11),
+                isDense: true,
+                contentPadding: const EdgeInsets.symmetric(horizontal: 0, vertical: 2),
+                filled: false,
+                border: InputBorder.none,
+                enabledBorder: UnderlineInputBorder(
+                  borderSide: BorderSide(color: colors.border, width: 1),
+                ),
+                focusedBorder: UnderlineInputBorder(
+                  borderSide: BorderSide(color: colors.primary, width: 1),
+                ),
+              ),
+              onSubmitted: (v) {
+                final branch = v.trim();
+                if (branch.isNotEmpty) onSubmit(branch);
+              },
+              onEditingComplete: () {},
+            ),
+          ),
+          const SizedBox(width: 4),
+          GestureDetector(
+            onTap: onCancel,
+            child: const Icon(Icons.close, size: 11, color: AppColors.textMuted),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SessionsSection extends StatelessWidget {
+  const _SessionsSection({
+    required this.workspace,
+    required this.sessions,
+    required this.worktrees,
+    required this.onRefresh,
+  });
+
+  final Workspace workspace;
+  final List<AgentSession> sessions;
+  final Map<String, List<WorktreeEntry>> worktrees;
+  final VoidCallback onRefresh;
+
+  String _sessionLabel(AgentSession s) {
+    if (s.customName?.isNotEmpty == true) return s.customName!;
+    if (s.worktreeContexts != null && s.worktreeContexts!.isNotEmpty) {
+      // Resolve the actual branch name from the worktree path.
+      // worktreeContexts maps repoPath → worktreePath (e.g. ".../yoloit__my_new_branch").
+      // We match against the loaded worktrees list first; fall back to stripping
+      // the "<repoName>__" prefix from the directory basename.
+      final firstEntry = s.worktreeContexts!.entries.first;
+      final repoPath = firstEntry.key;
+      final worktreePath = firstEntry.value;
+
+      final wtList = worktrees[repoPath] ?? [];
+      String? branchName;
+      for (final wt in wtList) {
+        if (wt.path == worktreePath) {
+          branchName = wt.branch;
+          break;
+        }
+      }
+      if (branchName == null) {
+        final dirName = p.basename(worktreePath);
+        final prefix = '${p.basename(repoPath)}__';
+        branchName = dirName.startsWith(prefix) ? dirName.substring(prefix.length) : dirName;
+      }
+      return '${s.type.displayName} · $branchName';
+    }
+    return s.type.displayName;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Padding(
+          padding: EdgeInsets.fromLTRB(12, 8, 8, 4),
+          child: Text(
+            'Agent Sessions',
+            style: TextStyle(
+              color: AppColors.textMuted,
+              fontSize: 10,
+              fontWeight: FontWeight.w600,
+              letterSpacing: 0.8,
+            ),
+          ),
+        ),
+        ...sessions.asMap().entries.map((e) {
+          final isLast = e.key == sessions.length - 1;
+          return _SessionRow(
+            session: e.value,
+            label: _sessionLabel(e.value),
+            isLast: isLast,
+          );
+        }),
+        _NewSessionButton(workspace: workspace, worktrees: worktrees, onSpawned: onRefresh),
+      ],
+    );
+  }
+}
+
+class _SessionRow extends StatefulWidget {
+  const _SessionRow({
+    required this.session,
+    required this.label,
+    required this.isLast,
+  });
+
+  final AgentSession session;
+  final String label;
+  final bool isLast;
+
+  @override
+  State<_SessionRow> createState() => _SessionRowState();
+}
+
+class _SessionRowState extends State<_SessionRow> {
+  bool _hovered = false;
+
+  Color _statusColor() {
+    switch (widget.session.status) {
+      case AgentStatus.live:
+        return AppColors.neonGreen;
+      case AgentStatus.idle:
+        return AppColors.textMuted;
+      case AgentStatus.error:
+        return AppColors.neonRed;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.appColors;
+    return MouseRegion(
+      onEnter: (_) => setState(() => _hovered = true),
+      onExit: (_) => setState(() => _hovered = false),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
+        color: _hovered ? colors.surfaceHighlight : colors.background.withAlpha(0),
+        padding: const EdgeInsets.fromLTRB(28, 1, 8, 1),
+        child: Row(
+          children: [
+            Text(
+              widget.isLast ? '└─ ' : '├─ ',
+              style: const TextStyle(color: AppColors.textMuted, fontSize: 10),
+            ),
+            Container(
+              width: 6,
+              height: 6,
+              margin: const EdgeInsets.only(right: 6),
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: _statusColor(),
+              ),
+            ),
+            Text(
+              widget.session.type.iconLabel,
+              style: const TextStyle(color: AppColors.textMuted, fontSize: 10),
+            ),
+            const SizedBox(width: 4),
+            Expanded(
+              child: Text(
+                widget.label,
+                style: const TextStyle(
+                  color: AppColors.textSecondary,
+                  fontSize: 11,
+                ),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            if (_hovered)
+              GestureDetector(
+                onTap: () =>
+                    context.read<TerminalCubit>().closeSession(widget.session.id),
+                child: const Icon(Icons.close, size: 12, color: AppColors.textMuted),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
 
 class _NewSessionButton extends StatelessWidget {
   const _NewSessionButton({
@@ -483,18 +517,13 @@ class _NewSessionButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
-      onTap: () => showNewAgentSessionDialog(
-        context,
-        workspace: workspace,
-        worktrees: worktrees,
-        onSpawned: onSpawned,
-      ),
-      child: const Padding(
-        padding: EdgeInsets.fromLTRB(28, 4, 8, 4),
+      onTap: () => _showDialog(context),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(28, 2, 8, 4),
         child: Row(
           children: [
-            Text('└─ ', style: TextStyle(color: AppColors.textMuted, fontSize: 10)),
-            Flexible(
+            const Text('└─ ', style: TextStyle(color: AppColors.textMuted, fontSize: 10)),
+            const Flexible(
               child: Text(
                 '＋ New Agent Session',
                 style: TextStyle(color: AppColors.textMuted, fontSize: 11),
@@ -506,4 +535,14 @@ class _NewSessionButton extends StatelessWidget {
       ),
     );
   }
+
+  void _showDialog(BuildContext context) {
+    showNewAgentSessionDialog(
+      context,
+      workspace: workspace,
+      worktrees: worktrees,
+      onSpawned: onSpawned,
+    );
+  }
 }
+
