@@ -41,5 +41,5 @@ class TerminalLoaded extends TerminalState {
   }
 
   @override
-  List<Object?> get props => [sessions.map((s) => s.id).toList(), activeIndex, allSessions.map((s) => s.id).toList()];
+  List<Object?> get props => [sessions, activeIndex, allSessions];
 }

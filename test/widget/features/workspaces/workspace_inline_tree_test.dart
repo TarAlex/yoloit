@@ -61,63 +61,51 @@ void main() {
   setUp(() => SharedPreferences.setMockInitialValues({}));
 
   group('WorkspaceInlineTree widget tests', () {
-    testWidgets('shows nothing initially while loading, then shows repo names after async completes',
-        (tester) async {
+    testWidgets('shows nothing initially while loading', (tester) async {
       await tester.pumpWidget(_buildTest());
 
-      // During loading phase, widget returns SizedBox.shrink() — nothing visible
+      // During loading phase, widget returns SizedBox.shrink()
       expect(find.text('repo-a'), findsNothing);
       expect(find.text('repo-b'), findsNothing);
 
-      // Wait for async git calls to finish (they fail for fake paths, returning [])
+      // Let async worktree loading complete to avoid pending timers
       await tester.pump(const Duration(seconds: 3));
-
-      // After loading completes, repo names are shown
-      expect(find.text('repo-a'), findsOneWidget);
-      expect(find.text('repo-b'), findsOneWidget);
     });
 
-    testWidgets('shows repo name (basename of path) for each path in workspace.paths',
-        (tester) async {
-      await tester.pumpWidget(_buildTest());
-      await tester.pump(const Duration(seconds: 3));
-
-      expect(find.text('repo-a'), findsOneWidget);
-      expect(find.text('repo-b'), findsOneWidget);
-    });
-
-    testWidgets('shows single repo name for single-path workspace', (tester) async {
-      const singleRepoWs = Workspace(
-        id: 'ws_single',
-        name: 'single',
-        paths: ['/some/my-only-repo'],
-      );
-      await tester.pumpWidget(_buildTest(workspace: singleRepoWs));
-      await tester.pump(const Duration(seconds: 3));
-
-      expect(find.text('my-only-repo'), findsOneWidget);
-    });
-
-    testWidgets('shows "＋ new branch..." button for each repo after load', (tester) async {
-      await tester.pumpWidget(_buildTest());
-      await tester.pump(const Duration(seconds: 3));
-
-      // "＋ new branch..." appears for each repo (uses fullwidth ＋)
-      expect(find.text('＋ new branch...'), findsNWidgets(2));
-    });
-
-    testWidgets('shows "Agent Sessions" section header', (tester) async {
-      await tester.pumpWidget(_buildTest());
-      await tester.pump(const Duration(seconds: 3));
-
-      expect(find.text('Agent Sessions'), findsOneWidget);
-    });
-
-    testWidgets('shows "＋ New Agent Session" button', (tester) async {
+    testWidgets('shows "＋ New Agent Session" button after load', (tester) async {
       await tester.pumpWidget(_buildTest());
       await tester.pump(const Duration(seconds: 3));
 
       expect(find.text('＋ New Agent Session'), findsOneWidget);
+    });
+
+    testWidgets('shows no repo names when there are no sessions', (tester) async {
+      await tester.pumpWidget(_buildTest());
+      await tester.pump(const Duration(seconds: 3));
+
+      // Repo names only appear inside session cards, not without a session
+      expect(find.text('repo-a'), findsNothing);
+      expect(find.text('repo-b'), findsNothing);
+    });
+
+    testWidgets('shows repo names inside session card when session exists', (tester) async {
+      final session = AgentSession(
+        id: 'sess_ws_test',
+        type: AgentType.copilot,
+        workspacePath: '/fake/repo-a',
+        workspaceId: 'ws_test',
+      );
+      final termState = TerminalLoaded(
+        sessions: [session],
+        activeIndex: 0,
+        allSessions: [session],
+      );
+
+      await tester.pumpWidget(_buildTest(termState: termState));
+      await tester.pump(const Duration(seconds: 3));
+
+      expect(find.text('repo-a'), findsOneWidget);
+      expect(find.text('repo-b'), findsOneWidget);
     });
 
     testWidgets('shows agent sessions that belong to the workspace', (tester) async {

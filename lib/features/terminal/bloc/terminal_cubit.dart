@@ -188,6 +188,16 @@ class TerminalCubit extends Cubit<TerminalState> {
     unawaited(SessionPrefs.saveActiveTerminalIdx(index));
   }
 
+  /// Switches the active session to the one with [sessionId].
+  /// No-op if the session is not in the current workspace or already active.
+  void setActiveSessionById(String sessionId) {
+    final current = _loaded;
+    if (current == null) return;
+    final idx = current.sessions.indexWhere((s) => s.id == sessionId);
+    if (idx == -1 || idx == current.activeIndex) return;
+    switchTab(idx);
+  }
+
   void renameSession(String sessionId, String name) {
     final idx = _allSessions.indexWhere((s) => s.id == sessionId);
     if (idx == -1) return;
@@ -200,6 +210,23 @@ class TerminalCubit extends Cubit<TerminalState> {
     _emitLoaded(visible, current?.activeIndex ?? 0);
     final wsId = _activeWorkspaceId;
     if (wsId != null) unawaited(_persistence.save(visible, wsId));
+  }
+
+  /// Updates the worktree path for [repoPath] inside [sessionId].
+  /// Returns the updated [AgentSession] so callers can react (e.g. reload file tree).
+  AgentSession? updateSessionWorktree(String sessionId, String repoPath, String newWorktreePath) {
+    final idx = _allSessions.indexWhere((s) => s.id == sessionId);
+    if (idx == -1) return null;
+    final old = _allSessions[idx];
+    final updatedContexts = Map<String, String>.from(old.worktreeContexts ?? {});
+    updatedContexts[repoPath] = newWorktreePath;
+    _allSessions[idx] = old.copyWith(worktreeContexts: updatedContexts);
+    final visible = _workspaceSessions;
+    final current = _loaded;
+    _emitLoaded(visible, current?.activeIndex ?? 0);
+    final wsId = _activeWorkspaceId;
+    if (wsId != null) unawaited(_persistence.save(visible, wsId));
+    return _allSessions[idx];
   }
 
   void closeSession(String sessionId) {
