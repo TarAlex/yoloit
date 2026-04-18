@@ -364,8 +364,27 @@ class _SessionsSection extends StatelessWidget {
   String _sessionLabel(AgentSession s) {
     if (s.customName?.isNotEmpty == true) return s.customName!;
     if (s.worktreeContexts != null && s.worktreeContexts!.isNotEmpty) {
-      final branch = s.worktreeContexts!.values.first;
-      final branchName = p.basename(branch);
+      // Resolve the actual branch name from the worktree path.
+      // worktreeContexts maps repoPath → worktreePath (e.g. ".../yoloit__my_new_branch").
+      // We match against the loaded worktrees list first; fall back to stripping
+      // the "<repoName>__" prefix from the directory basename.
+      final firstEntry = s.worktreeContexts!.entries.first;
+      final repoPath = firstEntry.key;
+      final worktreePath = firstEntry.value;
+
+      final wtList = worktrees[repoPath] ?? [];
+      String? branchName;
+      for (final wt in wtList) {
+        if (wt.path == worktreePath) {
+          branchName = wt.branch;
+          break;
+        }
+      }
+      if (branchName == null) {
+        final dirName = p.basename(worktreePath);
+        final prefix = '${p.basename(repoPath)}__';
+        branchName = dirName.startsWith(prefix) ? dirName.substring(prefix.length) : dirName;
+      }
       return '${s.type.displayName} · $branchName';
     }
     return s.type.displayName;
