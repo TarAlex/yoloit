@@ -1,0 +1,222 @@
+{
+  "version": 1,
+  "stores": [
+    {
+      "id": "flutter-skills",
+      "name": "Flutter Skills",
+      "type": "github",
+      "url": "flutter/skills",
+      "isBuiltIn": true
+    },
+    {
+      "id": "remotion-skills",
+      "name": "Remotion AI Skills",
+      "type": "url",
+      "url": "https://www.remotion.dev/docs/ai/skills",
+      "isBuiltIn": true
+    },
+    {
+      "id": "dmtools-skills",
+      "name": "DMTools Skills",
+      "type": "installScript",
+      "url": "curl -fsSL https://github.com/epam/dm.ai/releases/download/v1.7.175/skill-install.sh | bash",
+      "isBuiltIn": true
+    }
+  ],
+  "catalog": [
+    {
+      "id": "flutter-adding-home-screen-widgets",
+      "name": "Adding Home Screen Widgets",
+      "description": "Add home screen widgets to a Flutter app.",
+      "source": "flutter/skills",
+      "sourceType": "github",
+      "storeId": "flutter-skills"
+    },
+    {
+      "id": "flutter-animating-apps",
+      "name": "Animating Apps",
+      "description": "Add animations and transitions to Flutter apps.",
+      "source": "flutter/skills",
+      "sourceType": "github",
+      "storeId": "flutter-skills"
+    },
+    {
+      "id": "flutter-architecting-apps",
+      "name": "Architecting Apps",
+      "description": "Structure and architect Flutter apps with best practices.",
+      "source": "flutter/skills",
+      "sourceType": "github",
+      "storeId": "flutter-skills"
+    },
+    {
+      "id": "flutter-building-forms",
+      "name": "Building Forms",
+      "description": "Build forms and handle user input in Flutter.",
+      "source": "flutter/skills",
+      "sourceType": "github",
+      "storeId": "flutter-skills"
+    },
+    {
+      "id": "flutter-building-layouts",
+      "name": "Building Layouts",
+      "description": "Create and manage flexible layouts in Flutter.",
+      "source": "flutter/skills",
+      "sourceType": "github",
+      "storeId": "flutter-skills"
+    },
+    {
+      "id": "flutter-building-plugins",
+      "name": "Building Plugins",
+      "description": "Create Flutter platform plugins for native code integration.",
+      "source": "flutter/skills",
+      "sourceType": "github",
+      "storeId": "flutter-skills"
+    },
+    {
+      "id": "flutter-caching-data",
+      "name": "Caching Data",
+      "description": "Cache data efficiently in Flutter apps.",
+      "source": "flutter/skills",
+      "sourceType": "github",
+      "storeId": "flutter-skills"
+    },
+    {
+      "id": "flutter-embedding-native-views",
+      "name": "Embedding Native Views",
+      "description": "Embed native platform views inside Flutter widgets.",
+      "source": "flutter/skills",
+      "sourceType": "github",
+      "storeId": "flutter-skills"
+    },
+    {
+      "id": "flutter-handling-concurrency",
+      "name": "Handling Concurrency",
+      "description": "Manage async operations and concurrency in Flutter.",
+      "source": "flutter/skills",
+      "sourceType": "github",
+      "storeId": "flutter-skills"
+    },
+    {
+      "id": "flutter-handling-http-and-json",
+      "name": "Handling HTTP and JSON",
+      "description": "Make HTTP requests and parse JSON data in Flutter.",
+      "source": "flutter/skills",
+      "sourceType": "github",
+      "storeId": "flutter-skills"
+    },
+    {
+      "id": "flutter-implementing-navigation-and-routing",
+      "name": "Navigation and Routing",
+      "description": "Implement navigation and routing in Flutter apps.",
+      "source": "flutter/skills",
+      "sourceType": "github",
+      "storeId": "flutter-skills"
+    },
+    {
+      "id": "flutter-improving-accessibility",
+      "name": "Improving Accessibility",
+      "description": "Make Flutter apps accessible to all users.",
+      "source": "flutter/skills",
+      "sourceType": "github",
+      "storeId": "flutter-skills"
+    },
+    {
+      "id": "flutter-interoperating-with-native-apis",
+      "name": "Native API Interop",
+      "description": "Use native platform APIs from Flutter via platform channels.",
+      "source": "flutter/skills",
+      "sourceType": "github",
+      "storeId": "flutter-skills"
+    },
+    {
+      "id": "flutter-localizing-apps",
+      "name": "Localizing Apps",
+      "description": "Add internationalization and localization to Flutter apps.",
+      "source": "flutter/skills",
+      "sourceType": "github",
+      "storeId": "flutter-skills"
+    },
+    {
+      "id": "flutter-managing-state",
+      "name": "Managing State",
+      "description": "Manage application and ephemeral state in Flutter.",
+      "source": "flutter/skills",
+      "sourceType": "github",
+      "storeId": "flutter-skills"
+    },
+    {
+      "id": "flutter-reducing-app-size",
+      "name": "Reducing App Size",
+      "description": "Optimize and reduce Flutter app build size.",
+      "source": "flutter/skills",
+      "sourceType": "github",
+      "storeId": "flutter-skills"
+    },
+    {
+      "id": "flutter-setting-up-on-linux",
+      "name": "Setup on Linux",
+      "description": "Set up Flutter development environment on Linux.",
+      "source": "flutter/skills",
+      "sourceType": "github",
+      "storeId": "flutter-skills"
+    },
+    {
+      "id": "flutter-setting-up-on-macos",
+      "name": "Setup on macOS",
+      "description": "Set up Flutter development environment on macOS.",
+      "source": "flutter/skills",
+      "sourceType": "github",
+      "storeId": "flutter-skills"
+    },
+    {
+      "id": "flutter-setting-up-on-windows",
+      "name": "Setup on Windows",
+      "description": "Set up Flutter development environment on Windows.",
+      "source": "flutter/skills",
+      "sourceType": "github",
+      "storeId": "flutter-skills"
+    },
+    {
+      "id": "flutter-testing-apps",
+      "name": "Testing Apps",
+      "description": "Write unit, widget, and integration tests for Flutter apps.",
+      "source": "flutter/skills",
+      "sourceType": "github",
+      "storeId": "flutter-skills"
+    },
+    {
+      "id": "flutter-theming-apps",
+      "name": "Theming Apps",
+      "description": "Apply custom themes and styling to Flutter apps.",
+      "source": "flutter/skills",
+      "sourceType": "github",
+      "storeId": "flutter-skills"
+    },
+    {
+      "id": "flutter-working-with-databases",
+      "name": "Working with Databases",
+      "description": "Integrate local and remote databases in Flutter apps.",
+      "source": "flutter/skills",
+      "sourceType": "github",
+      "storeId": "flutter-skills"
+    },
+    {
+      "id": "dmtools-skills",
+      "name": "DMTools Skills",
+      "description": "Install DMTools AI skill set via the official installer script.",
+      "source": "curl -fsSL https://github.com/epam/dm.ai/releases/download/v1.7.175/skill-install.sh | bash",
+      "sourceType": "installScript",
+      "storeId": "dmtools-skills",
+      "installCommand": "curl -fsSL https://github.com/epam/dm.ai/releases/download/v1.7.175/skill-install.sh | bash"
+    },
+    {
+      "id": "remotion-skills",
+      "name": "Remotion AI Skills",
+      "description": "Skills for working with Remotion — a framework for creating videos programmatically.",
+      "source": "https://www.remotion.dev/docs/ai/skills",
+      "sourceType": "url",
+      "storeId": "remotion-skills",
+      "installUrl": "https://www.remotion.dev/docs/ai/skills"
+    }
+  ]
+}

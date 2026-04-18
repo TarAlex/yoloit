@@ -44,6 +44,9 @@ abstract class PlatformDirs {
   /// System temp directory (suitable for short-lived files).
   String get tempDir;
 
+  /// Directory for globally installed skills (~/.config/yoloit/skills/).
+  String get skillsDir;
+
   /// Convenience: a dedicated YoLoIT temp sub-directory.
   String get yoloitTempDir => '${Directory.systemTemp.path}/yoloit_tmp';
 }
@@ -74,6 +77,9 @@ class MacosPlatformDirs extends PlatformDirs {
 
   @override
   String get tempDir => Directory.systemTemp.path;
+
+  @override
+  String get skillsDir => '$_home/.config/yoloit/skills';
 }
 
 // ── Linux ────────────────────────────────────────────────────────────────────
@@ -102,6 +108,9 @@ class LinuxPlatformDirs extends PlatformDirs {
 
   @override
   String get tempDir => Directory.systemTemp.path;
+
+  @override
+  String get skillsDir => '$_home/.config/yoloit/skills';
 }
 
 // ── Windows ──────────────────────────────────────────────────────────────────
@@ -137,4 +146,7 @@ class WindowsPlatformDirs extends PlatformDirs {
       Platform.environment['TEMP'] ??
       Platform.environment['TMP'] ??
       'C:\\Windows\\Temp';
+
+  @override
+  String get skillsDir => '$_appData\\yoloit\\skills';
 }
