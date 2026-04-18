@@ -1,7 +1,9 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:yoloit/core/platform/platform_launcher.dart';
 import 'package:yoloit/core/session/session_prefs.dart';
 import 'package:yoloit/core/theme/app_color_scheme.dart';
 import 'package:yoloit/core/theme/app_colors.dart';
@@ -231,6 +233,17 @@ class _Body extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          if (Platform.isMacOS) ...[
+            const _SectionTitle(
+              icon: Icons.folder_open_outlined,
+              label: 'macOS Permissions',
+              subtitle: 'Allow access to folders on your Mac',
+            ),
+            const SizedBox(height: 10),
+            const _MacOsPermissionsCard(),
+            const SizedBox(height: 28),
+          ],
+
           const _SectionTitle(
             icon: Icons.settings_suggest_outlined,
             label: 'System Dependencies',
@@ -251,6 +264,178 @@ class _Body extends StatelessWidget {
           const SizedBox(height: 10),
           ...result.agents.map((agent) => _DependencyCard(dep: agent, onInstalled: onRecheck)),
         ],
+      ),
+    );
+  }
+}
+
+// ── macOS Permissions card ────────────────────────────────────────────────────
+
+enum _PermissionStatus { unknown, granted, denied }
+
+class _MacOsPermissionsCard extends StatefulWidget {
+  const _MacOsPermissionsCard();
+
+  @override
+  State<_MacOsPermissionsCard> createState() => _MacOsPermissionsCardState();
+}
+
+class _MacOsPermissionsCardState extends State<_MacOsPermissionsCard> {
+  _PermissionStatus _status = _PermissionStatus.unknown;
+  bool _checking = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _check();
+  }
+
+  Future<void> _check() async {
+    setState(() => _checking = true);
+    final granted = await _canAccessDocuments();
+    if (mounted) {
+      setState(() {
+        _status = granted ? _PermissionStatus.granted : _PermissionStatus.denied;
+        _checking = false;
+      });
+    }
+  }
+
+  /// Tries to list ~/Documents without triggering a TCC prompt.
+  static Future<bool> _canAccessDocuments() async {
+    try {
+      final home = Platform.environment['HOME'] ?? '';
+      final docs = Directory('$home/Documents');
+      await docs.list().first;
+      return true;
+    } on PathAccessException {
+      return false;
+    } catch (_) {
+      return true;
+    }
+  }
+
+  Future<void> _openPrivacySettings() async {
+    await PlatformLauncher.instance.openUrl(
+      'x-apple.systempreferences:com.apple.preference.security?Privacy_FilesAndFolders',
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.appColors;
+
+    final Color statusColor;
+    final IconData statusIcon;
+
+    if (_checking) {
+      statusColor = AppColors.neonBlue;
+      statusIcon = Icons.hourglass_top_rounded;
+    } else if (_status == _PermissionStatus.granted) {
+      statusColor = AppColors.neonGreen;
+      statusIcon = Icons.check_circle_outline;
+    } else {
+      statusColor = AppColors.neonOrange;
+      statusIcon = Icons.warning_amber_rounded;
+    }
+
+    final borderColor = _status == _PermissionStatus.granted
+        ? AppColors.neonGreen.withAlpha(60)
+        : _checking
+            ? AppColors.neonBlue.withAlpha(60)
+            : AppColors.neonOrange.withAlpha(60);
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 6),
+      decoration: BoxDecoration(
+        color: colors.surfaceElevated,
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: borderColor),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        child: Row(
+          children: [
+            if (_checking)
+              const SizedBox(
+                width: 14, height: 14,
+                child: CircularProgressIndicator(strokeWidth: 1.5, color: AppColors.neonBlue),
+              )
+            else
+              Icon(statusIcon, size: 14, color: statusColor),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Folder Access',
+                    style: TextStyle(color: AppColors.textPrimary, fontSize: 12, fontWeight: FontWeight.w500),
+                  ),
+                  const SizedBox(height: 1),
+                  const Text(
+                    'Allow YoLoIT in System Settings → Privacy & Security → Files and Folders',
+                    style: TextStyle(color: AppColors.textMuted, fontSize: 10),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            if (_checking)
+              const SizedBox.shrink()
+            else ...[
+              if (_status == _PermissionStatus.granted)
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: AppColors.neonGreen.withAlpha(20),
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: const Text('Granted', style: TextStyle(color: AppColors.neonGreen, fontSize: 9, fontWeight: FontWeight.w600)),
+                )
+              else ...[
+                GestureDetector(
+                  onTap: _check,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(4),
+                      border: Border.all(color: AppColors.textMuted.withAlpha(60)),
+                    ),
+                    child: const Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.refresh, size: 9, color: AppColors.textMuted),
+                        SizedBox(width: 3),
+                        Text('Re-check', style: TextStyle(color: AppColors.textMuted, fontSize: 9)),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 4),
+              ],
+              GestureDetector(
+                onTap: _openPrivacySettings,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: AppColors.neonBlue.withAlpha(20),
+                    borderRadius: BorderRadius.circular(4),
+                    border: Border.all(color: AppColors.neonBlue.withAlpha(60)),
+                  ),
+                  child: const Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.security_outlined, size: 10, color: AppColors.neonBlue),
+                      SizedBox(width: 4),
+                      Text('Privacy Settings', style: TextStyle(color: AppColors.neonBlue, fontSize: 9, fontWeight: FontWeight.w600)),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ],
+        ),
       ),
     );
   }
@@ -404,7 +589,7 @@ class _DependencyCardState extends State<_DependencyCard> {
               children: [
                 // Status icon / spinner
                 if (_phase == _Phase.installing)
-                  SizedBox(
+                  const SizedBox(
                     width: 14, height: 14,
                     child: CircularProgressIndicator(
                       strokeWidth: 1.5,
