@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:yoloit/core/theme/app_colors.dart';
 import 'package:yoloit/core/theme/app_theme.dart';
 import 'package:yoloit/core/theme/theme_manager.dart';
 import 'package:yoloit/features/settings/ui/settings_page.dart';
+import 'package:yoloit/features/workspaces/bloc/workspace_cubit.dart';
 
 void main() {
   setUp(() async {
@@ -105,11 +107,14 @@ void main() {
       await tester.pumpWidget(
         MaterialApp(
           theme: AppThemePreset.neonPurple.theme,
-          home: Scaffold(
-            body: Builder(
-              builder: (ctx) => TextButton(
-                onPressed: () => SettingsPage.show(ctx),
-                child: const Text('Open'),
+          home: BlocProvider(
+            create: (_) => WorkspaceCubit(),
+            child: Scaffold(
+              body: Builder(
+                builder: (ctx) => TextButton(
+                  onPressed: () => SettingsPage.show(ctx),
+                  child: const Text('Open'),
+                ),
               ),
             ),
           ),

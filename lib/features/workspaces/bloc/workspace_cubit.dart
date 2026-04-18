@@ -169,6 +169,15 @@ class WorkspaceCubit extends Cubit<WorkspaceState> {
     }
   }
 
+  /// Updates a single workspace (e.g. after skill enablement changes) and persists.
+  Future<void> updateWorkspace(Workspace workspace) async {
+    final current = _currentLoaded;
+    if (current == null) return;
+    final updated = current.workspaces.map((w) => w.id == workspace.id ? workspace : w).toList();
+    emit(current.copyWith(workspaces: updated));
+    await _save(updated);
+  }
+
   Future<void> _refreshGitInfo(String id) async {
     final current = _currentLoaded;
     if (current == null) return;

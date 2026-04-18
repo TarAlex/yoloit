@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:yoloit/core/hotkeys/hotkey_definition.dart';
 import 'package:yoloit/core/hotkeys/hotkey_registry.dart';
 import 'package:yoloit/core/services/app_logger.dart';
@@ -10,15 +11,19 @@ import 'package:yoloit/core/theme/app_theme.dart';
 import 'package:yoloit/core/theme/theme_manager.dart';
 import 'package:yoloit/features/settings/data/agent_config_service.dart';
 import 'package:yoloit/features/settings/ui/setup_guide_page.dart';
+import 'package:yoloit/features/skills/bloc/skills_cubit.dart';
+import 'package:yoloit/features/skills/ui/skills_panel.dart';
 import 'package:yoloit/features/terminal/data/logging_service.dart';
 import 'package:yoloit/features/terminal/data/tmux_service.dart';
 import 'package:yoloit/features/updates/data/update_service.dart';
+import 'package:yoloit/features/workspaces/bloc/workspace_cubit.dart';
 
 const _kCategories = [
   'Appearance',
   'AI Agents',
   'Sessions',
   'Shortcuts',
+  'Skills',
   'Setup Guide',
   'About',
 ];
@@ -28,13 +33,20 @@ class SettingsPage extends StatefulWidget {
   const SettingsPage({super.key});
 
   static Future<void> show(BuildContext context) {
+    final wsCubit = context.read<WorkspaceCubit>();
     return showDialog<void>(
       context: context,
       barrierColor: Colors.black.withAlpha(160),
-      builder: (_) => const Dialog(
-        backgroundColor: Colors.transparent,
-        insetPadding: EdgeInsets.symmetric(horizontal: 60, vertical: 40),
-        child: SettingsPage(),
+      builder: (_) => BlocProvider(
+        create: (_) => SkillsCubit(),
+        child: BlocProvider.value(
+          value: wsCubit,
+          child: const Dialog(
+            backgroundColor: Colors.transparent,
+            insetPadding: EdgeInsets.symmetric(horizontal: 60, vertical: 40),
+            child: SettingsPage(),
+          ),
+        ),
       ),
     );
   }
@@ -147,6 +159,10 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 
   Widget _buildContent() {
+    // Skills panel needs full height, not scrollable wrapper
+    if (_selectedCategory == 4) {
+      return const SkillsPanel();
+    }
     return SingleChildScrollView(
       padding: const EdgeInsets.all(24),
       child: switch (_selectedCategory) {
@@ -182,7 +198,7 @@ class _SettingsPageState extends State<SettingsPage> {
               _ShortcutsTable(),
             ],
           ),
-        4 => const SetupGuideEmbedded(),
+        5 => const SetupGuideEmbedded(),
         _ => Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [

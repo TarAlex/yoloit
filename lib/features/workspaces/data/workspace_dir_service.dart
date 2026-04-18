@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:path/path.dart' as p;
 import 'package:yoloit/core/platform/platform_dirs.dart';
+import 'package:yoloit/features/skills/data/skills_install_service.dart';
 import 'package:yoloit/features/workspaces/models/workspace.dart';
 
 /// Manages the internal workspace directory structure.
@@ -62,6 +63,12 @@ class WorkspaceDirService {
     if (await dir.exists()) {
       await dir.delete(recursive: true);
     }
+  }
+
+  /// Syncs skill symlinks for the workspace based on its enabledSkills list.
+  /// Delegates to SkillsInstallService which handles both Claude and Copilot patterns.
+  Future<void> syncSkillSymlinks(Workspace workspace) async {
+    await SkillsInstallService.instance.syncWorkspaceSkills(workspace);
   }
 
   /// Ensures link name is unique by appending _2, _3 etc. if needed.

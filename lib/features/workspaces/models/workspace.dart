@@ -13,6 +13,7 @@ class Workspace extends Equatable {
     this.removedLines = 0,
     this.isActive = false,
     this.color,
+    this.enabledSkills = const [],
   });
 
   final String id;
@@ -26,6 +27,8 @@ class Workspace extends Equatable {
   final bool isActive;
   /// User-chosen accent color for this workspace (null = use theme default)
   final Color? color;
+  /// Skill IDs enabled in this workspace (symlinked into .agents/skills/).
+  final List<String> enabledSkills;
 
   /// Primary path (first in list) — used for git operations and display.
   /// Returns empty string if no paths exist.
@@ -45,6 +48,7 @@ class Workspace extends Equatable {
     bool? isActive,
     Color? color,
     bool clearColor = false,
+    List<String>? enabledSkills,
   }) {
     return Workspace(
       id: id,
@@ -55,6 +59,7 @@ class Workspace extends Equatable {
       removedLines: removedLines ?? this.removedLines,
       isActive: isActive ?? this.isActive,
       color: clearColor ? null : (color ?? this.color),
+      enabledSkills: enabledSkills ?? this.enabledSkills,
     );
   }
 
@@ -68,6 +73,7 @@ class Workspace extends Equatable {
         'addedLines': addedLines,
         'removedLines': removedLines,
         'colorValue': color?.value,
+        'enabledSkills': enabledSkills,
       };
 
   factory Workspace.fromJson(Map<String, dynamic> json) {
@@ -90,10 +96,11 @@ class Workspace extends Equatable {
       color: json['colorValue'] != null
           ? Color(json['colorValue'] as int)
           : null,
+      enabledSkills: (json['enabledSkills'] as List?)?.cast<String>() ?? [],
     );
   }
 
   @override
   List<Object?> get props =>
-      [id, name, paths, gitBranch, addedLines, removedLines, isActive, color];
+      [id, name, paths, gitBranch, addedLines, removedLines, isActive, color, enabledSkills];
 }
