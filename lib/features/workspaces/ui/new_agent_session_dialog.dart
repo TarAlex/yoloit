@@ -65,10 +65,18 @@ class _NewAgentSessionDialogState extends State<NewAgentSessionDialog> {
   @override
   void initState() {
     super.initState();
-    // Default selection = first worktree's branch for each repo
+    // Default selection = branch checked out at the configured repo path.
+    // The worktrees list may contain multiple entries (main + additional worktrees).
+    // We match the configured path to the correct worktree entry so that,
+    // e.g., a workspace path pointing to a non-main worktree defaults to its branch.
     _selectedBranches = {
       for (final e in widget.worktrees.entries)
-        if (e.value.isNotEmpty) e.key: e.value.first.branch ?? e.value.first.commit,
+        if (e.value.isNotEmpty)
+          e.key: (e.value.firstWhere(
+                    (wt) => wt.path == e.key,
+                    orElse: () => e.value.first,
+                  ).branch ??
+                  e.value.first.commit),
     };
     _checkedOutBranches = {
       for (final e in widget.worktrees.entries)
