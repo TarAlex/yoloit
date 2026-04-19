@@ -1,3 +1,5 @@
+import 'dart:ui' as ui;
+
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
@@ -455,17 +457,17 @@ class _MindMapCanvasState extends State<_MindMapCanvas> {
 
   // Large canvas with generous top/left padding so users can scroll in all
   // directions. boundaryMargin(infinity) on InteractiveViewer makes it infinite.
-  static const _canvasW = 6000.0;
-  static const _canvasH = 4000.0;
+  static const _canvasW = 8000.0;
+  static const _canvasH = 8000.0;
 
   // Column x positions mirrored from MindMapLayoutEngine, offset right for space.
-  static const _colX = [240.0, 480.0, 720.0, 940.0, 1140.0, 1500.0, 1760.0, 2240.0];
+  static const _colX = [2040.0, 2260.0, 2680.0, 2900.0, 3100.0, 3360.0, 3860.0, 4240.0];
 
   /// Returns a column-based fallback so nodes are never piled at (0,0).
   Offset _fallbackPos(MindMapNodeData node) {
     final col = node.columnIndex.clamp(0, _colX.length - 1);
     // Start at y=300 so users have room to scroll upward.
-    return Offset(_colX[col], 300.0);
+    return Offset(_colX[col], 2000.0);
   }
 
   @override
@@ -495,28 +497,16 @@ class _MindMapCanvasState extends State<_MindMapCanvas> {
                   return Stack(
                     clipBehavior: Clip.none,
                     children: [
-                      // Dot-grid background.
-                      Positioned.fill(child: _DotGrid()),
-
-                      // Column labels.
-                      for (var i = 0; i < MindMapLayoutEngine.columnLabels.length; i++)
-                        Positioned(
-                          left: MindMapLayoutEngine.columnLabelX(i),
-                          top:  16,
-                          child: Text(
-                            MindMapLayoutEngine.columnLabels[i],
-                            style: const TextStyle(
-                              fontSize: 9,
-                              fontWeight: FontWeight.w700,
-                              letterSpacing: 0.1,
-                              color: Color(0xFF3D475E),
-                            ),
-                          ),
-                        ),
+                      // Dot-grid background — RepaintBoundary so dots
+                      // don't repaint when nodes move.
+                      const Positioned.fill(
+                        child: RepaintBoundary(child: _DotGrid()),
+                      ),
 
                       // SVG connector layer (below nodes).
                       Positioned.fill(
-                        child: MindMapConnectorLayer(
+                        child: RepaintBoundary(
+                          child: MindMapConnectorLayer(
                           connections:  widget.conns
                               .where((c) {
                                 if (mmState.hidden.contains(c.fromId)) return false;
@@ -537,6 +527,7 @@ class _MindMapCanvasState extends State<_MindMapCanvas> {
                           defaultSizes: defaultSizeMap,
                           dashAnimation: widget.dashAnimation,
                         ),
+                        ),   // RepaintBoundary
                       ),
 
                       // Node cards (skip hidden and hidden-type).
@@ -580,32 +571,64 @@ class _MindMapCanvasState extends State<_MindMapCanvas> {
 
 // ── Dot-grid background ────────────────────────────────────────────────────
 
-class _DotGrid extends StatelessWidget {
+class _DotGrid extends StatefulWidget {
+  const _DotGrid();
+  @override
+  State<_DotGrid> createState() => _DotGridState();
+}
+
+class _DotGridState extends State<_DotGrid> {
+  ui.Image? _tile;
+
+  @override
+  void initState() {
+    super.initState();
+    _buildTile();
+  }
+
+  Future<void> _buildTile() async {
+    const spacing = 28.0;
+    const tileSize = spacing;
+    final recorder = ui.PictureRecorder();
+    final canvas   = Canvas(recorder);
+    canvas.drawCircle(
+      const Offset(tileSize / 2, tileSize / 2),
+      0.9,
+      Paint()..color = const Color(0x8C3A4560),
+    );
+    final picture = recorder.endRecording();
+    final image   = await picture.toImage(tileSize.toInt(), tileSize.toInt());
+    if (mounted) setState(() => _tile = image);
+  }
+
   @override
   Widget build(BuildContext context) {
-    return CustomPaint(painter: _DotGridPainter());
+    final tile = _tile;
+    if (tile == null) return const SizedBox.expand();
+    return CustomPaint(painter: _TiledDotPainter(tile));
   }
 }
 
-class _DotGridPainter extends CustomPainter {
-  static final _paint = Paint()
-    ..color = const Color(0x8C3A4560)
-    ..style = PaintingStyle.fill;
-
-  static const _spacing = 28.0;
-  static const _dotR    = 0.9;
+class _TiledDotPainter extends CustomPainter {
+  const _TiledDotPainter(this.tile);
+  final ui.Image tile;
 
   @override
   void paint(Canvas canvas, Size size) {
-    for (double x = 14; x < size.width; x += _spacing) {
-      for (double y = 14; y < size.height; y += _spacing) {
-        canvas.drawCircle(Offset(x, y), _dotR, _paint);
-      }
-    }
+    final shader = ui.ImageShader(
+      tile,
+      TileMode.repeated,
+      TileMode.repeated,
+      Matrix4.identity().storage,
+    );
+    canvas.drawRect(
+      Offset.zero & size,
+      Paint()..shader = shader,
+    );
   }
 
   @override
-  bool shouldRepaint(_DotGridPainter old) => false;
+  bool shouldRepaint(_TiledDotPainter old) => old.tile != tile;
 }
 
 // ── Toolbar ────────────────────────────────────────────────────────────────

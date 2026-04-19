@@ -95,8 +95,8 @@ class MindMapCubit extends Cubit<MindMapState> {
   void moveNode(String id, Offset delta) {
     final current = state.positions[id] ?? Offset.zero;
     final newPos  = Offset(
-      (current.dx + delta.dx).clamp(0.0, 4000.0),
-      (current.dy + delta.dy).clamp(0.0, 4000.0),
+      current.dx + delta.dx,
+      current.dy + delta.dy,
     );
     final newPositions = Map<String, Offset>.from(state.positions)..[id] = newPos;
     final newLocked    = {...state.locked, id};
@@ -110,8 +110,8 @@ class MindMapCubit extends Cubit<MindMapState> {
   void resizeNode(String id, Offset delta, Size minSize) {
     final current = state.sizes[id] ?? const Size(200, 200);
     final newSize = Size(
-      (current.width  + delta.dx).clamp(minSize.width,  1000.0),
-      (current.height + delta.dy).clamp(minSize.height, 1000.0),
+      (current.width  + delta.dx).clamp(minSize.width,  double.infinity),
+      (current.height + delta.dy).clamp(minSize.height, double.infinity),
     );
     final newSizes = Map<String, Size>.from(state.sizes)..[id] = newSize;
     emit(state.copyWith(sizes: newSizes));
@@ -123,7 +123,7 @@ class MindMapCubit extends Cubit<MindMapState> {
     final currentPos  = state.positions[id]  ?? Offset.zero;
     final currentSize = state.sizes[id]      ?? const Size(200, 200);
 
-    final newWidth    = (currentSize.width - dx).clamp(minSize.width, 1000.0);
+    final newWidth    = (currentSize.width - dx).clamp(minSize.width, double.infinity);
     final clampedDx   = currentSize.width - newWidth;
     final newPos      = Offset(currentPos.dx + clampedDx, currentPos.dy);
     final newSize     = Size(newWidth, currentSize.height);

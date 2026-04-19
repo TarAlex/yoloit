@@ -5,20 +5,21 @@ import 'package:yoloit/features/mindmap/model/mindmap_node_model.dart';
 
 /// Column x-offsets for each column index.
 /// Column 1 (Sessions) is wide enough for the merged session+terminal card.
+/// All columns are offset by 2000 so users have room to pan left freely.
 const _columnX = [
-  40.0,   // 0 Workspaces
-  260.0,  // 1 Sessions (merged with terminal) — wide card
-  680.0,  // 2 Repositories
-  900.0,  // 3 Branches
-  1100.0, // 4 Files Changed
-  1360.0, // 5 Editor
-  1860.0, // 6 Runs (attached from session)
-  2240.0, // 7 File Tree · Diffs (attached from repo)
+  2040.0,  // 0 Workspaces
+  2260.0,  // 1 Sessions (merged with terminal) — wide card
+  2680.0,  // 2 Repositories
+  2900.0,  // 3 Branches
+  3100.0,  // 4 Files Changed
+  3360.0,  // 5 Editor
+  3860.0,  // 6 Runs (attached from session)
+  4240.0,  // 7 File Tree · Diffs (attached from repo)
 ];
 
 const _columnMargin = 20.0;
 const _nodeVMargin  = 20.0;
-const _canvasStartY = 56.0; // below column labels
+const _canvasStartY = 2000.0; // large offset so users can pan upward freely
 
 /// Per-column override for vertical node spacing. Workspaces use a larger
 /// margin so the list breathes.
