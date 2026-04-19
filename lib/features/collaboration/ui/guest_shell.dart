@@ -17,9 +17,33 @@ class GuestShell extends StatefulWidget {
 }
 
 class _GuestShellState extends State<GuestShell> {
-  final _hostCtrl = TextEditingController(text: '192.168.1.');
+  late final TextEditingController _hostCtrl;
   final _portCtrl = TextEditingController(text: '40401');
   final _nameCtrl = TextEditingController(text: 'Remote Guest');
+
+  @override
+  void initState() {
+    super.initState();
+    // Auto-fill host from the page's origin (works when opened from
+    // http://192.168.x.x:40400 — host is the desktop machine's IP).
+    final autoHost = _inferHost();
+    _hostCtrl = TextEditingController(text: autoHost);
+  }
+
+  /// On web: reads the page URL host so the connect form is pre-filled.
+  /// On desktop fallback: empty string.
+  static String _inferHost() {
+    try {
+      final host = Uri.base.host;
+      // Skip loopback-only auto-fills — user still needs to type for local dev
+      if (host == 'localhost' || host == '127.0.0.1' || host.isEmpty) {
+        return '';
+      }
+      return host;
+    } catch (_) {
+      return '';
+    }
+  }
 
   @override
   void dispose() {
@@ -109,7 +133,7 @@ class _GuestShellState extends State<GuestShell> {
               // ── Fields ────────────────────────────────────────────────
               _label('Host IP'),
               const SizedBox(height: 6),
-              _field(_hostCtrl, 'e.g. 192.168.1.42'),
+              _field(_hostCtrl, 'e.g. 192.168.1.42 or localhost'),
               const SizedBox(height: 16),
               _label('Port'),
               const SizedBox(height: 6),
