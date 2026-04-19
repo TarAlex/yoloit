@@ -36,10 +36,17 @@ class MindMapView extends StatefulWidget {
 }
 
 class _MindMapViewState extends State<MindMapView>
-    with SingleTickerProviderStateMixin {
+    with TickerProviderStateMixin {
   final _transformCtrl = TransformationController();
   late AnimationController _dashCtrl;
   late Animation<double>   _dashAnim;
+
+  // ── Smooth pan animation ──────────────────────────────────────────────────
+  late AnimationController _panCtrl;
+  Animation<Matrix4>? _panAnim;
+  /// Tracks which file path was last animated to — avoids re-animating on
+  /// content-only updates when the same file is still active.
+  String? _lastFocusedFilePath;
 
   @override
   void initState() {
@@ -49,6 +56,11 @@ class _MindMapViewState extends State<MindMapView>
       duration: const Duration(milliseconds: 900),
     )..repeat();
     _dashAnim = Tween<double>(begin: 0.0, end: 1.0).animate(_dashCtrl);
+
+    _panCtrl = AnimationController(
+      vsync:    this,
+      duration: const Duration(milliseconds: 480),
+    );
 
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       await context.read<MindMapCubit>().loadPersistedPositions();
@@ -70,11 +82,13 @@ class _MindMapViewState extends State<MindMapView>
   void dispose() {
     _transformCtrl.dispose();
     _dashCtrl.dispose();
+    _panCtrl.dispose();
     super.dispose();
   }
 
-  /// Pans the canvas so [nodeId] is roughly centered on screen.
-  void _scrollToNode(String nodeId, MindMapState mmState) {
+  /// Smoothly pans the canvas so [nodeId] is roughly centered on screen.
+  /// Uses [Matrix4Tween] so the transition is animated with [Curves.easeInOutCubic].
+  void _animateToNode(String nodeId, MindMapState mmState) {
     final pos = mmState.positions[nodeId];
     if (pos == null) return;
     final renderBox = context.findRenderObject() as RenderBox?;
@@ -85,9 +99,40 @@ class _MindMapViewState extends State<MindMapView>
     final targetX = pos.dx + editorW / 2 - screenSize.width  / 2;
     final targetY = pos.dy + editorH / 2 - screenSize.height / 2;
     final scale = _transformCtrl.value.getMaxScaleOnAxis();
-    _transformCtrl.value = Matrix4.identity()
+    final targetMatrix = Matrix4.identity()
       ..scale(scale)
       ..translate(-targetX, -targetY);
+
+    // Stop any in-progress pan, build a new tween from current position.
+    _panCtrl.stop();
+    _panAnim?.removeListener(_applyPanAnim);
+
+    _panAnim = Matrix4Tween(
+      begin: _transformCtrl.value.clone(),
+      end:   targetMatrix,
+    ).animate(CurvedAnimation(parent: _panCtrl, curve: Curves.easeInOutCubic))
+      ..addListener(_applyPanAnim);
+
+    _panCtrl.forward(from: 0.0);
+  }
+
+  void _applyPanAnim() {
+    final anim = _panAnim;
+    if (anim != null && _panCtrl.isAnimating) {
+      _transformCtrl.value = anim.value;
+    }
+  }
+
+  /// Smoothly reset the view to [Matrix4.identity].
+  void _animateToIdentity() {
+    _panCtrl.stop();
+    _panAnim?.removeListener(_applyPanAnim);
+    _panAnim = Matrix4Tween(
+      begin: _transformCtrl.value.clone(),
+      end:   Matrix4.identity(),
+    ).animate(CurvedAnimation(parent: _panCtrl, curve: Curves.easeInOutCubic))
+      ..addListener(_applyPanAnim);
+    _panCtrl.forward(from: 0.0);
   }
 
   // ── Build node + connection lists from blocs ───────────────────────────
@@ -461,10 +506,17 @@ class _MindMapViewState extends State<MindMapView>
                           if (!mounted) return;
                           final mm = context.read<MindMapCubit>();
                           mm.updateNodes(nodes, conns);
-                          // If editor just became visible, unhide it and scroll to it.
+                          // Animate to editor card only when the active file changes
+                          // (not on every content update for the same file).
                           if (editorState.isVisible && editorState.tabs.isNotEmpty) {
                             mm.showNode('editor:active');
-                            _scrollToNode('editor:active', mm.state);
+                            final idx = editorState.activeIndex
+                                .clamp(0, editorState.tabs.length - 1);
+                            final filePath = editorState.tabs[idx].filePath;
+                            if (filePath != _lastFocusedFilePath) {
+                              _lastFocusedFilePath = filePath;
+                              _animateToNode('editor:active', mm.state);
+                            }
                           }
                         });
 
@@ -473,6 +525,7 @@ class _MindMapViewState extends State<MindMapView>
                           conns:          conns,
                           transformCtrl:  _transformCtrl,
                           dashAnimation:  _dashAnim,
+                          onResetView:    _animateToIdentity,
                         );
                       },
                     );
@@ -495,11 +548,13 @@ class _MindMapCanvas extends StatefulWidget {
     required this.conns,
     required this.transformCtrl,
     required this.dashAnimation,
+    required this.onResetView,
   });
   final List<MindMapNodeData> nodes;
   final List<MindMapConnection> conns;
   final TransformationController transformCtrl;
   final Animation<double> dashAnimation;
+  final VoidCallback onResetView;
 
   @override
   State<_MindMapCanvas> createState() => _MindMapCanvasState();
@@ -608,6 +663,7 @@ class _MindMapCanvasState extends State<_MindMapCanvas> {
             top: 8, right: 8,
             child: _CanvasToolbar(
               transformCtrl: widget.transformCtrl,
+              onResetView:   widget.onResetView,
             ),
           ),
 
@@ -687,8 +743,9 @@ class _TiledDotPainter extends CustomPainter {
 // ── Toolbar ────────────────────────────────────────────────────────────────
 
 class _CanvasToolbar extends StatelessWidget {
-  const _CanvasToolbar({required this.transformCtrl});
+  const _CanvasToolbar({required this.transformCtrl, required this.onResetView});
   final TransformationController transformCtrl;
+  final VoidCallback onResetView;
 
   @override
   Widget build(BuildContext context) {
@@ -703,7 +760,7 @@ class _CanvasToolbar extends StatelessWidget {
         _ToolBtn(
           icon: Icons.filter_center_focus,
           tooltip: 'Fit / reset',
-          onTap: () => transformCtrl.value = Matrix4.identity(),
+          onTap: onResetView,
         ),
         const SizedBox(width: 1),
         _ToolBtn(
