@@ -10,7 +10,6 @@ import 'package:yoloit/features/editor/bloc/file_editor_cubit.dart';
 import 'package:yoloit/features/editor/bloc/file_editor_state.dart';
 import 'package:yoloit/features/mindmap/bloc/mindmap_cubit.dart';
 import 'package:yoloit/features/mindmap/bloc/mindmap_state.dart';
-import 'package:yoloit/features/mindmap/mindmap_layout_engine.dart';
 import 'package:yoloit/features/mindmap/model/mindmap_node_model.dart';
 import 'package:yoloit/features/mindmap/nodes/node_registry.dart';
 import 'package:yoloit/features/mindmap/plugin/mindmap_plugin_registry.dart';
@@ -443,9 +442,9 @@ class _MindMapViewState extends State<MindMapView>
       // Connect from the matching FileTree card (longest matching repoPath wins).
       final filePath = activeTab.filePath;
       final matchingTree = nodes.whereType<FileTreeNodeData>()
-          .where((t) => filePath.startsWith(t.repoPath))
+          .where((t) => t.repoPath != null && filePath.startsWith(t.repoPath!))
           .fold<FileTreeNodeData?>(null, (best, t) =>
-              best == null || t.repoPath.length > best.repoPath.length ? t : best);
+              best == null || (t.repoPath?.length ?? 0) > (best.repoPath?.length ?? 0) ? t : best);
       if (matchingTree != null) {
         conns.add(MindMapConnection(
           fromId: matchingTree.id,

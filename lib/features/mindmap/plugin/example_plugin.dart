@@ -13,7 +13,6 @@
 import 'package:flutter/material.dart';
 import 'package:yoloit/features/mindmap/model/mindmap_node_model.dart';
 import 'package:yoloit/features/mindmap/plugin/mindmap_card_plugin.dart';
-import 'package:yoloit/features/mindmap/plugin/mindmap_plugin_registry.dart';
 
 // ── 1. Define your plugin class ────────────────────────────────────────────
 
