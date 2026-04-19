@@ -1,5 +1,3 @@
-import 'package:flutter/material.dart';
-
 // Web / non-desktop stub — window_manager is not available.
 Future<void> initWindow() async {}
 

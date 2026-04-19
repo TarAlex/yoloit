@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
-import '../../mindmap/bloc/mindmap_cubit.dart';
 import '../bloc/collaboration_cubit.dart';
 import '../bloc/collaboration_state.dart';
 import 'web_mindmap_canvas.dart';
