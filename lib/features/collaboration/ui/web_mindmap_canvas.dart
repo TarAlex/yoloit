@@ -10,9 +10,9 @@ import 'package:yoloit/features/mindmap/bloc/mindmap_state.dart';
 import 'package:yoloit/features/collaboration/bloc/collaboration_cubit.dart';
 
 /// Lightweight mindmap canvas for web/remote guests.
-/// Renders every node as a coloured card using [CustomPainter] — no native
-/// widgets (no terminal, file editor, etc.).  Supports pan/zoom and
-/// drag-to-move; move deltas are sent back to the host via WebSocket.
+/// Renders every node as a rich Flutter widget card — no native widgets
+/// (no terminal, file editor, etc.).  Supports pan/zoom and drag-to-move;
+/// move deltas are sent back to the host via WebSocket.
 class WebMindMapCanvas extends StatefulWidget {
   const WebMindMapCanvas({super.key});
 
@@ -90,6 +90,7 @@ class _WebMindMapCanvasState extends State<WebMindMapCanvas> {
       listener: (_, state) => _centerOnContent(state),
       child: BlocBuilder<MindMapCubit, MindMapState>(
         builder: (ctx, state) {
+          final draggingId = _draggingId;
           return Stack(children: [
           // ── Dot-grid background ──────────────────────────────────────
           Positioned.fill(
@@ -128,9 +129,9 @@ class _WebMindMapCanvasState extends State<WebMindMapCanvas> {
                 final hit = _hitTest(cp, state);
                 if (hit != null) {
                   setState(() {
-                    _draggingId     = hit;
+                    _draggingId      = hit;
                     _dragStartCanvas = cp;
-                    _nodeOrigin     = state.positions[hit] ?? Offset.zero;
+                    _nodeOrigin      = state.positions[hit] ?? Offset.zero;
                   });
                 }
               },
@@ -152,8 +153,32 @@ class _WebMindMapCanvasState extends State<WebMindMapCanvas> {
                 child: SizedBox(
                   width:  10000,
                   height: 10000,
-                  child: CustomPaint(
-                    painter: _NodesPainter(state, _draggingId),
+                  child: Stack(
+                    children: [
+                      // ── Connectors (behind nodes) ────────────────────
+                      Positioned.fill(
+                        child: CustomPaint(
+                          painter: _ConnectorsPainter(state),
+                        ),
+                      ),
+                      // ── Node cards ───────────────────────────────────
+                      for (final e in state.positions.entries)
+                        if (!state.hidden.contains(e.key))
+                          Positioned(
+                            left:   e.value.dx,
+                            top:    e.value.dy,
+                            width:  (state.sizes[e.key] ?? const Size(220, 160)).width,
+                            height: (state.sizes[e.key] ?? const Size(220, 160)).height,
+                            child: IgnorePointer(
+                              child: _GuestCard(
+                                nodeId:     e.key,
+                                content:    state.nodeContent[e.key] ?? const {},
+                                size:       state.sizes[e.key] ?? const Size(220, 160),
+                                isDragging: e.key == draggingId,
+                              ),
+                            ),
+                          ),
+                    ],
                   ),
                 ),
               ),
@@ -166,113 +191,14 @@ class _WebMindMapCanvasState extends State<WebMindMapCanvas> {
   }
 }
 
-// ── Nodes painter ──────────────────────────────────────────────────────────
+// ── Connectors painter ─────────────────────────────────────────────────────
 
-class _NodesPainter extends CustomPainter {
-  _NodesPainter(this.state, this.draggingId);
+class _ConnectorsPainter extends CustomPainter {
+  const _ConnectorsPainter(this.state);
   final MindMapState state;
-  final String? draggingId;
 
   @override
   void paint(Canvas canvas, Size size) {
-    // Draw connectors first (behind nodes)
-    _drawConnectors(canvas);
-
-    // Iterate positions (works even when state.nodes is empty, e.g. on guest)
-    for (final entry in state.positions.entries) {
-      final id = entry.key;
-      if (state.hidden.contains(id)) continue;
-      final pos = entry.value;
-      final sz  = state.sizes[id] ?? const Size(220, 120);
-      _drawNode(canvas, id, pos, sz);
-    }
-  }
-
-  void _drawNode(Canvas canvas, String id, Offset pos, Size sz) {
-    final color  = _colorFor(id);
-    final isDragging = id == draggingId;
-    final rect = RRect.fromRectAndRadius(
-      Rect.fromLTWH(pos.dx, pos.dy, sz.width, sz.height),
-      const Radius.circular(10),
-    );
-
-    // Shadow when dragging
-    if (isDragging) {
-      canvas.drawRRect(
-        rect.shift(const Offset(0, 6)),
-        Paint()
-          ..color = Colors.black45
-          ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 16),
-      );
-    }
-
-    // Card background
-    canvas.drawRRect(rect,
-        Paint()..color = const Color(0xFF0D1117).withAlpha(245));
-
-    // Header accent band
-    canvas.drawRRect(
-      RRect.fromRectAndCorners(
-        Rect.fromLTWH(pos.dx, pos.dy, sz.width, 30),
-        topLeft: const Radius.circular(10),
-        topRight: const Radius.circular(10),
-      ),
-      Paint()..color = color.withAlpha(28),
-    );
-
-    // Coloured border
-    canvas.drawRRect(
-      rect,
-      Paint()
-        ..color = color.withAlpha(isDragging ? 220 : 160)
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = isDragging ? 2.0 : 1.5,
-    );
-
-    // Type tag
-    _text(canvas, _typeFor(id),
-        Offset(pos.dx + 12, pos.dy + 7),
-        sz.width - 16,
-        color: color.withAlpha(190),
-        fontSize: 9,
-        weight: FontWeight.w700,
-        letterSpacing: 1.2);
-
-    // Main label
-    _text(canvas, _labelFor(id),
-        Offset(pos.dx + 12, pos.dy + 35),
-        sz.width - 16,
-        color: const Color(0xFFE8E8FF),
-        fontSize: 13,
-        weight: FontWeight.w600);
-  }
-
-  void _text(
-    Canvas canvas,
-    String text,
-    Offset offset,
-    double maxWidth, {
-    required Color color,
-    required double fontSize,
-    required FontWeight weight,
-    double letterSpacing = 0,
-  }) {
-    final tp = TextPainter(
-      text: TextSpan(
-        text: text,
-        style: TextStyle(
-          color: color,
-          fontSize: fontSize,
-          fontWeight: weight,
-          letterSpacing: letterSpacing,
-        ),
-      ),
-      textDirection: TextDirection.ltr,
-    )..layout(maxWidth: maxWidth);
-    tp.paint(canvas, offset);
-  }
-
-  void _drawConnectors(Canvas canvas) {
     final paint = Paint()
       ..color = const Color(0xFF1E2D40)
       ..style = PaintingStyle.stroke
@@ -281,14 +207,14 @@ class _NodesPainter extends CustomPainter {
     for (final conn in state.connections) {
       if (state.hidden.contains(conn.fromId) ||
           state.hidden.contains(conn.toId)) continue;
-      final fp = state.positions[conn.fromId];
+      final fp  = state.positions[conn.fromId];
       final tp2 = state.positions[conn.toId];
       if (fp == null || tp2 == null) continue;
-      final fsz = state.sizes[conn.fromId] ?? const Size(220, 120);
-      final tsz = state.sizes[conn.toId]   ?? const Size(220, 120);
+      final fsz = state.sizes[conn.fromId] ?? const Size(220, 160);
+      final tsz = state.sizes[conn.toId]   ?? const Size(220, 160);
 
-      final start = Offset(fp.dx + fsz.width, fp.dy + fsz.height / 2);
-      final end   = Offset(tp2.dx, tp2.dy + tsz.height / 2);
+      final start = Offset(fp.dx  + fsz.width, fp.dy  + fsz.height / 2);
+      final end   = Offset(tp2.dx,              tp2.dy + tsz.height / 2);
       final mid   = (end.dx - start.dx) / 2;
 
       canvas.drawPath(
@@ -302,9 +228,29 @@ class _NodesPainter extends CustomPainter {
     }
   }
 
-  // ── helpers ────────────────────────────────────────────────────────────
+  @override
+  bool shouldRepaint(_ConnectorsPainter old) => old.state != state;
+}
 
-  Color _colorFor(String id) {
+// ── Guest card widget ──────────────────────────────────────────────────────
+
+/// Stateless rich card rendered for every visible mindmap node.
+class _GuestCard extends StatelessWidget {
+  const _GuestCard({
+    required this.nodeId,
+    required this.content,
+    required this.size,
+    required this.isDragging,
+  });
+
+  final String nodeId;
+  final Map<String, dynamic> content;
+  final Size size;
+  final bool isDragging;
+
+  // ── type helpers ──────────────────────────────────────────────────────
+
+  static Color _colorFor(String id) {
     if (id.startsWith('ws:'))      return const Color(0xFF4B9EFF);
     if (id.startsWith('session:')) return const Color(0xFFB87FFF);
     if (id.startsWith('repo:'))    return const Color(0xFF00E5FF);
@@ -313,17 +259,12 @@ class _NodesPainter extends CustomPainter {
     if (id.startsWith('files:'))   return const Color(0xFF94A3B8);
     if (id.startsWith('diff:'))    return const Color(0xFFFF9500);
     if (id.startsWith('run:'))     return const Color(0xFFFF6B85);
+    if (id.startsWith('tree:'))    return const Color(0xFFFFD700);
+    if (id.startsWith('editor:'))  return const Color(0xFF7DD3FC);
     return const Color(0xFF64748B);
   }
 
-  String _labelFor(String id) {
-    final i = id.indexOf(':');
-    if (i < 0) return id;
-    final s = id.substring(i + 1);
-    return s.length > 26 ? '${s.substring(0, 24)}…' : s;
-  }
-
-  String _typeFor(String id) {
+  static String _typeTagFor(String id) {
     if (id.startsWith('ws:'))      return 'WORKSPACE';
     if (id.startsWith('session:')) return 'SESSION';
     if (id.startsWith('repo:'))    return 'REPO';
@@ -332,12 +273,428 @@ class _NodesPainter extends CustomPainter {
     if (id.startsWith('files:'))   return 'FILES';
     if (id.startsWith('diff:'))    return 'DIFF';
     if (id.startsWith('run:'))     return 'RUN';
+    if (id.startsWith('tree:'))    return 'TREE';
+    if (id.startsWith('editor:'))  return 'EDITOR';
     return 'NODE';
   }
 
+  static String _typeFromId(String id) {
+    final i = id.indexOf(':');
+    return i < 0 ? 'node' : id.substring(0, i);
+  }
+
+  // ── build ─────────────────────────────────────────────────────────────
+
   @override
-  bool shouldRepaint(_NodesPainter old) =>
-      old.state != state || old.draggingId != draggingId;
+  Widget build(BuildContext context) {
+    final color      = _colorFor(nodeId);
+    final typeTag    = _typeTagFor(nodeId);
+    final type       = (content['type'] as String?) ?? _typeFromId(nodeId);
+    final name       = (content['name'] as String?) ??
+                       (content['filePath'] as String?) ??
+                       nodeId.substring(math.min(nodeId.indexOf(':') + 1, nodeId.length));
+    final borderAlpha = isDragging ? 220 : 160;
+
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 120),
+      decoration: BoxDecoration(
+        color: const Color(0xFF0D1117),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(
+          color: color.withAlpha(borderAlpha),
+          width: isDragging ? 2.0 : 1.5,
+        ),
+        boxShadow: isDragging
+            ? [
+                BoxShadow(
+                  color: color.withAlpha(60),
+                  blurRadius: 20,
+                  offset: const Offset(0, 6),
+                ),
+              ]
+            : const [],
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(9),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // ── Header ──────────────────────────────────────────────
+            _CardHeader(color: color, typeTag: typeTag, name: name, type: type, content: content),
+            // ── Content ─────────────────────────────────────────────
+            Expanded(child: _CardBody(type: type, content: content, color: color)),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ── Card header ────────────────────────────────────────────────────────────
+
+class _CardHeader extends StatelessWidget {
+  const _CardHeader({
+    required this.color,
+    required this.typeTag,
+    required this.name,
+    required this.type,
+    required this.content,
+  });
+
+  final Color color;
+  final String typeTag;
+  final String name;
+  final String type;
+  final Map<String, dynamic> content;
+
+  @override
+  Widget build(BuildContext context) {
+    final isRunning = content['isRunning'] as bool? ?? false;
+    final status    = (content['status'] as String? ?? '').toLowerCase();
+    final showDot   = type == 'agent' || type == 'session' || type == 'run';
+
+    Widget? dot;
+    if (showDot) {
+      final dotColor = isRunning
+          ? const Color(0xFF22C55E)
+          : (status == 'error' || status == 'stopped' || status == 'failed')
+              ? const Color(0xFFEF4444)
+              : const Color(0xFF64748B);
+      dot = Container(
+        width: 7,
+        height: 7,
+        margin: const EdgeInsets.only(right: 6),
+        decoration: BoxDecoration(color: dotColor, shape: BoxShape.circle),
+      );
+    }
+
+    return Container(
+      height: 30,
+      padding: const EdgeInsets.symmetric(horizontal: 10),
+      decoration: BoxDecoration(color: color.withAlpha(28)),
+      child: Row(
+        children: [
+          // Type tag chip
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+            margin: const EdgeInsets.only(right: 8),
+            decoration: BoxDecoration(
+              color: color.withAlpha(40),
+              borderRadius: BorderRadius.circular(4),
+            ),
+            child: Text(
+              typeTag,
+              style: TextStyle(
+                color: color.withAlpha(200),
+                fontSize: 8,
+                fontWeight: FontWeight.w700,
+                letterSpacing: 1.2,
+              ),
+            ),
+          ),
+          if (dot != null) dot,
+          // Name
+          Expanded(
+            child: Text(
+              name,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                color: Color(0xFFE8E8FF),
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ── Card body dispatcher ───────────────────────────────────────────────────
+
+class _CardBody extends StatelessWidget {
+  const _CardBody({required this.type, required this.content, required this.color});
+
+  final String type;
+  final Map<String, dynamic> content;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return switch (type) {
+      'agent' || 'session' || 'run' => _TerminalBody(content: content),
+      'workspace'                   => _KvBody(rows: _workspaceRows(content)),
+      'repo'                        => _KvBody(rows: _repoRows(content)),
+      'branch'                      => _KvBody(rows: _branchRows(content)),
+      'editor'                      => _EditorBody(content: content),
+      'files'                       => _FilesBody(content: content),
+      'tree' || 'diff'              => _KvBody(rows: _treeDiffRows(content)),
+      _                             => _KvBody(rows: _genericRows(content)),
+    };
+  }
+
+  static List<(String, String)> _workspaceRows(Map<String, dynamic> c) => [
+    ('PATH', (c['path'] as String?) ?? '—'),
+  ];
+
+  static List<(String, String)> _repoRows(Map<String, dynamic> c) => [
+    ('BRANCH', (c['branch'] as String?) ?? '—'),
+    ('PATH',   (c['path'] as String?) ?? '—'),
+  ];
+
+  static List<(String, String)> _branchRows(Map<String, dynamic> c) {
+    final hash = (c['commitHash'] as String?) ?? '';
+    return [
+      ('COMMIT', hash.length > 8 ? hash.substring(0, 8) : hash),
+      ('REPO',   (c['repoName'] as String?) ?? '—'),
+    ];
+  }
+
+  static List<(String, String)> _treeDiffRows(Map<String, dynamic> c) => [
+    ('REPO', (c['repoName'] as String?) ?? '—'),
+    ('PATH', (c['repoPath'] as String?) ?? '—'),
+  ];
+
+  static List<(String, String)> _genericRows(Map<String, dynamic> c) {
+    return c.entries
+        .where((e) => e.key != 'type' && e.value is String)
+        .map((e) => (e.key.toUpperCase(), e.value as String))
+        .toList();
+  }
+}
+
+// ── Terminal / run output body ─────────────────────────────────────────────
+
+class _TerminalBody extends StatelessWidget {
+  const _TerminalBody({required this.content});
+  final Map<String, dynamic> content;
+
+  @override
+  Widget build(BuildContext context) {
+    final rawLines = content['lastLines'];
+    final lines = rawLines is List
+        ? rawLines.map((l) => l.toString()).toList()
+        : <String>[];
+
+    if (lines.isEmpty) {
+      return const Center(
+        child: Text(
+          'No output',
+          style: TextStyle(color: Color(0xFF475569), fontSize: 11),
+        ),
+      );
+    }
+
+    return Container(
+      color: const Color(0xFF0A0F14),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+      child: ListView.builder(
+        physics: const NeverScrollableScrollPhysics(),
+        itemCount: lines.length,
+        itemBuilder: (_, i) => Text(
+          lines[i],
+          style: const TextStyle(
+            fontFamily: 'monospace',
+            fontSize: 10.5,
+            color: Color(0xFF9ECFFF),
+            height: 1.4,
+          ),
+          overflow: TextOverflow.fade,
+          softWrap: false,
+        ),
+      ),
+    );
+  }
+}
+
+// ── Key-value info body ────────────────────────────────────────────────────
+
+class _KvBody extends StatelessWidget {
+  const _KvBody({required this.rows});
+  final List<(String, String)> rows;
+
+  @override
+  Widget build(BuildContext context) {
+    if (rows.isEmpty) {
+      return const SizedBox.shrink();
+    }
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          for (final (label, value) in rows) ...[
+            Text(
+              label,
+              style: const TextStyle(
+                color: Color(0xFF475569),
+                fontSize: 8.5,
+                fontWeight: FontWeight.w600,
+                letterSpacing: 0.8,
+              ),
+            ),
+            const SizedBox(height: 2),
+            Text(
+              value,
+              overflow: TextOverflow.ellipsis,
+              maxLines: 2,
+              style: const TextStyle(
+                color: Color(0xFFCBD5E1),
+                fontSize: 11.5,
+              ),
+            ),
+            const SizedBox(height: 8),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+// ── Editor / code body ─────────────────────────────────────────────────────
+
+class _EditorBody extends StatelessWidget {
+  const _EditorBody({required this.content});
+  final Map<String, dynamic> content;
+
+  @override
+  Widget build(BuildContext context) {
+    final rawContent = (content['content'] as String?) ?? '';
+    final lines = rawContent.split('\n').take(50).toList();
+    final language = (content['language'] as String?) ?? '';
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (language.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(10, 6, 10, 0),
+            child: Text(
+              language.toUpperCase(),
+              style: const TextStyle(
+                color: Color(0xFF7DD3FC),
+                fontSize: 8,
+                fontWeight: FontWeight.w700,
+                letterSpacing: 1.0,
+              ),
+            ),
+          ),
+        Expanded(
+          child: Container(
+            color: const Color(0xFF0A0F14),
+            margin: const EdgeInsets.fromLTRB(0, 4, 0, 0),
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+            child: ListView.builder(
+              physics: const NeverScrollableScrollPhysics(),
+              itemCount: lines.length,
+              itemBuilder: (_, i) => Text(
+                lines[i],
+                style: const TextStyle(
+                  fontFamily: 'monospace',
+                  fontSize: 10,
+                  color: Color(0xFFADD8E6),
+                  height: 1.4,
+                ),
+                overflow: TextOverflow.fade,
+                softWrap: false,
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+// ── Files list body ────────────────────────────────────────────────────────
+
+class _FilesBody extends StatelessWidget {
+  const _FilesBody({required this.content});
+  final Map<String, dynamic> content;
+
+  static Color _statusColor(String s) => switch (s.toLowerCase()) {
+    'added' || 'a'    => const Color(0xFF22C55E),
+    'modified' || 'm' => const Color(0xFFFBBF24),
+    'deleted' || 'd'  => const Color(0xFFEF4444),
+    'renamed' || 'r'  => const Color(0xFF60A5FA),
+    _                 => const Color(0xFF64748B),
+  };
+
+  static String _statusLabel(String s) => switch (s.toLowerCase()) {
+    'added' || 'a'    => 'A',
+    'modified' || 'm' => 'M',
+    'deleted' || 'd'  => 'D',
+    'renamed' || 'r'  => 'R',
+    _                 => '?',
+  };
+
+  @override
+  Widget build(BuildContext context) {
+    final rawFiles = content['files'];
+    final files = rawFiles is List
+        ? rawFiles.cast<Map<String, dynamic>>()
+        : <Map<String, dynamic>>[];
+
+    if (files.isEmpty) {
+      return const Center(
+        child: Text(
+          'No files',
+          style: TextStyle(color: Color(0xFF475569), fontSize: 11),
+        ),
+      );
+    }
+
+    return ListView.builder(
+      physics: const NeverScrollableScrollPhysics(),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+      itemCount: files.length,
+      itemBuilder: (_, i) {
+        final file   = files[i];
+        final path   = (file['path'] as String?) ?? '';
+        final status = (file['status'] as String?) ?? '';
+        final col    = _statusColor(status);
+        final label  = _statusLabel(status);
+
+        return Padding(
+          padding: const EdgeInsets.symmetric(vertical: 2),
+          child: Row(
+            children: [
+              Container(
+                width: 14,
+                height: 14,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: col.withAlpha(40),
+                  borderRadius: BorderRadius.circular(3),
+                ),
+                child: Text(
+                  label,
+                  style: TextStyle(
+                    color: col,
+                    fontSize: 8,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  path,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontFamily: 'monospace',
+                    fontSize: 10.5,
+                    color: Color(0xFFCBD5E1),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
 }
 
 // ── Dot-grid painter ───────────────────────────────────────────────────────

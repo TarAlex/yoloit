@@ -20,13 +20,17 @@ class SyncMessage {
 
   // ── Type constants ─────────────────────────────────────────────────────────
 
-  static const kSnapshot     = 'snapshot';
-  static const kDeltaMove    = 'delta.move';
-  static const kDeltaResize  = 'delta.resize';
-  static const kDeltaToggle  = 'delta.toggle';
-  static const kHello        = 'hello';
-  static const kConnected    = 'connected';
-  static const kDisconnected = 'disconnected';
+  static const kSnapshot      = 'snapshot';
+  static const kDeltaMove     = 'delta.move';
+  static const kDeltaResize   = 'delta.resize';
+  static const kDeltaToggle   = 'delta.toggle';
+  static const kHello         = 'hello';
+  static const kConnected     = 'connected';
+  static const kDisconnected  = 'disconnected';
+  /// Host → guest: rich content update for a single node.
+  static const kNodeUpdate    = 'node.update';
+  /// Guest → host: keyboard input for a terminal node.
+  static const kTerminalInput = 'terminal.input';
 
   // ── Factories ──────────────────────────────────────────────────────────────
 
@@ -36,6 +40,7 @@ class SyncMessage {
     required List<String> hidden,
     required List<String> hiddenTypes,
     List<Map<String, dynamic>> connections = const [],
+    Map<String, Map<String, dynamic>> nodeContent = const {},
     String senderId = 'host',
   }) => SyncMessage(
     type: kSnapshot, senderId: senderId,
@@ -45,6 +50,7 @@ class SyncMessage {
       'hidden':      hidden,
       'hiddenTypes': hiddenTypes,
       'connections': connections,
+      'nodeContent': nodeContent,
     },
   );
 
@@ -65,6 +71,15 @@ class SyncMessage {
 
   factory SyncMessage.disconnected(String clientId) =>
       SyncMessage(type: kDisconnected, senderId: 'server', payload: {'id': clientId});
+
+  factory SyncMessage.nodeUpdate(String nodeId, Map<String, dynamic> content,
+      {String senderId = 'host'}) =>
+      SyncMessage(type: kNodeUpdate, senderId: senderId, payload: {'id': nodeId, 'content': content});
+
+  factory SyncMessage.terminalInput(String nodeId, String data,
+      {required String senderId}) =>
+      SyncMessage(type: kTerminalInput, senderId: senderId,
+          payload: {'id': nodeId, 'data': data});
 
   // ── Serialisation ──────────────────────────────────────────────────────────
 

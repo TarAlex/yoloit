@@ -7,6 +7,7 @@ import 'package:yoloit/features/mindmap/bloc/mindmap_cubit.dart';
 import 'package:yoloit/features/review/bloc/review_cubit.dart';
 import 'package:yoloit/features/runs/bloc/run_cubit.dart';
 import 'package:yoloit/features/terminal/bloc/terminal_cubit.dart';
+import 'package:yoloit/features/terminal/data/pty_service.dart';
 import 'package:yoloit/features/workspaces/bloc/workspace_cubit.dart';
 import 'package:yoloit/ui/shell/main_shell.dart';
 
@@ -27,6 +28,7 @@ class App extends StatelessWidget {
         BlocProvider(
           create: (ctx) => CollaborationCubit(
             mindMapCubit: ctx.read<MindMapCubit>(),
+            onTerminalInput: PtyService.instance.write,
           ),
         ),
       ],

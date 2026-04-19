@@ -327,6 +327,7 @@ class MindMapCubit extends Cubit<MindMapState> {
     required Set<String>            hidden,
     required Set<String>            hiddenTypes,
     List<MindMapConnection>         connections = const [],
+    Map<String, Map<String, dynamic>> nodeContent = const {},
   }) {
     emit(state.copyWith(
       positions:   {...state.positions, ...positions},
@@ -334,6 +335,7 @@ class MindMapCubit extends Cubit<MindMapState> {
       hidden:      hidden,
       hiddenTypes: hiddenTypes,
       connections: connections.isNotEmpty ? connections : null,
+      nodeContent: nodeContent.isNotEmpty ? nodeContent : null,
     ));
   }
 
@@ -345,5 +347,12 @@ class MindMapCubit extends Cubit<MindMapState> {
   /// Applies a single node-resized delta from the host.
   void applyRemoteResize(String nodeId, Size size) {
     emit(state.copyWith(sizes: {...state.sizes, nodeId: size}));
+  }
+
+  /// Updates content for a single node (terminal stream, file content, etc.).
+  void updateNodeContent(String nodeId, Map<String, dynamic> content) {
+    final updated = Map<String, Map<String, dynamic>>.from(state.nodeContent);
+    updated[nodeId] = content;
+    emit(state.copyWith(nodeContent: updated));
   }
 }

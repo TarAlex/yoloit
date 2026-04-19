@@ -6,6 +6,9 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import '../../mindmap/bloc/mindmap_cubit.dart';
 import '../../mindmap/bloc/mindmap_state.dart';
 import '../../mindmap/model/mindmap_node_model.dart';
+import '../../terminal/data/terminal_output_bus.dart';
+import '../../terminal/models/agent_session.dart';
+import '../../runs/models/run_session.dart';
 import '../model/sync_message.dart';
 import '../services/collaboration_client.dart';
 import '../services/collaboration_server_platform.dart';
@@ -19,14 +22,21 @@ import 'collaboration_state.dart';
 /// **Guest mode**: starts [CollaborationClient], receives JSON messages, and
 /// applies them to the local [MindMapCubit].
 class CollaborationCubit extends Cubit<CollaborationState> {
-  CollaborationCubit({required this.mindMapCubit})
-      : super(const CollaborationState());
+  /// [onTerminalInput] receives (sessionId, data) when a browser guest sends
+  /// keyboard input to a terminal.  Pass [PtyService.instance.write] on the
+  /// host (macOS); leave null on web guests where PtyService is unavailable.
+  CollaborationCubit({
+    required this.mindMapCubit,
+    this.onTerminalInput,
+  }) : super(const CollaborationState());
 
   final MindMapCubit mindMapCubit;
+  final void Function(String sessionId, String data)? onTerminalInput;
 
   CollaborationServer? _server;
   CollaborationClient? _client;
   StreamSubscription<MindMapState>? _stateSub;
+  StreamSubscription<(String, String)>? _terminalSub;
   MindMapState? _lastBroadcast;
 
   // ── Host ─────────────────────────────────────────────────────────────────
@@ -41,6 +51,8 @@ class CollaborationCubit extends Cubit<CollaborationState> {
       );
       final address = await _server!.start();
       _stateSub = mindMapCubit.stream.listen(_onMindMapStateChanged);
+      // Stream live terminal output to all connected browser guests.
+      _terminalSub = TerminalOutputBus.instance.stream.listen(_onTerminalData);
       emit(state.copyWith(
         mode:         CollaborationMode.hosting,
         address:      address,
@@ -56,8 +68,10 @@ class CollaborationCubit extends Cubit<CollaborationState> {
   Future<void> stopHosting() async {
     await _server?.stop();
     await _stateSub?.cancel();
+    await _terminalSub?.cancel();
     _server        = null;
     _stateSub      = null;
+    _terminalSub   = null;
     _lastBroadcast = null;
     emit(const CollaborationState());
   }
@@ -141,7 +155,112 @@ class CollaborationCubit extends Cubit<CollaborationState> {
       'style': c.style.name,
       'color': c.color.toARGB32(),
     }).toList(),
+    nodeContent: Map.fromEntries(mm.nodes.map((n) {
+      final content = _serializeNodeContent(n);
+      return MapEntry(n.id, content);
+    })),
   );
+
+  Map<String, dynamic> _serializeNodeContent(MindMapNodeData node) {
+    return switch (node) {
+      AgentNodeData d => {
+        'type':   'agent',
+        'name':   d.session.customName ?? d.session.id,
+        'status': d.session.status.name,
+        'isRunning': d.isRunning,
+        'workspaceId': d.workspaceId,
+        'lastLines': d.session.lastLines(80),
+      },
+      WorkspaceNodeData d => {
+        'type': 'workspace',
+        'name': d.workspace.name,
+        'path': d.workspace.path,
+      },
+      SessionNodeData d => {
+        'type':   'session',
+        'name':   d.session.customName ?? d.session.id,
+        'status': d.session.status.name,
+        'isRunning': d.session.status == AgentStatus.live,
+        'workspaceId': d.workspaceId,
+        'lastLines': d.session.lastLines(80),
+      },
+      RepoNodeData d => {
+        'type':   'repo',
+        'name':   d.repoName,
+        'path':   d.repoPath,
+        'branch': d.branch,
+      },
+      BranchNodeData d => {
+        'type':       'branch',
+        'name':       d.branch,
+        'repoName':   d.repoName,
+        'commitHash': d.commitHash,
+      },
+      EditorNodeData d => {
+        'type':     'editor',
+        'filePath': d.filePath,
+        'language': d.language,
+        'content':  d.content.length > 8000
+            ? d.content.substring(0, 8000)
+            : d.content,
+      },
+      FilesNodeData d => {
+        'type':   'files',
+        'repoPath': d.repoPath,
+        'files': d.changedFiles.map((f) => {
+          'path':   f.path,
+          'status': f.status.name,
+        }).toList(),
+      },
+      FileTreeNodeData d => {
+        'type':       'tree',
+        'workspaceId': d.workspaceId,
+        'repoPath':   d.repoPath,
+        'repoName':   d.repoName,
+      },
+      DiffNodeData d => {
+        'type':       'diff',
+        'workspaceId': d.workspaceId,
+        'repoPath':   d.repoPath,
+        'repoName':   d.repoName,
+      },
+      RunNodeData d => {
+        'type':      'run',
+        'name':      d.session.config.name,
+        'status':    d.session.status.name,
+        'isRunning': d.session.status == RunStatus.running,
+        'lastLines': d.session.output
+            .reversed.take(80).toList().reversed
+            .map((l) => l.text).toList(),
+      },
+      MindMapPluginNodeData d => {
+        'type':     'plugin',
+        'pluginId': d.pluginId,
+        'payload':  d.payload,
+      },
+    };
+  }
+
+  /// Streams live terminal output to all connected browser guests.
+  void _onTerminalData((String, String) event) {
+    if (_server == null || _server!.clientCount == 0) return;
+    final (sessionId, plainText) = event;
+    // Find the agent node that owns this session.
+    final node = mindMapCubit.state.nodes.whereType<AgentNodeData>()
+        .cast<AgentNodeData?>()
+        .firstWhere((n) => n!.session.id == sessionId, orElse: () => null);
+    if (node == null) return;
+
+    final currentContent = _serializeNodeContent(node);
+    _server!.broadcastRaw(SyncMessage.nodeUpdate(node.id, currentContent));
+  }
+
+  /// Guest: send keyboard input for a terminal to the host.
+  void sendTerminalInput(String nodeId, String data) {
+    _client?.sendMessage(
+      SyncMessage.terminalInput(nodeId, data, senderId: 'guest'),
+    );
+  }
 
   // ── Guest: received from host ─────────────────────────────────────────────
 
@@ -155,6 +274,10 @@ class CollaborationCubit extends Cubit<CollaborationState> {
         _applyResize(msg.payload);
       case SyncMessage.kDeltaToggle:
         _applyToggle(msg.payload);
+      case SyncMessage.kNodeUpdate:
+        final id = msg.payload['id'] as String;
+        final content = (msg.payload['content'] as Map<String, dynamic>?) ?? {};
+        mindMapCubit.updateNodeContent(id, content);
       case SyncMessage.kConnected:
         final map = Map<String, String>.from(state.peers)
           ..[msg.payload['id'] as String] = msg.payload['name'] as String;
@@ -176,6 +299,7 @@ class CollaborationCubit extends Cubit<CollaborationState> {
     final hidden  = ((p['hidden']    as List?) ?? []).cast<String>().toSet();
     final hTypes  = ((p['hiddenTypes'] as List?) ?? []).cast<String>().toSet();
     final connRaw = (p['connections'] as List?) ?? [];
+    final ncRaw   = (p['nodeContent'] as Map<String, dynamic>?) ?? {};
 
     final positions = posRaw.map((k, v) {
       final l = (v as List).cast<num>();
@@ -198,6 +322,8 @@ class CollaborationCubit extends Cubit<CollaborationState> {
         color:  Color(c['color'] as int),
       );
     }).toList();
+    final nodeContent = ncRaw.map((k, v) =>
+        MapEntry(k, (v as Map<String, dynamic>)));
 
     mindMapCubit.applyRemoteSnapshot(
       positions:   positions,
@@ -205,6 +331,7 @@ class CollaborationCubit extends Cubit<CollaborationState> {
       hidden:      hidden,
       hiddenTypes: hTypes,
       connections: connections,
+      nodeContent: nodeContent,
     );
   }
 
@@ -245,6 +372,13 @@ class CollaborationCubit extends Cubit<CollaborationState> {
         _applyResize(msg.payload);
       case SyncMessage.kDeltaToggle:
         _applyToggle(msg.payload);
+      case SyncMessage.kTerminalInput:
+        // Forward keyboard input from browser guest to the actual PTY.
+        final nodeId = msg.payload['id'] as String? ?? '';
+        final data   = msg.payload['data'] as String? ?? '';
+        if (nodeId.isNotEmpty && data.isNotEmpty) {
+          onTerminalInput?.call(nodeId, data);
+        }
       default:
         break;
     }

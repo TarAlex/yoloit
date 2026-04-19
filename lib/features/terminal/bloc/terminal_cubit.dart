@@ -295,6 +295,7 @@ class TerminalCubit extends Cubit<TerminalState> {
           (data) {
             session.terminal.write(data);
             _logging.write(session.id, data);
+            session.appendOutput(data); // capture for browser streaming
           },
           onDone: () => _onSessionDone(session.id),
           // ignore: avoid_types_on_closure_parameters

@@ -61,6 +61,7 @@ class MindMapState extends Equatable {
     this.connections = const [],
     this.savedViews  = const {},
     this.activeViewName,
+    this.nodeContent = const {},
   });
 
   /// Node id → canvas offset (top-left corner).
@@ -90,6 +91,10 @@ class MindMapState extends Equatable {
   /// Currently active view name, null = unsaved / default.
   final String? activeViewName;
 
+  /// Rich content per node received from the host (browser guest only).
+  /// Map of nodeId → JSON-serializable content map.
+  final Map<String, Map<String, dynamic>> nodeContent;
+
   MindMapState copyWith({
     Map<String, Offset>? positions,
     Map<String, Size>?   sizes,
@@ -101,6 +106,7 @@ class MindMapState extends Equatable {
     Map<String, MindMapViewSnapshot>? savedViews,
     String? activeViewName,
     bool clearActiveViewName = false,
+    Map<String, Map<String, dynamic>>? nodeContent,
   }) {
     return MindMapState(
       positions:      positions      ?? this.positions,
@@ -112,12 +118,13 @@ class MindMapState extends Equatable {
       connections:    connections    ?? this.connections,
       savedViews:     savedViews     ?? this.savedViews,
       activeViewName: clearActiveViewName ? null : (activeViewName ?? this.activeViewName),
+      nodeContent:    nodeContent    ?? this.nodeContent,
     );
   }
 
   @override
   List<Object?> get props => [
     positions, sizes, locked, hidden, hiddenTypes,
-    nodes, connections, savedViews, activeViewName,
+    nodes, connections, savedViews, activeViewName, nodeContent,
   ];
 }
