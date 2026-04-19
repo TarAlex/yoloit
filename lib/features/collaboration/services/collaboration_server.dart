@@ -1,10 +1,17 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
+
+import 'package:crypto/crypto.dart';
 
 import '../model/sync_message.dart';
 
 /// WebSocket server (port [port]) + static HTTP server (port [httpPort]).
-/// Uses dart:io WebSocket directly — more reliable for cross-machine LAN connections.
+///
+/// Uses raw [ServerSocket] — NOT [HttpServer] — to avoid a macOS/dart bug
+/// where dart:_http calls setOption(TCP_NODELAY) on accepted sockets and
+/// gets errno=22 (EINVAL) for connections coming in on the LAN interface.
+/// Both the WS upgrade and HTTP file serving are implemented manually.
 class CollaborationServer {
   CollaborationServer({
     required this.onClientMessage,
@@ -16,35 +23,29 @@ class CollaborationServer {
   final int port;
   final int httpPort;
 
-  HttpServer? _wsServer;
-  HttpServer? _staticServer;
+  ServerSocket? _wsServerSocket;
+  ServerSocket? _staticServerSocket;
   final Map<String, WebSocket> _clients = {};
   String _resolvedIp = '127.0.0.1';
 
-  bool get isRunning   => _wsServer != null;
+  bool get isRunning   => _wsServerSocket != null;
   int  get clientCount => _clients.length;
 
   /// Returns the address string "ip:port" of the WS server.
-  /// Also starts the static HTTP server if a web-client directory exists.
   Future<String> start() async {
-    _wsServer = await HttpServer.bind(InternetAddress.anyIPv4, port);
-    // Wrap async handler so unhandled Future errors don't crash the isolate.
-    _wsServer!.listen(
-      (req) => _handleRequest(req).catchError((_) {}),
+    _wsServerSocket = await ServerSocket.bind(InternetAddress.anyIPv4, port);
+    _wsServerSocket!.listen(
+      (s) => _handleWsSocket(s).catchError((_) { _destroySocket(s); }),
       onError: (_) {},
     );
     _resolvedIp = await _localIp();
-
-    // Auto-install web client to ~/.yoloit/web_client if not present yet.
     await _ensureWebClientInstalled();
-
     await _startStaticServer();
     return '$_resolvedIp:$port';
   }
 
-  /// The URL that guests should open in their browser.
   String get webClientUrl {
-    if (_staticServer == null) return '';
+    if (_staticServerSocket == null) return '';
     return 'http://$_resolvedIp:$httpPort';
   }
 
@@ -53,10 +54,10 @@ class CollaborationServer {
       try { await ws.close(); } catch (_) {}
     }
     _clients.clear();
-    await _wsServer?.close(force: true);
-    await _staticServer?.close(force: true);
-    _wsServer   = null;
-    _staticServer = null;
+    await _wsServerSocket?.close();
+    await _staticServerSocket?.close();
+    _wsServerSocket   = null;
+    _staticServerSocket = null;
   }
 
   void broadcastRaw(SyncMessage msg, {String? exclude}) {
@@ -71,42 +72,60 @@ class CollaborationServer {
     try { _clients[clientId]?.add(msg.encode()); } catch (_) {}
   }
 
-  // ── Internal ────────────────────────────────────────────────────────────────
+  // ── WebSocket server (manual HTTP upgrade) ─────────────────────────────────
 
-  Future<void> _handleRequest(HttpRequest request) async {
-    if (!WebSocketTransformer.isUpgradeRequest(request)) {
-      // Health-check / browser preflight
-      request.response
-        ..statusCode = HttpStatus.ok
-        ..headers.set('Access-Control-Allow-Origin', '*')
-        ..write('YoLoIT collaboration server');
-      await request.response.close();
+  Future<void> _handleWsSocket(Socket socket) async {
+    final headers = await _readHeaders(socket);
+    if (headers == null) { socket.destroy(); return; }
+
+    final isUpgrade = (headers['upgrade'] ?? '').toLowerCase() == 'websocket';
+    if (!isUpgrade) {
+      // Health-check ping.
+      _writeRaw(socket,
+        'HTTP/1.1 200 OK\r\n'
+        'Access-Control-Allow-Origin: *\r\n'
+        'Content-Type: text/plain\r\n'
+        'Content-Length: 27\r\n'
+        'Connection: close\r\n'
+        '\r\n'
+        'YoLoIT collaboration server',
+      );
+      await socket.close();
       return;
     }
-    try {
-      final ws       = await WebSocketTransformer.upgrade(request);
-      final clientId = 'c_${DateTime.now().millisecondsSinceEpoch}';
-      _clients[clientId] = ws;
 
-      ws.listen(
-        (raw) {
-          final msg = SyncMessage.decode(raw);
-          if (msg == null) return;
-          onClientMessage(clientId, msg);
-          if (msg.type.startsWith('delta.')) {
-            broadcastRaw(msg, exclude: clientId);
-          }
-        },
-        onDone:        () => _onDisconnect(clientId),
-        onError:       (_) => _onDisconnect(clientId),
-        cancelOnError: true,
-      );
+    final key = headers['sec-websocket-key'];
+    if (key == null) { socket.destroy(); return; }
 
-      // Send full state snapshot to the new client.
-      broadcastRaw(SyncMessage.connected(clientId, 'Remote'));
-    } catch (_) {
-      // ignore failed upgrade (e.g. client sent non-WS request to WS port)
-    }
+    // Compute Sec-WebSocket-Accept
+    final accept = base64.encode(
+      sha1.convert(utf8.encode('${key}258EAFA5-E914-47DA-95CA-C5AB0DC85B11'))
+          .bytes,
+    );
+    _writeRaw(socket,
+      'HTTP/1.1 101 Switching Protocols\r\n'
+      'Upgrade: websocket\r\n'
+      'Connection: Upgrade\r\n'
+      'Sec-WebSocket-Accept: $accept\r\n'
+      '\r\n',
+    );
+
+    final ws = WebSocket.fromUpgradedSocket(socket, serverSide: true);
+    final clientId = 'c_${DateTime.now().millisecondsSinceEpoch}';
+    _clients[clientId] = ws;
+
+    ws.listen(
+      (raw) {
+        final msg = SyncMessage.decode(raw);
+        if (msg == null) return;
+        onClientMessage(clientId, msg);
+        if (msg.type.startsWith('delta.')) broadcastRaw(msg, exclude: clientId);
+      },
+      onDone:        () => _onDisconnect(clientId),
+      onError:       (_) => _onDisconnect(clientId),
+      cancelOnError: true,
+    );
+    broadcastRaw(SyncMessage.connected(clientId, 'Remote'));
   }
 
   void _onDisconnect(String clientId) {
@@ -114,89 +133,146 @@ class CollaborationServer {
     broadcastRaw(SyncMessage.disconnected(clientId));
   }
 
-  // ── Static HTTP server (pure dart:io, no shelf) ──────────────────────────
+  // ── Static HTTP file server ────────────────────────────────────────────────
 
-  /// Starts a minimal HTTP file server on [httpPort] for the Flutter web build.
   Future<void> _startStaticServer() async {
     final webDir = await _findWebClientDir();
     if (webDir == null) return;
     try {
-      _staticServer = await HttpServer.bind(InternetAddress.anyIPv4, httpPort);
-      _staticServer!.listen(
-        (req) => _serveFile(req, webDir).catchError((_) {}),
+      _staticServerSocket = await ServerSocket.bind(
+          InternetAddress.anyIPv4, httpPort);
+      _staticServerSocket!.listen(
+        (s) => _serveStaticSocket(s, webDir).catchError((_) { _destroySocket(s); }),
         onError: (_) {},
       );
     } catch (_) {
-      _staticServer = null; // Optional — don't fail hosting.
+      _staticServerSocket = null;
     }
   }
 
-  /// Serves a single file request from [webDir] with CORS headers.
-  static Future<void> _serveFile(HttpRequest req, String webDir) async {
-    // OPTIONS preflight
-    if (req.method == 'OPTIONS') {
-      req.response
-        ..statusCode = HttpStatus.noContent
-        ..headers.set('Access-Control-Allow-Origin', '*')
-        ..headers.set('Access-Control-Allow-Methods', 'GET, OPTIONS')
-        ..headers.set('Access-Control-Allow-Headers', 'Content-Type');
-      await req.response.close();
+  static Future<void> _serveStaticSocket(Socket socket, String webDir) async {
+    final headers = await _readHeaders(socket);
+    if (headers == null) { socket.destroy(); return; }
+
+    final method = headers['_method'] ?? 'GET';
+    var path     = headers['_path']   ?? '/';
+
+    if (method == 'OPTIONS') {
+      _writeRaw(socket,
+        'HTTP/1.1 204 No Content\r\n'
+        'Access-Control-Allow-Origin: *\r\n'
+        'Access-Control-Allow-Methods: GET, OPTIONS\r\n'
+        'Access-Control-Allow-Headers: Content-Type\r\n'
+        'Connection: close\r\n'
+        '\r\n',
+      );
+      await socket.close();
       return;
     }
 
-    var urlPath = req.uri.path;
-    // SPA routing: serve index.html for all non-file paths.
-    if (urlPath == '/' || urlPath.isEmpty || !urlPath.contains('.')) {
-      urlPath = '/index.html';
-    }
-    // Sanitise: strip query, collapse "..", disallow escaping webDir.
-    final safePath = Uri.decodeFull(urlPath.split('?').first)
+    if (path == '/' || path.isEmpty || !path.contains('.')) path = '/index.html';
+    final safePath = Uri.decodeFull(path.split('?').first)
         .replaceAll(RegExp(r'\.\.[\\/]'), '');
-    final filePath = '$webDir$safePath';
-    final file = File(filePath);
 
-    req.response.headers.set('Access-Control-Allow-Origin', '*');
-    req.response.headers.set('Cache-Control', 'no-cache');
+    var file = File('$webDir$safePath');
+    if (!await file.exists()) file = File('$webDir/index.html');
 
-    if (await file.exists()) {
-      req.response
-        ..statusCode = HttpStatus.ok
-        ..headers.contentType = _mimeType(safePath);
-      await req.response.addStream(file.openRead());
-    } else {
-      // SPA fallback — serve index.html so Flutter router takes over.
-      final index = File('$webDir/index.html');
-      req.response
-        ..statusCode = HttpStatus.ok
-        ..headers.contentType = ContentType.html;
-      await req.response.addStream(index.openRead());
-    }
-    await req.response.close();
+    final bytes    = await file.readAsBytes();
+    final mimeStr  = _mimeString(safePath);
+
+    _writeRaw(socket,
+      'HTTP/1.1 200 OK\r\n'
+      'Access-Control-Allow-Origin: *\r\n'
+      'Cache-Control: no-cache\r\n'
+      'Content-Type: $mimeStr\r\n'
+      'Content-Length: ${bytes.length}\r\n'
+      'Connection: close\r\n'
+      '\r\n',
+    );
+    socket.add(bytes);
+    await socket.flush();
+    await socket.close();
   }
 
-  static ContentType _mimeType(String path) {
+  // ── Helpers ────────────────────────────────────────────────────────────────
+
+  /// Reads HTTP request headers from [socket].
+  /// Returns a map with lowercased header names + '_method' and '_path' keys.
+  /// Returns null if the socket closes or sends malformed data.
+  static Future<Map<String, String>?> _readHeaders(Socket socket) async {
+    final buf = <int>[];
+    final end = [13, 10, 13, 10]; // \r\n\r\n
+    try {
+      await for (final chunk in socket) {
+        buf.addAll(chunk);
+        if (buf.length >= 4) {
+          final tail = buf.sublist(buf.length - 4);
+          if (_listEquals(tail, end)) break;
+        }
+        if (buf.length > 65536) return null; // too large — reject
+      }
+    } catch (_) {
+      return null;
+    }
+
+    final text  = utf8.decode(buf, allowMalformed: true);
+    final lines = text.split('\r\n');
+    if (lines.isEmpty) return null;
+
+    final result = <String, String>{};
+    final requestParts = lines[0].split(' ');
+    result['_method'] = requestParts.isNotEmpty ? requestParts[0] : 'GET';
+    result['_path']   = requestParts.length > 1  ? requestParts[1] : '/';
+
+    for (int i = 1; i < lines.length; i++) {
+      final colon = lines[i].indexOf(':');
+      if (colon < 0) continue;
+      final name  = lines[i].substring(0, colon).trim().toLowerCase();
+      final value = lines[i].substring(colon + 1).trim();
+      result[name] = value;
+    }
+    return result;
+  }
+
+  static bool _listEquals(List<int> a, List<int> b) {
+    if (a.length != b.length) return false;
+    for (int i = 0; i < a.length; i++) {
+      if (a[i] != b[i]) return false;
+    }
+    return true;
+  }
+
+  static void _writeRaw(Socket socket, String data) {
+    try { socket.add(utf8.encode(data)); } catch (_) {}
+  }
+
+  static void _destroySocket(Socket s) {
+    try { s.destroy(); } catch (_) {}
+  }
+
+  static String _mimeString(String path) {
     final ext = path.split('.').last.toLowerCase();
     return switch (ext) {
-      'html' => ContentType.html,
-      'js'   => ContentType('application', 'javascript', charset: 'utf-8'),
-      'css'  => ContentType('text', 'css', charset: 'utf-8'),
-      'json' => ContentType.json,
-      'png'  => ContentType('image', 'png'),
-      'ico'  => ContentType('image', 'x-icon'),
-      'svg'  => ContentType('image', 'svg+xml'),
-      'wasm' => ContentType('application', 'wasm'),
-      _      => ContentType.binary,
+      'html' => 'text/html; charset=utf-8',
+      'js'   => 'application/javascript; charset=utf-8',
+      'css'  => 'text/css; charset=utf-8',
+      'json' => 'application/json',
+      'png'  => 'image/png',
+      'ico'  => 'image/x-icon',
+      'svg'  => 'image/svg+xml',
+      'wasm' => 'application/wasm',
+      _      => 'application/octet-stream',
     };
   }
 
-  /// Auto-copies the web client from build/web to ~/.yoloit/web_client if needed.
+  // ── Web client installation ────────────────────────────────────────────────
+
   static Future<void> _ensureWebClientInstalled() async {
     final home = Platform.environment['HOME'];
     if (home == null) return;
     final dest = '$home/.yoloit/web_client';
-    if (await File('$dest/index.html').exists()) return; // already installed
+    if (await File('$dest/index.html').exists()) return;
 
-    // Search for build/web relative to executable — go up the dir tree.
     final exe = Platform.resolvedExecutable;
     var dir = File(exe).parent;
     for (int i = 0; i < 12; i++) {
@@ -224,24 +300,20 @@ class CollaborationServer {
     }
   }
 
-  /// Candidate directories where the Flutter web build might live.
   static Future<String?> _findWebClientDir() async {
     final home   = Platform.environment['HOME'] ?? '';
     final exe    = Platform.resolvedExecutable;
     final appDir = File(exe).parent.path;
 
-    // Fixed-priority candidates.
     final fixed = [
-      '$appDir/../Resources/web_client',  // macOS app bundle Resources
-      '$appDir/web_client',               // sibling to executable
-      '$home/.yoloit/web_client',         // user install / auto-copy
-      '${Directory.current.path}/build/web', // flutter run dev
+      '$appDir/../Resources/web_client',
+      '$appDir/web_client',
+      '$home/.yoloit/web_client',
+      '${Directory.current.path}/build/web',
     ];
     for (final path in fixed) {
       if (await File('$path/index.html').exists()) return _resolved(path);
     }
-
-    // Traverse up from executable to find project build/web.
     var dir = File(exe).parent;
     for (int i = 0; i < 12; i++) {
       final path = '${dir.path}/build/web';
@@ -265,4 +337,3 @@ class CollaborationServer {
     return '127.0.0.1';
   }
 }
-
