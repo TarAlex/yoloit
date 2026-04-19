@@ -1028,6 +1028,9 @@ class _GroupSidebar extends StatefulWidget {
 
 class _GroupSidebarState extends State<_GroupSidebar> {
   bool _collapsed = false;
+  double _width = 220;
+  static const _minWidth = 160.0;
+  static const _maxWidth = 480.0;
   // Set of node ids whose children are expanded in the tree.
   final _expandedIds = <String>{};
 
@@ -1070,8 +1073,11 @@ class _GroupSidebarState extends State<_GroupSidebar> {
 
         final cubit = context.read<MindMapCubit>();
 
-        return Container(
-          width: 220,
+        return Stack(
+          clipBehavior: Clip.none,
+          children: [
+            Container(
+          width: _width,
           decoration: BoxDecoration(
             color: const Color(0xEE0F1218),
             border: Border.all(color: const Color(0xFF1E2330)),
@@ -1186,7 +1192,19 @@ class _GroupSidebarState extends State<_GroupSidebar> {
               ),
             ],
           ),
-        );
+        ), // Container
+            // ── Resize handle (right edge) ──────────────────────────────
+            Positioned(
+              right: -4, top: 0, bottom: 0,
+              width: 8,
+              child: _SidebarResizeHandle(
+                onDrag: (dx) => setState(() {
+                  _width = (_width + dx).clamp(_minWidth, _maxWidth);
+                }),
+              ),
+            ),
+          ],
+        ); // Stack
       },
     );
   }
@@ -1433,6 +1451,46 @@ class _TreeRow extends StatelessWidget {
   }
 }
 
+
+// ── Sidebar resize handle ──────────────────────────────────────────────────
+
+class _SidebarResizeHandle extends StatefulWidget {
+  const _SidebarResizeHandle({required this.onDrag});
+  final ValueChanged<double> onDrag;
+
+  @override
+  State<_SidebarResizeHandle> createState() => _SidebarResizeHandleState();
+}
+
+class _SidebarResizeHandleState extends State<_SidebarResizeHandle> {
+  bool _hovered = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return MouseRegion(
+      cursor: SystemMouseCursors.resizeColumn,
+      onEnter: (_) => setState(() => _hovered = true),
+      onExit:  (_) => setState(() => _hovered = false),
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onPanUpdate: (d) => widget.onDrag(d.delta.dx),
+        child: Center(
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 120),
+            width:  _hovered ? 3 : 1,
+            height: double.infinity,
+            decoration: BoxDecoration(
+              color: _hovered
+                  ? const Color(0xFF7C6BFF)
+                  : const Color(0x40FFFFFF),
+              borderRadius: BorderRadius.circular(2),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
 
 // ── Sidebar collapsed toggle ───────────────────────────────────────────────
 
