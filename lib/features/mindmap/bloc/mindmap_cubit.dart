@@ -290,4 +290,32 @@ class MindMapCubit extends Cubit<MindMapState> {
     final map = views.map((k, v) => MapEntry(k, v.toJson()));
     await prefs.setString(_kSavedViews, jsonEncode(map));
   }
+
+  // ── Remote collaboration helpers ──────────────────────────────────────────
+
+  /// Applies a full state snapshot received from the host.
+  /// Does NOT persist — guest state is ephemeral (mirrors host).
+  void applyRemoteSnapshot({
+    required Map<String, Offset> positions,
+    required Map<String, Size>   sizes,
+    required Set<String>         hidden,
+    required Set<String>         hiddenTypes,
+  }) {
+    emit(state.copyWith(
+      positions:   {...state.positions, ...positions},
+      sizes:       {...state.sizes, ...sizes},
+      hidden:      hidden,
+      hiddenTypes: hiddenTypes,
+    ));
+  }
+
+  /// Applies a single node-moved delta from the host.
+  void applyRemoteMove(String nodeId, Offset pos) {
+    emit(state.copyWith(positions: {...state.positions, nodeId: pos}));
+  }
+
+  /// Applies a single node-resized delta from the host.
+  void applyRemoteResize(String nodeId, Size size) {
+    emit(state.copyWith(sizes: {...state.sizes, nodeId: size}));
+  }
 }

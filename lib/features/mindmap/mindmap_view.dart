@@ -5,6 +5,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:path/path.dart' as p;
+import 'package:yoloit/features/collaboration/ui/collaboration_button.dart';
 import 'package:yoloit/features/editor/bloc/file_editor_cubit.dart';
 import 'package:yoloit/features/editor/bloc/file_editor_state.dart';
 import 'package:yoloit/features/mindmap/bloc/mindmap_cubit.dart';
@@ -842,6 +843,8 @@ class _CanvasToolbar extends StatelessWidget {
         ),
         const SizedBox(width: 1),
         _ViewsButton(),
+        const SizedBox(width: 1),
+        const CollaborationButton(),
         const SizedBox(width: 1),
       ],
     );

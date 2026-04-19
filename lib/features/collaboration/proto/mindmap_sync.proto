@@ -1,0 +1,76 @@
+syntax = "proto3";
+
+package yoloit.mindmap;
+
+// ── Primitive ─────────────────────────────────────────────────────────────
+
+message Vec2 {
+  float x = 1;
+  float y = 2;
+}
+
+// ── Full state snapshot (sent on connection or explicit resync) ────────────
+
+message StateSnapshot {
+  map<string, Vec2> positions    = 1;
+  map<string, Vec2> sizes        = 2;
+  repeated string   hidden       = 3;
+  repeated string   hidden_types = 4;
+}
+
+// ── Incremental delta events ───────────────────────────────────────────────
+
+message NodeMoved {
+  string node_id = 1;
+  float  x       = 2;
+  float  y       = 3;
+}
+
+message NodeResized {
+  string node_id = 1;
+  float  width   = 2;
+  float  height  = 3;
+}
+
+message NodeToggled {
+  string node_id = 1;
+  bool   hidden  = 2;
+}
+
+message DeltaEvent {
+  oneof kind {
+    NodeMoved   moved   = 1;
+    NodeResized resized = 2;
+    NodeToggled toggled = 3;
+  }
+}
+
+// ── Handshake ─────────────────────────────────────────────────────────────
+
+message ClientHello {
+  string client_id   = 1;
+  string client_name = 2;
+  string version     = 3;
+}
+
+message ClientConnected {
+  string client_id   = 1;
+  string client_name = 2;
+}
+
+message ClientDisconnected {
+  string client_id = 1;
+}
+
+// ── Top-level envelope (every WS message is one of these) ─────────────────
+
+message SyncEnvelope {
+  string sender_id = 1;
+  oneof payload {
+    StateSnapshot    snapshot     = 2;
+    DeltaEvent       delta        = 3;
+    ClientHello      hello        = 4;
+    ClientConnected  connected    = 5;
+    ClientDisconnected disconnected = 6;
+  }
+}

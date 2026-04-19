@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:yoloit/core/theme/theme_manager.dart';
+import 'package:yoloit/features/collaboration/bloc/collaboration_cubit.dart';
 import 'package:yoloit/features/editor/bloc/file_editor_cubit.dart';
 import 'package:yoloit/features/mindmap/bloc/mindmap_cubit.dart';
 import 'package:yoloit/features/review/bloc/review_cubit.dart';
@@ -22,6 +23,12 @@ class App extends StatelessWidget {
         BlocProvider(create: (_) => FileEditorCubit()),
         BlocProvider(create: (_) => RunCubit()),
         BlocProvider(create: (_) => MindMapCubit()),
+        // CollaborationCubit must come after MindMapCubit so it can read it.
+        BlocProvider(
+          create: (ctx) => CollaborationCubit(
+            mindMapCubit: ctx.read<MindMapCubit>(),
+          ),
+        ),
       ],
       child: ListenableBuilder(
         listenable: ThemeManager.instance,
