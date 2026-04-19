@@ -34,6 +34,7 @@ class App extends StatelessWidget {
           create: (ctx) => CollaborationCubit(
             mindMapCubit: ctx.read<MindMapCubit>(),
             onTerminalInput: PtyService.instance.write,
+            reviewCubit: ctx.read<ReviewCubit>(),
             ensureNodesPopulated: () => _populateMindMap(
               ctx.read<MindMapCubit>(),
               ctx.read<WorkspaceCubit>().state,

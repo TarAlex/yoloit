@@ -34,11 +34,13 @@ class CollaborationCubit extends Cubit<CollaborationState> {
     required this.mindMapCubit,
     this.ensureNodesPopulated,
     this.onTerminalInput,
+    this.reviewCubit,
   }) : super(const CollaborationState());
 
   final MindMapCubit mindMapCubit;
   final Future<void> Function()? ensureNodesPopulated;
   final void Function(String sessionId, String data)? onTerminalInput;
+  final dynamic reviewCubit; // ReviewCubit on desktop, null on web
 
   CollaborationServer? _server;
   CollaborationClient? _client;
@@ -236,12 +238,14 @@ class CollaborationCubit extends Cubit<CollaborationState> {
         'workspaceId': d.workspaceId,
         'repoPath':    d.repoPath,
         'repoName':    d.repoName,
+        'entries':     _serializeFileTree(),
       },
       DiffNodeData d => {
         'type':        'diff',
         'workspaceId': d.workspaceId,
         'repoPath':    d.repoPath,
         'repoName':    d.repoName,
+        'hunks':       _serializeDiffHunks(),
       },
       RunNodeData d => {
         'type':      'run',
@@ -261,6 +265,58 @@ class CollaborationCubit extends Cubit<CollaborationState> {
         'payload':  d.payload,
       },
     };
+  }
+
+  /// Flattens the ReviewCubit file tree into serializable entries.
+  List<Map<String, dynamic>> _serializeFileTree() {
+    if (reviewCubit == null) return const [];
+    try {
+      final state = reviewCubit!.state;
+      final fileTree = state.fileTree as List?;
+      if (fileTree == null || fileTree.isEmpty) return const [];
+      final entries = <Map<String, dynamic>>[];
+      _flattenTreeNodes(fileTree, entries, 0);
+      return entries;
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  void _flattenTreeNodes(List<dynamic> nodes, List<Map<String, dynamic>> out, int depth) {
+    for (final node in nodes) {
+      out.add({
+        'name': node.name as String,
+        'path': node.path as String,
+        'isDir': node.isDirectory as bool,
+        'depth': depth,
+        'isExpanded': node.isExpanded as bool,
+      });
+      if (node.isExpanded == true) {
+        final children = node.children as List?;
+        if (children != null && children.isNotEmpty) {
+          _flattenTreeNodes(children, out, depth + 1);
+        }
+      }
+    }
+  }
+
+  /// Serializes diff hunks from ReviewCubit state.
+  List<Map<String, dynamic>> _serializeDiffHunks() {
+    if (reviewCubit == null) return const [];
+    try {
+      final state = reviewCubit!.state;
+      final hunks = state.diffHunks as List?;
+      if (hunks == null || hunks.isEmpty) return const [];
+      return hunks.map<Map<String, dynamic>>((h) => {
+        'header': h.header as String,
+        'lines': (h.lines as List).map<Map<String, dynamic>>((l) => {
+          'text': l.text as String,
+          'type': l.type as String,
+        }).toList(),
+      }).toList();
+    } catch (_) {
+      return const [];
+    }
   }
 
   /// Streams live terminal output to all connected browser guests.

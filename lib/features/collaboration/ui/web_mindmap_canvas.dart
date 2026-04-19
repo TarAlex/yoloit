@@ -842,15 +842,23 @@ class _WebSidebarState extends State<_WebSidebar> {
       (childMap[c.fromId] ??= []).add(c.toId);
     }
 
-    // Workspace nodes are identified by type in nodeContent
-    final workspaceIds = mm.nodeContent.entries
-        .where((e) => e.value['type'] == 'workspace')
-        .map((e) => e.key)
-        .toList();
+    // Workspace nodes: check nodeContent type first, then fall back to ID prefix
+    final workspaceIds = mm.positions.keys.where((id) {
+      final type = mm.nodeContent[id]?['type'] as String?;
+      if (type == 'workspace') return true;
+      return _typeFromId(id) == 'ws';
+    }).toList();
 
-    // Auto-expand workspaces on first appearance
+    // Auto-expand workspaces and sessions on first appearance
     for (final wsId in workspaceIds) {
       _expandedIds.add(wsId);
+    }
+    // Also auto-expand session nodes
+    for (final id in mm.positions.keys) {
+      final type = _resolveType(id, mm);
+      if (type == 'session' || type == 'agent') {
+        _expandedIds.add(id);
+      }
     }
 
     // Find orphan nodes (not reachable from any workspace)
@@ -916,8 +924,8 @@ class _WebSidebarState extends State<_WebSidebar> {
                     for (final wsId in workspaceIds) ...[
                       _SidebarRow(
                         nodeId: wsId,
-                        label: (mm.nodeContent[wsId]?['name'] as String?) ?? wsId,
-                        type: 'workspace',
+                        label: _resolveLabel(wsId, mm),
+                        type: _resolveType(wsId, mm),
                         depth: 0,
                         hidden: mm.hidden.contains(wsId),
                         expanded: _expandedIds.contains(wsId),
@@ -943,8 +951,8 @@ class _WebSidebarState extends State<_WebSidebar> {
                       for (final id in orphanIds)
                         _SidebarRow(
                           nodeId: id,
-                          label: _nodeLabel(id, mm),
-                          type: (mm.nodeContent[id]?['type'] as String?) ?? 'node',
+                          label: _resolveLabel(id, mm),
+                          type: _resolveType(id, mm),
                           depth: 1,
                           hidden: mm.hidden.contains(id),
                           expanded: false,
@@ -991,8 +999,8 @@ class _WebSidebarState extends State<_WebSidebar> {
       final hasKids = childMap.containsKey(childId);
       widgets.add(_SidebarRow(
         nodeId: childId,
-        label: _nodeLabel(childId, mm),
-        type: (mm.nodeContent[childId]?['type'] as String?) ?? 'node',
+        label: _resolveLabel(childId, mm),
+        type: _resolveType(childId, mm),
         depth: depth,
         hidden: mm.hidden.contains(childId),
         expanded: _expandedIds.contains(childId),
@@ -1015,13 +1023,60 @@ class _WebSidebarState extends State<_WebSidebar> {
     return widgets;
   }
 
-  String _nodeLabel(String id, MindMapState mm) {
+  /// Resolves the node type from nodeContent or ID prefix.
+  String _resolveType(String id, MindMapState mm) {
+    final contentType = mm.nodeContent[id]?['type'] as String?;
+    if (contentType != null && contentType.isNotEmpty) return contentType;
+    final prefix = _typeFromId(id);
+    // Map ID prefixes to canonical types
+    return switch (prefix) {
+      'ws' => 'workspace',
+      _ => prefix,
+    };
+  }
+
+  /// Resolves a human-readable label for a node.
+  String _resolveLabel(String id, MindMapState mm) {
     final content = mm.nodeContent[id] ?? {};
     final name = content['name'] as String?;
     if (name != null && name.isNotEmpty) return name;
-    // Fallback: extract type prefix from id
+    // Fallback: use type-specific display name + short ID
+    final type = _resolveType(id, mm);
+    final shortId = _shortId(id);
+    return switch (type) {
+      'workspace' => shortId.isNotEmpty ? 'Workspace · $shortId' : 'Workspace',
+      'session'   => shortId.isNotEmpty ? 'Session · $shortId' : 'Session',
+      'agent'     => shortId.isNotEmpty ? 'Agent · $shortId' : 'Agent',
+      'repo'      => content['path'] as String? ?? 'Repository',
+      'branch'    => content['branch'] as String? ?? 'Branch',
+      'run'       => 'Run',
+      'tree'      => content['repoName'] as String? ?? 'File Tree',
+      'diff'      => content['repoName'] as String? ?? 'Diff',
+      'editor'    => _fileName(content['filePath'] as String?) ?? 'Editor',
+      'files'     => 'Files',
+      _           => type,
+    };
+  }
+
+  static String _typeFromId(String id) {
     final i = id.indexOf(':');
     return i > 0 ? id.substring(0, i) : id;
+  }
+
+  static String _shortId(String id) {
+    final i = id.indexOf(':');
+    if (i < 0) return '';
+    final rest = id.substring(i + 1);
+    // Return last segment after underscore or last 8 chars
+    final u = rest.lastIndexOf('_');
+    if (u >= 0 && u < rest.length - 1) return rest.substring(u + 1);
+    return rest.length > 12 ? '..${rest.substring(rest.length - 8)}' : rest;
+  }
+
+  static String? _fileName(String? path) {
+    if (path == null || path.isEmpty) return null;
+    final i = path.lastIndexOf('/');
+    return i >= 0 ? path.substring(i + 1) : path;
   }
 
   void _collectIds(String id, Map<String, List<String>> childMap, Set<String> result) {
