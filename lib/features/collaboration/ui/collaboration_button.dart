@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
@@ -294,14 +296,31 @@ class _HostActiveView extends StatelessWidget {
   const _HostActiveView({required this.state});
   final CollaborationState state;
 
+  Future<void> _openInBrowser() async {
+    final url = state.webClientUrl;
+    if (url.isEmpty) return;
+    try {
+      if (Platform.isMacOS) {
+        await Process.run('open', [url]);
+      } else if (Platform.isLinux) {
+        await Process.run('xdg-open', [url]);
+      } else if (Platform.isWindows) {
+        await Process.run('start', [url], runInShell: true);
+      }
+    } catch (_) {}
+  }
+
   @override
   Widget build(BuildContext context) {
+    final browserUrl = state.webClientUrl;
+
     return Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
+        // ── Status badge ────────────────────────────────────────────
         Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
           decoration: BoxDecoration(
             color:  const Color(0xFF0A1A12),
             border: Border.all(color: const Color(0x4034D399)),
@@ -309,92 +328,138 @@ class _HostActiveView extends StatelessWidget {
           ),
           child: Row(
             children: [
-              const Icon(Icons.wifi_tethering_rounded, size: 16, color: Color(0xFF34D399)),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text('Hosting',
-                        style: TextStyle(color: Color(0xFF34D399),
-                            fontSize: 12, fontWeight: FontWeight.w700)),
-                    Text(state.address,
-                        style: const TextStyle(color: Color(0xFFE8E8FF),
-                            fontSize: 14, fontFamily: 'monospace',
-                            fontWeight: FontWeight.w600)),
-                  ],
-                ),
-              ),
-              IconButton(
-                icon:    const Icon(Icons.copy, size: 14, color: Color(0xFF64748B)),
-                tooltip: 'Copy address',
-                onPressed: () =>
-                    Clipboard.setData(ClipboardData(text: state.address)),
-              ),
+              const Icon(Icons.wifi_tethering_rounded,
+                  size: 14, color: Color(0xFF34D399)),
+              const SizedBox(width: 8),
+              const Text('Hosting active',
+                  style: TextStyle(color: Color(0xFF34D399),
+                      fontSize: 12, fontWeight: FontWeight.w700)),
+              const Spacer(),
+              if (state.peers.isNotEmpty)
+                Row(children: [
+                  const Icon(Icons.person_outline, size: 13,
+                      color: Color(0xFF60A5FA)),
+                  const SizedBox(width: 4),
+                  Text('${state.peerCount}',
+                      style: const TextStyle(color: Color(0xFF60A5FA),
+                          fontSize: 12, fontWeight: FontWeight.w600)),
+                  const SizedBox(width: 4),
+                  const Text('connected',
+                      style: TextStyle(color: Color(0xFF64748B), fontSize: 11)),
+                ]),
             ],
           ),
         ),
-        const SizedBox(height: 12),
-        if (state.peers.isEmpty)
-          const Text('Waiting for peers…',
-              style: TextStyle(color: Color(0xFF64748B), fontSize: 12))
-        else
-          for (final e in state.peers.entries)
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 3),
-              child: Row(
-                children: [
-                  const Icon(Icons.person_outline, size: 14, color: Color(0xFF60A5FA)),
-                  const SizedBox(width: 8),
-                  Text(e.value.isEmpty ? e.key : e.value,
-                      style: const TextStyle(color: Color(0xFFE8E8FF), fontSize: 12)),
-                ],
-              ),
-            ),
-        // ── Browser URL ──────────────────────────────────────────────
-        if (state.webClientUrl.isNotEmpty) ...[
+
+        if (browserUrl.isNotEmpty) ...[
           const SizedBox(height: 12),
+          // ── "How to connect" section ─────────────────────────────
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
               color:  const Color(0xFF0A0F1A),
-              border: Border.all(color: const Color(0xFF1E2D4A)),
+              border: Border.all(color: const Color(0xFF2D4060)),
               borderRadius: BorderRadius.circular(8),
             ),
-            child: Row(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Icon(Icons.open_in_browser, size: 14,
-                    color: Color(0xFF4B9EFF)),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text('Open in browser',
-                          style: TextStyle(color: Color(0xFF4B9EFF),
-                              fontSize: 10, fontWeight: FontWeight.w600)),
-                      Text(state.webClientUrl,
+                const Row(children: [
+                  Icon(Icons.info_outline, size: 13, color: Color(0xFF4B9EFF)),
+                  SizedBox(width: 6),
+                  Text('How to connect from another device:',
+                      style: TextStyle(color: Color(0xFF4B9EFF),
+                          fontSize: 11, fontWeight: FontWeight.w600)),
+                ]),
+                const SizedBox(height: 8),
+                const Text(
+                  '1. Make sure both devices are on the same Wi-Fi\n'
+                  '2. Open the URL below in a browser on the other device\n'
+                  '3. Click "Connect" — the mindmap will sync in real time',
+                  style: TextStyle(color: Color(0xFF94A3B8), fontSize: 11,
+                      height: 1.6),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 10),
+
+          // ── Browser URL row ──────────────────────────────────────
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            decoration: BoxDecoration(
+              color:  const Color(0xFF0D1117),
+              border: Border.all(color: const Color(0xFF3B5BDB)),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('Share this URL:',
+                    style: TextStyle(color: Color(0xFF7B9EFF),
+                        fontSize: 10, fontWeight: FontWeight.w600,
+                        letterSpacing: 0.5)),
+                const SizedBox(height: 4),
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(browserUrl,
                           style: const TextStyle(
                               color: Color(0xFFE8E8FF),
-                              fontSize: 11,
-                              fontFamily: 'monospace')),
-                    ],
-                  ),
-                ),
-                IconButton(
-                  icon: const Icon(Icons.copy, size: 12,
-                      color: Color(0xFF64748B)),
-                  tooltip: 'Copy browser URL',
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints(),
-                  onPressed: () => Clipboard.setData(
-                      ClipboardData(text: state.webClientUrl)),
+                              fontSize: 13,
+                              fontFamily: 'monospace',
+                              fontWeight: FontWeight.w600)),
+                    ),
+                    const SizedBox(width: 4),
+                    _UrlActionBtn(
+                      icon: Icons.copy,
+                      tooltip: 'Copy URL',
+                      onTap: () =>
+                          Clipboard.setData(ClipboardData(text: browserUrl)),
+                    ),
+                    const SizedBox(width: 4),
+                    _UrlActionBtn(
+                      icon: Icons.open_in_browser,
+                      tooltip: 'Open in browser on this Mac',
+                      onTap: _openInBrowser,
+                    ),
+                  ],
                 ),
               ],
             ),
           ),
         ],
-        const SizedBox(height: 16),
+
+        // ── Peers list ───────────────────────────────────────────────
+        if (state.peers.isNotEmpty) ...[
+          const SizedBox(height: 10),
+          const Text('Connected peers:',
+              style: TextStyle(color: Color(0xFF64748B), fontSize: 10,
+                  fontWeight: FontWeight.w600, letterSpacing: 0.5)),
+          const SizedBox(height: 4),
+          for (final e in state.peers.entries)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 2),
+              child: Row(children: [
+                const Icon(Icons.person_outline, size: 13,
+                    color: Color(0xFF60A5FA)),
+                const SizedBox(width: 6),
+                Text(e.value.isEmpty ? e.key : e.value,
+                    style: const TextStyle(color: Color(0xFFE8E8FF),
+                        fontSize: 12)),
+              ]),
+            ),
+        ] else ...[
+          const SizedBox(height: 10),
+          const Row(children: [
+            Icon(Icons.hourglass_empty, size: 12, color: Color(0xFF64748B)),
+            SizedBox(width: 6),
+            Text('Waiting for peers to connect…',
+                style: TextStyle(color: Color(0xFF64748B), fontSize: 12)),
+          ]),
+        ],
+
+        const SizedBox(height: 14),
         _SecondaryBtn(
           label: 'Stop Hosting',
           icon:  Icons.wifi_tethering_off_rounded,
@@ -407,6 +472,34 @@ class _HostActiveView extends StatelessWidget {
       ],
     );
   }
+}
+
+class _UrlActionBtn extends StatelessWidget {
+  const _UrlActionBtn({
+    required this.icon,
+    required this.tooltip,
+    required this.onTap,
+  });
+  final IconData     icon;
+  final String       tooltip;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) => Tooltip(
+        message: tooltip,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(6),
+          onTap: onTap,
+          child: Container(
+            padding: const EdgeInsets.all(6),
+            decoration: BoxDecoration(
+              color:  const Color(0xFF1A2035),
+              borderRadius: BorderRadius.circular(6),
+            ),
+            child: Icon(icon, size: 14, color: const Color(0xFF7B9EFF)),
+          ),
+        ),
+      );
 }
 
 // ── Guest active ───────────────────────────────────────────────────────────
