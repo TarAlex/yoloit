@@ -50,6 +50,8 @@ class _FileEditorPanelState extends State<FileEditorPanel>
   bool _suppressControllerUpdates = false;
   /// File paths currently showing Markdown/SVG preview instead of raw code.
   final Set<String> _previewPaths = {};
+  /// Paths we have already auto-decided preview mode for (prevents repeated auto-toggle).
+  final Set<String> _seenPaths = {};
   double _scaleBase = 13.0;
   final _fontSizeNotifier = ValueNotifier<double>(13.0);
   /// True after first frame renders for the current file (prevents toggle bar
@@ -63,6 +65,10 @@ class _FileEditorPanelState extends State<FileEditorPanel>
     WidgetsBinding.instance.addObserver(this);
     SessionPrefs.load().then((snap) {
       if (mounted) _fontSizeNotifier.value = snap.editorFontSize;
+    });
+    // Restore which files were in preview mode.
+    SessionPrefs.loadPreviewPaths().then((saved) {
+      if (mounted) setState(() => _previewPaths.addAll(saved));
     });
   }
 
@@ -172,6 +178,20 @@ class _FileEditorPanelState extends State<FileEditorPanel>
           WidgetsBinding.instance.addPostFrameCallback((_) {
             if (mounted) setState(() => _editorReady = true);
           });
+          // Auto-default to preview for previewable files the first time they open.
+          final path = activeTab.filePath;
+          if (!_seenPaths.contains(path)) {
+            _seenPaths.add(path);
+            if (!_previewPaths.contains(path) &&
+                (_isMarkdown(path) || _isSvg(path) || _isImage(path))) {
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                if (mounted) {
+                  setState(() => _previewPaths.add(path));
+                  SessionPrefs.savePreviewPaths(_previewPaths.toList());
+                }
+              });
+            }
+          }
         }
 
         final toggleVisible = _editorReady &&
@@ -224,6 +244,7 @@ class _FileEditorPanelState extends State<FileEditorPanel>
                             } else {
                               _previewPaths.add(path);
                             }
+                            SessionPrefs.savePreviewPaths(_previewPaths.toList());
                           }),
                         ),
                       ),

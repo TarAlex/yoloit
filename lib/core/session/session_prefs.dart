@@ -130,6 +130,16 @@ class SessionPrefs {
     return (paths: paths, activeIndex: active);
   }
 
+  // ── Preview-mode paths ────────────────────────────────────────────────────
+
+  static const _kPreviewPaths = 'editor.previewPaths';
+
+  static Future<void> savePreviewPaths(List<String> paths) async =>
+      (await _p()).setStringList(_kPreviewPaths, paths);
+
+  static Future<Set<String>> loadPreviewPaths() async =>
+      ((await _p()).getStringList(_kPreviewPaths) ?? []).toSet();
+
   // ── File tree expanded paths (per workspace) ──────────────────────────────
 
   static Future<void> saveExpandedPaths(String workspaceId, List<String> paths) async =>

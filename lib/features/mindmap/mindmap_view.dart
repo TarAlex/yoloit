@@ -1033,6 +1033,8 @@ class _GroupSidebarState extends State<_GroupSidebar> {
   static const _maxWidth = 480.0;
   // Set of node ids whose children are expanded in the tree.
   final _expandedIds = <String>{};
+  // Tracks which workspace ids have been auto-expanded on first appearance.
+  final _autoExpandedIds = <String>{};
 
   @override
   Widget build(BuildContext context) {
@@ -1056,9 +1058,11 @@ class _GroupSidebarState extends State<_GroupSidebar> {
 
         final workspaces = mm.nodes.whereType<WorkspaceNodeData>().toList();
 
-        // Auto-expand workspaces that have never been seen before.
+        // Auto-expand workspaces only the first time they appear.
         for (final ws in workspaces) {
-          _expandedIds.add(ws.id); // add is a no-op if already present
+          if (_autoExpandedIds.add(ws.id)) {
+            _expandedIds.add(ws.id);
+          }
         }
 
         // Nodes reachable from any workspace (excluding workspace itself).
@@ -1220,7 +1224,7 @@ class _GroupSidebarState extends State<_GroupSidebar> {
     required Set<String> visited,
   }) {
     final widgets = <Widget>[];
-    for (final childId in (childMap[parentId] ?? [])) {
+    for (final childId in (childMap[parentId] ?? <String>[])) {
       if (!visited.add(childId)) continue;
       final node = nodeById[childId];
       if (node == null) continue;
@@ -1259,7 +1263,7 @@ class _GroupSidebarState extends State<_GroupSidebar> {
 
   /// Collect all node ids reachable from [id] via [childMap].
   void _collectIds(String id, Map<String, List<String>> childMap, Set<String> out) {
-    for (final child in (childMap[id] ?? [])) {
+    for (final child in (childMap[id] ?? <String>[])) {
       if (out.add(child)) _collectIds(child, childMap, out);
     }
   }
