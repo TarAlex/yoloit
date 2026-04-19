@@ -171,31 +171,41 @@ class CollaborationCubit extends Cubit<CollaborationState> {
   Map<String, dynamic> _serializeNodeContent(MindMapNodeData node) {
     return switch (node) {
       AgentNodeData d => {
-        'type':   'agent',
-        'name':   d.session.customName ?? d.session.id,
-        'status': d.session.status.name,
+        'type':     'agent',
+        'name':     d.session.customName ?? d.session.id,
+        'status':   d.session.status.name,
         'isRunning': d.isRunning,
+        'isIdle':   d.session.status == AgentStatus.idle,
+        'typeName': d.session.type.name,
         'workspaceId': d.workspaceId,
         'lastLines': d.session.lastLines(80),
+        'repos': (d.session.worktreeContexts ?? {}).entries.map((e) => {
+          'repo': e.key.split('/').last,
+          'branch': '', // branch not easily available here
+        }).toList(),
       },
       WorkspaceNodeData d => {
-        'type': 'workspace',
-        'name': d.workspace.name,
-        'path': d.workspace.path,
+        'type':  'workspace',
+        'name':  d.workspace.name,
+        'path':  d.workspace.path,
+        'paths': d.workspace.paths,
+        'color': d.workspace.color?.value,
       },
       SessionNodeData d => {
-        'type':   'session',
-        'name':   d.session.customName ?? d.session.id,
-        'status': d.session.status.name,
+        'type':      'session',
+        'name':      d.session.customName ?? d.session.id,
+        'typeName':  d.session.type.name,
+        'status':    d.session.status.name,
         'isRunning': d.session.status == AgentStatus.live,
+        'isLive':    d.session.status == AgentStatus.live,
         'workspaceId': d.workspaceId,
         'lastLines': d.session.lastLines(80),
       },
       RepoNodeData d => {
-        'type':   'repo',
-        'name':   d.repoName,
-        'path':   d.repoPath,
-        'branch': d.branch,
+        'type':     'repo',
+        'name':     d.repoName,
+        'path':     d.repoPath,
+        'branch':   d.branch,
       },
       BranchNodeData d => {
         'type':       'branch',
@@ -212,30 +222,35 @@ class CollaborationCubit extends Cubit<CollaborationState> {
             : d.content,
       },
       FilesNodeData d => {
-        'type':   'files',
+        'type':     'files',
         'repoPath': d.repoPath,
         'files': d.changedFiles.map((f) => {
-          'path':   f.path,
-          'status': f.status.name,
+          'path':         f.path,
+          'status':       f.status.name,
+          'addedLines':   f.addedLines,
+          'removedLines': f.removedLines,
         }).toList(),
       },
       FileTreeNodeData d => {
-        'type':       'tree',
+        'type':        'tree',
         'workspaceId': d.workspaceId,
-        'repoPath':   d.repoPath,
-        'repoName':   d.repoName,
+        'repoPath':    d.repoPath,
+        'repoName':    d.repoName,
       },
       DiffNodeData d => {
-        'type':       'diff',
+        'type':        'diff',
         'workspaceId': d.workspaceId,
-        'repoPath':   d.repoPath,
-        'repoName':   d.repoName,
+        'repoPath':    d.repoPath,
+        'repoName':    d.repoName,
       },
       RunNodeData d => {
         'type':      'run',
         'name':      d.session.config.name,
         'status':    d.session.status.name,
         'isRunning': d.session.status == RunStatus.running,
+        'lines': d.session.output
+            .reversed.take(80).toList().reversed
+            .map((l) => {'text': l.text, 'isError': l.isError}).toList(),
         'lastLines': d.session.output
             .reversed.take(80).toList().reversed
             .map((l) => l.text).toList(),
@@ -267,6 +282,15 @@ class CollaborationCubit extends Cubit<CollaborationState> {
     _client?.sendMessage(
       SyncMessage.terminalInput(nodeId, data, senderId: 'guest'),
     );
+  }
+
+  /// Guest: send a generic event to the host.
+  void sendGuestEvent(String type, Map<String, dynamic> payload) {
+    _client?.sendMessage(SyncMessage(
+      type: type,
+      payload: payload,
+      senderId: 'guest',
+    ));
   }
 
   // ── Guest: received from host ─────────────────────────────────────────────
