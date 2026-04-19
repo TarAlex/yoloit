@@ -5,16 +5,20 @@ class CollaborationServer {
   CollaborationServer({
     required void Function(String, SyncMessage) onClientMessage,
     this.port = 40401,
+    this.httpPort = 40400,
   });
 
   final int port;
+  final int httpPort;
   int get clientCount => 0;
   String get webClientUrl => '';
+  String get localUrl => '';
+  bool get isRunning => false;
   Future<String> start() async => throw UnsupportedError(
       'Hosting is not available in browser mode.');
 
   Future<void> stop() async {}
 
-  void broadcastRaw(SyncMessage msg) {}
+  void broadcastRaw(SyncMessage msg, {String? exclude}) {}
   void sendTo(String clientId, SyncMessage msg) {}
 }
