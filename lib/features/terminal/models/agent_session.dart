@@ -60,9 +60,24 @@ class AgentSession extends Equatable {
   }
 
   /// Last [n] non-empty plain-text lines for display in the browser.
+  /// Falls back to reading the xterm buffer when the ring buffer is still empty
+  /// (e.g., first snapshot right after app start with existing sessions).
   List<String> lastLines([int n = 80]) {
-    final nonEmpty = recentLines.where((l) => l.trim().isNotEmpty).toList();
-    return nonEmpty.length <= n ? nonEmpty : nonEmpty.sublist(nonEmpty.length - n);
+    if (recentLines.isNotEmpty) {
+      final nonEmpty = recentLines.where((l) => l.trim().isNotEmpty).toList();
+      return nonEmpty.length <= n ? nonEmpty : nonEmpty.sublist(nonEmpty.length - n);
+    }
+    // Fallback: extract all text from xterm scrollback buffer.
+    try {
+      final raw = terminal.buffer.getText();
+      final lines = raw.split('\n')
+          .map(stripAnsi)
+          .where((l) => l.trim().isNotEmpty)
+          .toList();
+      return lines.length <= n ? lines : lines.sublist(lines.length - n);
+    } catch (_) {
+      return const [];
+    }
   }
 
   AgentSession copyWith({
