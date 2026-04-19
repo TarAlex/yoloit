@@ -25,12 +25,19 @@ class CollaborationCubit extends Cubit<CollaborationState> {
   /// [onTerminalInput] receives (sessionId, data) when a browser guest sends
   /// keyboard input to a terminal.  Pass [PtyService.instance.write] on the
   /// host (macOS); leave null on web guests where PtyService is unavailable.
+  ///
+  /// [ensureNodesPopulated] is called before sending the first snapshot when
+  /// [mindMapCubit] has no positions (user hasn't opened Map View yet).
+  /// The host (macOS app.dart) provides a callback that reads workspace and
+  /// terminal state and calls [mindMapCubit.updateNodes]; leave null on web.
   CollaborationCubit({
     required this.mindMapCubit,
+    this.ensureNodesPopulated,
     this.onTerminalInput,
   }) : super(const CollaborationState());
 
   final MindMapCubit mindMapCubit;
+  final Future<void> Function()? ensureNodesPopulated;
   final void Function(String sessionId, String data)? onTerminalInput;
 
   CollaborationServer? _server;
@@ -364,8 +371,9 @@ class CollaborationCubit extends Cubit<CollaborationState> {
         final name = msg.payload['name'] as String;
         final map  = Map<String, String>.from(state.peers)..[id] = name;
         emit(state.copyWith(peers: map, peerCount: map.length));
-        // Send full snapshot to newly connected client.
-        _server!.sendTo(clientId, _buildSnapshot(mindMapCubit.state));
+        // Populate mind map from workspace/terminal state if not yet done,
+        // then send the full snapshot to the newly connected client.
+        _sendSnapshotAfterPopulate(clientId);
       case SyncMessage.kDeltaMove:
         _applyMove(msg.payload);
       case SyncMessage.kDeltaResize:
@@ -382,6 +390,16 @@ class CollaborationCubit extends Cubit<CollaborationState> {
       default:
         break;
     }
+  }
+
+  /// Ensures the mind map has nodes populated from the current workspace and
+  /// terminal state (for users who haven't opened the Map View yet), then
+  /// sends the full snapshot to [clientId].
+  Future<void> _sendSnapshotAfterPopulate(String clientId) async {
+    if (mindMapCubit.state.positions.isEmpty) {
+      await ensureNodesPopulated?.call();
+    }
+    _server?.sendTo(clientId, _buildSnapshot(mindMapCubit.state));
   }
 
   @override

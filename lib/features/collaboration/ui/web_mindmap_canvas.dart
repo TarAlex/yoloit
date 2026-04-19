@@ -21,11 +21,26 @@ class WebMindMapCanvas extends StatefulWidget {
 }
 
 class _WebMindMapCanvasState extends State<WebMindMapCanvas> {
-  final _transform = TransformationController();
+  // Start zoomed out at 10% so the whole 10000x10000 canvas fits in ~1000px —
+  // nodes at x=2000-4000 are visible immediately even before centering runs.
+  final _transform = TransformationController(
+    Matrix4.identity()..scale(0.1, 0.1, 1.0),
+  );
   String? _draggingId;
   Offset _dragStartCanvas = Offset.zero;
   Offset _nodeOrigin      = Offset.zero;
   bool _hasCentered       = false;
+
+  @override
+  void initState() {
+    super.initState();
+    // If snapshot already arrived before this widget mounted, center on first frame.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        _centerOnContent(context.read<MindMapCubit>().state);
+      }
+    });
+  }
 
   @override
   void dispose() {
@@ -147,6 +162,7 @@ class _WebMindMapCanvasState extends State<WebMindMapCanvas> {
               child: InteractiveViewer(
                 transformationController: _transform,
                 boundaryMargin: const EdgeInsets.all(double.infinity),
+                constrained: false,
                 minScale: 0.04,
                 maxScale: 3.0,
                 panEnabled: _draggingId == null,
