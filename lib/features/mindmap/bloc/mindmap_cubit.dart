@@ -322,16 +322,18 @@ class MindMapCubit extends Cubit<MindMapState> {
   /// Applies a full state snapshot received from the host.
   /// Does NOT persist — guest state is ephemeral (mirrors host).
   void applyRemoteSnapshot({
-    required Map<String, Offset> positions,
-    required Map<String, Size>   sizes,
-    required Set<String>         hidden,
-    required Set<String>         hiddenTypes,
+    required Map<String, Offset>    positions,
+    required Map<String, Size>      sizes,
+    required Set<String>            hidden,
+    required Set<String>            hiddenTypes,
+    List<MindMapConnection>         connections = const [],
   }) {
     emit(state.copyWith(
       positions:   {...state.positions, ...positions},
       sizes:       {...state.sizes, ...sizes},
       hidden:      hidden,
       hiddenTypes: hiddenTypes,
+      connections: connections.isNotEmpty ? connections : null,
     ));
   }
 

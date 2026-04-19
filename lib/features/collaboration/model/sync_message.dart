@@ -35,14 +35,16 @@ class SyncMessage {
     required Map<String, List<double>> sizes,
     required List<String> hidden,
     required List<String> hiddenTypes,
+    List<Map<String, dynamic>> connections = const [],
     String senderId = 'host',
   }) => SyncMessage(
     type: kSnapshot, senderId: senderId,
     payload: {
-      'positions':  positions,
-      'sizes':      sizes,
-      'hidden':     hidden,
+      'positions':   positions,
+      'sizes':       sizes,
+      'hidden':      hidden,
       'hiddenTypes': hiddenTypes,
+      'connections': connections,
     },
   );
 
