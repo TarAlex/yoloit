@@ -11,11 +11,13 @@ class RunCard extends StatelessWidget {
     this.onStart,
     this.onStop,
     this.onRestart,
+    this.onCopy,
   });
   final RunCardProps props;
   final VoidCallback? onStart;
   final VoidCallback? onStop;
   final VoidCallback? onRestart;
+  final VoidCallback? onCopy;
 
   @override
   Widget build(BuildContext context) {
@@ -71,7 +73,7 @@ class RunCard extends StatelessWidget {
                   icon: Icons.copy_all_rounded,
                   tooltip: 'Copy all logs',
                   color: const Color(0xFFA78BFA),
-                  onTap: () {
+                  onTap: onCopy ?? () {
                     final text = props.lines.map((l) => l.text).join('\n');
                     Clipboard.setData(ClipboardData(text: text));
                     ScaffoldMessenger.of(context).showSnackBar(
