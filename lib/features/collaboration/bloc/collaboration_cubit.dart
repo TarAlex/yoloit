@@ -5,6 +5,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../../mindmap/bloc/mindmap_cubit.dart';
 import '../../mindmap/bloc/mindmap_state.dart';
+import '../../mindmap/model/mindmap_node_model.dart';
 import '../model/sync_message.dart';
 import '../services/collaboration_client.dart';
 import '../services/collaboration_server_platform.dart';
@@ -134,6 +135,12 @@ class CollaborationCubit extends Cubit<CollaborationState> {
     sizes:       mm.sizes.map((k, v) => MapEntry(k, [v.width, v.height])),
     hidden:      mm.hidden.toList(),
     hiddenTypes: mm.hiddenTypes.toList(),
+    connections: mm.connections.map((c) => {
+      'from': c.fromId,
+      'to':   c.toId,
+      'style': c.style.name,
+      'color': c.color.toARGB32(),
+    }).toList(),
   );
 
   // ── Guest: received from host ─────────────────────────────────────────────
@@ -168,6 +175,7 @@ class CollaborationCubit extends Cubit<CollaborationState> {
     final szRaw   = (p['sizes']      as Map<String, dynamic>?) ?? {};
     final hidden  = ((p['hidden']    as List?) ?? []).cast<String>().toSet();
     final hTypes  = ((p['hiddenTypes'] as List?) ?? []).cast<String>().toSet();
+    final connRaw = (p['connections'] as List?) ?? [];
 
     final positions = posRaw.map((k, v) {
       final l = (v as List).cast<num>();
@@ -177,11 +185,26 @@ class CollaborationCubit extends Cubit<CollaborationState> {
       final l = (v as List).cast<num>();
       return MapEntry(k, Size(l[0].toDouble(), l[1].toDouble()));
     });
+    final connections = connRaw.map((raw) {
+      final c = raw as Map<String, dynamic>;
+      final style = ConnectorStyle.values.firstWhere(
+        (s) => s.name == (c['style'] as String? ?? 'solid'),
+        orElse: () => ConnectorStyle.solid,
+      );
+      return MindMapConnection(
+        fromId: c['from'] as String,
+        toId:   c['to'] as String,
+        style:  style,
+        color:  Color(c['color'] as int),
+      );
+    }).toList();
+
     mindMapCubit.applyRemoteSnapshot(
       positions:   positions,
       sizes:       sizes,
       hidden:      hidden,
       hiddenTypes: hTypes,
+      connections: connections,
     );
   }
 

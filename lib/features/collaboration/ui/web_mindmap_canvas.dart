@@ -140,12 +140,13 @@ class _NodesPainter extends CustomPainter {
     // Draw connectors first (behind nodes)
     _drawConnectors(canvas);
 
-    // Draw nodes
-    for (final node in state.nodes) {
-      if (state.hidden.contains(node.id)) continue;
-      final pos = state.positions[node.id];
-      if (pos == null) continue;
-      _drawNode(canvas, node.id, pos, state.sizes[node.id] ?? node.defaultSize);
+    // Iterate positions (works even when state.nodes is empty, e.g. on guest)
+    for (final entry in state.positions.entries) {
+      final id = entry.key;
+      if (state.hidden.contains(id)) continue;
+      final pos = entry.value;
+      final sz  = state.sizes[id] ?? const Size(220, 120);
+      _drawNode(canvas, id, pos, sz);
     }
   }
 
