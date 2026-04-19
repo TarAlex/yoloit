@@ -19,25 +19,24 @@ class _GuestShellState extends State<GuestShell> {
   late final TextEditingController _hostCtrl;
   final _portCtrl = TextEditingController(text: '40401');
   final _nameCtrl = TextEditingController(text: 'Remote Guest');
+  bool _autoConnectPending = false;
 
   @override
   void initState() {
     super.initState();
-    // Auto-fill host from the page's origin (works when opened from
-    // http://192.168.x.x:40400 — host is the desktop machine's IP).
     final autoHost = _inferHost();
     _hostCtrl = TextEditingController(text: autoHost);
+    // Auto-connect when page is served from localhost (local dev / test).
+    if (autoHost == 'localhost' || autoHost == '127.0.0.1') {
+      _autoConnectPending = true;
+    }
   }
 
   /// On web: reads the page URL host so the connect form is pre-filled.
-  /// On desktop fallback: empty string.
   static String _inferHost() {
     try {
       final host = Uri.base.host;
-      // Skip loopback-only auto-fills — user still needs to type for local dev
-      if (host == 'localhost' || host == '127.0.0.1' || host.isEmpty) {
-        return '';
-      }
+      if (host.isEmpty) return '';
       return host;
     } catch (_) {
       return '';
@@ -63,6 +62,13 @@ class _GuestShellState extends State<GuestShell> {
   Widget build(BuildContext context) {
     return BlocBuilder<CollaborationCubit, CollaborationState>(
       builder: (ctx, collab) {
+        // Auto-connect once when served from localhost
+        if (_autoConnectPending && collab.mode == CollaborationMode.idle) {
+          _autoConnectPending = false;
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) _connect(ctx.read<CollaborationCubit>());
+          });
+        }
         if (collab.mode == CollaborationMode.connected) {
           return _buildCanvas(ctx, collab);
         }

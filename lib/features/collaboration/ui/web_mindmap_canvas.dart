@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
@@ -23,11 +25,44 @@ class _WebMindMapCanvasState extends State<WebMindMapCanvas> {
   String? _draggingId;
   Offset _dragStartCanvas = Offset.zero;
   Offset _nodeOrigin      = Offset.zero;
+  bool _hasCentered       = false;
 
   @override
   void dispose() {
     _transform.dispose();
     super.dispose();
+  }
+
+  /// Auto-pan to center on content bounding box when first snapshot arrives.
+  void _centerOnContent(MindMapState state) {
+    if (_hasCentered || state.positions.isEmpty || !mounted) return;
+    _hasCentered = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final size = MediaQuery.of(context).size;
+      double minX = double.infinity, minY = double.infinity;
+      double maxX = double.negativeInfinity, maxY = double.negativeInfinity;
+      for (final e in state.positions.entries) {
+        final sz = state.sizes[e.key] ?? const Size(220, 120);
+        minX = math.min(minX, e.value.dx);
+        minY = math.min(minY, e.value.dy);
+        maxX = math.max(maxX, e.value.dx + sz.width);
+        maxY = math.max(maxY, e.value.dy + sz.height);
+      }
+      final centerX = (minX + maxX) / 2;
+      final centerY = (minY + maxY) / 2;
+      const padding = 80.0;
+      final scaleX = (size.width  - padding * 2) / (maxX - minX);
+      final scaleY = (size.height - padding * 2) / (maxY - minY);
+      final scale  = math.min(scaleX, scaleY).clamp(0.05, 0.8);
+      // screen_point = scale * canvas_point + (tx, ty)
+      // centre on screen: scale * centerX + tx = size.width/2
+      final tx = size.width  / 2 - scale * centerX;
+      final ty = size.height / 2 - scale * centerY;
+      final m = Matrix4.identity()..scale(scale, scale, 1.0);
+      m.setTranslationRaw(tx, ty, 0.0);
+      setState(() => _transform.value = m);
+    });
   }
 
   /// Convert screen-space point to canvas-space.
@@ -51,9 +86,11 @@ class _WebMindMapCanvasState extends State<WebMindMapCanvas> {
 
   @override
   Widget build(BuildContext context) {
-    return BlocBuilder<MindMapCubit, MindMapState>(
-      builder: (ctx, state) {
-        return Stack(children: [
+    return BlocListener<MindMapCubit, MindMapState>(
+      listener: (_, state) => _centerOnContent(state),
+      child: BlocBuilder<MindMapCubit, MindMapState>(
+        builder: (ctx, state) {
+          return Stack(children: [
           // ── Dot-grid background ──────────────────────────────────────
           Positioned.fill(
             child: ListenableBuilder(
@@ -124,6 +161,7 @@ class _WebMindMapCanvasState extends State<WebMindMapCanvas> {
           ),
         ]);
       },
+      ),
     );
   }
 }
