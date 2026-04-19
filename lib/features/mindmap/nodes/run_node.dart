@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:yoloit/features/mindmap/model/mindmap_node_model.dart';
 import 'package:yoloit/features/runs/bloc/run_cubit.dart';
@@ -56,6 +57,24 @@ class RunNode extends StatelessWidget {
                   ),
                 ),
                 // ── Action buttons ─────────────────────────────────────
+                _RunActionBtn(
+                  icon: Icons.copy_all_rounded,
+                  tooltip: 'Copy all logs',
+                  color: const Color(0xFFA78BFA),
+                  onTap: () {
+                    final text = session.output.map((l) => l.text).join('\n');
+                    Clipboard.setData(ClipboardData(text: text));
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('Logs copied to clipboard'),
+                        duration: Duration(seconds: 2),
+                        behavior: SnackBarBehavior.floating,
+                        width: 220,
+                      ),
+                    );
+                  },
+                ),
+                const SizedBox(width: 4),
                 if (isRunning)
                   _RunActionBtn(
                     icon: Icons.stop_rounded,
@@ -91,9 +110,10 @@ class RunNode extends StatelessWidget {
               ],
             ),
           ),
-          // Output lines
+          // Output lines (selectable)
           Expanded(
-            child: Container(
+            child: SelectionArea(
+              child: Container(
               color: const Color(0xFF070714),
               child: session.output.isEmpty
                   ? const Center(
@@ -119,6 +139,7 @@ class RunNode extends StatelessWidget {
                         );
                       },
                     ),
+            ),
             ),
           ),
         ],
