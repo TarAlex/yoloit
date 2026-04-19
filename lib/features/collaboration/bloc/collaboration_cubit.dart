@@ -151,8 +151,8 @@ class CollaborationCubit extends Cubit<CollaborationState> {
   SyncEnvelope _makeSnapshot(MindMapState mm) => SyncEnvelope(
     senderId: 'host',
     snapshot: StateSnapshot(
-      positions:    mm.positions.map((k, v) => MapEntry(k, Vec2(x: v.dx.toFloat(), y: v.dy.toFloat()))),
-      sizes:        mm.sizes.map((k, v) => MapEntry(k, Vec2(x: v.width.toFloat(), y: v.height.toFloat()))),
+      positions:    mm.positions.entries.map((e) => MapEntry(e.key, Vec2(x: e.value.dx.toFloat(), y: e.value.dy.toFloat()))),
+      sizes:        mm.sizes.entries.map((e) => MapEntry(e.key, Vec2(x: e.value.width.toFloat(), y: e.value.height.toFloat()))),
       hidden:       mm.hidden.toList(),
       hiddenTypes: mm.hiddenTypes.toList(),
     ),

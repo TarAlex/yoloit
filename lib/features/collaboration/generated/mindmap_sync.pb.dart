@@ -40,8 +40,8 @@ class Vec2 extends $pb.GeneratedMessage {
       _omitMessageNames ? '' : 'Vec2',
       package: const $pb.PackageName(_omitMessageNames ? '' : 'yoloit.mindmap'),
       createEmptyInstance: create)
-    ..aD(1, _omitFieldNames ? '' : 'x', fieldType: $pb.PbFieldType.OF)
-    ..aD(2, _omitFieldNames ? '' : 'y', fieldType: $pb.PbFieldType.OF)
+    ..a<double>(1, _omitFieldNames ? '' : 'x', $pb.PbFieldType.OF)
+    ..a<double>(2, _omitFieldNames ? '' : 'y', $pb.PbFieldType.OF)
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -69,7 +69,7 @@ class Vec2 extends $pb.GeneratedMessage {
   @$pb.TagNumber(1)
   $core.bool hasX() => $_has(0);
   @$pb.TagNumber(1)
-  void clearX() => $_clearField(1);
+  void clearX() => clearField(1);
 
   @$pb.TagNumber(2)
   $core.double get y => $_getN(1);
@@ -78,7 +78,7 @@ class Vec2 extends $pb.GeneratedMessage {
   @$pb.TagNumber(2)
   $core.bool hasY() => $_has(1);
   @$pb.TagNumber(2)
-  void clearY() => $_clearField(2);
+  void clearY() => clearField(2);
 }
 
 class StateSnapshot extends $pb.GeneratedMessage {
@@ -147,16 +147,16 @@ class StateSnapshot extends $pb.GeneratedMessage {
   static StateSnapshot? _defaultInstance;
 
   @$pb.TagNumber(1)
-  $pb.PbMap<$core.String, Vec2> get positions => $_getMap(0);
+  Map<$core.String, Vec2> get positions => $_getMap(0);
 
   @$pb.TagNumber(2)
-  $pb.PbMap<$core.String, Vec2> get sizes => $_getMap(1);
+  Map<$core.String, Vec2> get sizes => $_getMap(1);
 
   @$pb.TagNumber(3)
-  $pb.PbList<$core.String> get hidden => $_getList(2);
+  List<$core.String> get hidden => $_getList(2);
 
   @$pb.TagNumber(4)
-  $pb.PbList<$core.String> get hiddenTypes => $_getList(3);
+  List<$core.String> get hiddenTypes => $_getList(3);
 }
 
 class NodeMoved extends $pb.GeneratedMessage {
@@ -186,8 +186,8 @@ class NodeMoved extends $pb.GeneratedMessage {
       package: const $pb.PackageName(_omitMessageNames ? '' : 'yoloit.mindmap'),
       createEmptyInstance: create)
     ..aOS(1, _omitFieldNames ? '' : 'nodeId')
-    ..aD(2, _omitFieldNames ? '' : 'x', fieldType: $pb.PbFieldType.OF)
-    ..aD(3, _omitFieldNames ? '' : 'y', fieldType: $pb.PbFieldType.OF)
+    ..a<double>(2, _omitFieldNames ? '' : 'x', $pb.PbFieldType.OF)
+    ..a<double>(3, _omitFieldNames ? '' : 'y', $pb.PbFieldType.OF)
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -215,7 +215,7 @@ class NodeMoved extends $pb.GeneratedMessage {
   @$pb.TagNumber(1)
   $core.bool hasNodeId() => $_has(0);
   @$pb.TagNumber(1)
-  void clearNodeId() => $_clearField(1);
+  void clearNodeId() => clearField(1);
 
   @$pb.TagNumber(2)
   $core.double get x => $_getN(1);
@@ -224,7 +224,7 @@ class NodeMoved extends $pb.GeneratedMessage {
   @$pb.TagNumber(2)
   $core.bool hasX() => $_has(1);
   @$pb.TagNumber(2)
-  void clearX() => $_clearField(2);
+  void clearX() => clearField(2);
 
   @$pb.TagNumber(3)
   $core.double get y => $_getN(2);
@@ -233,7 +233,7 @@ class NodeMoved extends $pb.GeneratedMessage {
   @$pb.TagNumber(3)
   $core.bool hasY() => $_has(2);
   @$pb.TagNumber(3)
-  void clearY() => $_clearField(3);
+  void clearY() => clearField(3);
 }
 
 class NodeResized extends $pb.GeneratedMessage {
@@ -263,8 +263,8 @@ class NodeResized extends $pb.GeneratedMessage {
       package: const $pb.PackageName(_omitMessageNames ? '' : 'yoloit.mindmap'),
       createEmptyInstance: create)
     ..aOS(1, _omitFieldNames ? '' : 'nodeId')
-    ..aD(2, _omitFieldNames ? '' : 'width', fieldType: $pb.PbFieldType.OF)
-    ..aD(3, _omitFieldNames ? '' : 'height', fieldType: $pb.PbFieldType.OF)
+    ..a<double>(2, _omitFieldNames ? '' : 'width', $pb.PbFieldType.OF)
+    ..a<double>(3, _omitFieldNames ? '' : 'height', $pb.PbFieldType.OF)
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -293,7 +293,7 @@ class NodeResized extends $pb.GeneratedMessage {
   @$pb.TagNumber(1)
   $core.bool hasNodeId() => $_has(0);
   @$pb.TagNumber(1)
-  void clearNodeId() => $_clearField(1);
+  void clearNodeId() => clearField(1);
 
   @$pb.TagNumber(2)
   $core.double get width => $_getN(1);
@@ -302,7 +302,7 @@ class NodeResized extends $pb.GeneratedMessage {
   @$pb.TagNumber(2)
   $core.bool hasWidth() => $_has(1);
   @$pb.TagNumber(2)
-  void clearWidth() => $_clearField(2);
+  void clearWidth() => clearField(2);
 
   @$pb.TagNumber(3)
   $core.double get height => $_getN(2);
@@ -311,7 +311,7 @@ class NodeResized extends $pb.GeneratedMessage {
   @$pb.TagNumber(3)
   $core.bool hasHeight() => $_has(2);
   @$pb.TagNumber(3)
-  void clearHeight() => $_clearField(3);
+  void clearHeight() => clearField(3);
 }
 
 class NodeToggled extends $pb.GeneratedMessage {
@@ -368,7 +368,7 @@ class NodeToggled extends $pb.GeneratedMessage {
   @$pb.TagNumber(1)
   $core.bool hasNodeId() => $_has(0);
   @$pb.TagNumber(1)
-  void clearNodeId() => $_clearField(1);
+  void clearNodeId() => clearField(1);
 
   @$pb.TagNumber(2)
   $core.bool get hidden => $_getBF(1);
@@ -377,7 +377,7 @@ class NodeToggled extends $pb.GeneratedMessage {
   @$pb.TagNumber(2)
   $core.bool hasHidden() => $_has(1);
   @$pb.TagNumber(2)
-  void clearHidden() => $_clearField(2);
+  void clearHidden() => clearField(2);
 }
 
 enum DeltaEvent_Kind { moved, resized, toggled, notSet }
@@ -448,7 +448,7 @@ class DeltaEvent extends $pb.GeneratedMessage {
   @$pb.TagNumber(1)
   @$pb.TagNumber(2)
   @$pb.TagNumber(3)
-  void clearKind() => $_clearField($_whichOneof(0));
+  void clearKind() => clearField($_whichOneof(0));
 
   @$pb.TagNumber(1)
   NodeMoved get moved => $_getN(0);
@@ -457,7 +457,7 @@ class DeltaEvent extends $pb.GeneratedMessage {
   @$pb.TagNumber(1)
   $core.bool hasMoved() => $_has(0);
   @$pb.TagNumber(1)
-  void clearMoved() => $_clearField(1);
+  void clearMoved() => clearField(1);
   @$pb.TagNumber(1)
   NodeMoved ensureMoved() => $_ensure(0);
 
@@ -468,7 +468,7 @@ class DeltaEvent extends $pb.GeneratedMessage {
   @$pb.TagNumber(2)
   $core.bool hasResized() => $_has(1);
   @$pb.TagNumber(2)
-  void clearResized() => $_clearField(2);
+  void clearResized() => clearField(2);
   @$pb.TagNumber(2)
   NodeResized ensureResized() => $_ensure(1);
 
@@ -479,7 +479,7 @@ class DeltaEvent extends $pb.GeneratedMessage {
   @$pb.TagNumber(3)
   $core.bool hasToggled() => $_has(2);
   @$pb.TagNumber(3)
-  void clearToggled() => $_clearField(3);
+  void clearToggled() => clearField(3);
   @$pb.TagNumber(3)
   NodeToggled ensureToggled() => $_ensure(2);
 }
@@ -541,7 +541,7 @@ class ClientHello extends $pb.GeneratedMessage {
   @$pb.TagNumber(1)
   $core.bool hasClientId() => $_has(0);
   @$pb.TagNumber(1)
-  void clearClientId() => $_clearField(1);
+  void clearClientId() => clearField(1);
 
   @$pb.TagNumber(2)
   $core.String get clientName => $_getSZ(1);
@@ -550,7 +550,7 @@ class ClientHello extends $pb.GeneratedMessage {
   @$pb.TagNumber(2)
   $core.bool hasClientName() => $_has(1);
   @$pb.TagNumber(2)
-  void clearClientName() => $_clearField(2);
+  void clearClientName() => clearField(2);
 
   @$pb.TagNumber(3)
   $core.String get version => $_getSZ(2);
@@ -559,7 +559,7 @@ class ClientHello extends $pb.GeneratedMessage {
   @$pb.TagNumber(3)
   $core.bool hasVersion() => $_has(2);
   @$pb.TagNumber(3)
-  void clearVersion() => $_clearField(3);
+  void clearVersion() => clearField(3);
 }
 
 class ClientConnected extends $pb.GeneratedMessage {
@@ -616,7 +616,7 @@ class ClientConnected extends $pb.GeneratedMessage {
   @$pb.TagNumber(1)
   $core.bool hasClientId() => $_has(0);
   @$pb.TagNumber(1)
-  void clearClientId() => $_clearField(1);
+  void clearClientId() => clearField(1);
 
   @$pb.TagNumber(2)
   $core.String get clientName => $_getSZ(1);
@@ -625,7 +625,7 @@ class ClientConnected extends $pb.GeneratedMessage {
   @$pb.TagNumber(2)
   $core.bool hasClientName() => $_has(1);
   @$pb.TagNumber(2)
-  void clearClientName() => $_clearField(2);
+  void clearClientName() => clearField(2);
 }
 
 class ClientDisconnected extends $pb.GeneratedMessage {
@@ -679,7 +679,7 @@ class ClientDisconnected extends $pb.GeneratedMessage {
   @$pb.TagNumber(1)
   $core.bool hasClientId() => $_has(0);
   @$pb.TagNumber(1)
-  void clearClientId() => $_clearField(1);
+  void clearClientId() => clearField(1);
 }
 
 enum SyncEnvelope_Payload {
@@ -777,7 +777,7 @@ class SyncEnvelope extends $pb.GeneratedMessage {
   @$pb.TagNumber(4)
   @$pb.TagNumber(5)
   @$pb.TagNumber(6)
-  void clearPayload() => $_clearField($_whichOneof(0));
+  void clearPayload() => clearField($_whichOneof(0));
 
   @$pb.TagNumber(1)
   $core.String get senderId => $_getSZ(0);
@@ -786,7 +786,7 @@ class SyncEnvelope extends $pb.GeneratedMessage {
   @$pb.TagNumber(1)
   $core.bool hasSenderId() => $_has(0);
   @$pb.TagNumber(1)
-  void clearSenderId() => $_clearField(1);
+  void clearSenderId() => clearField(1);
 
   @$pb.TagNumber(2)
   StateSnapshot get snapshot => $_getN(1);
@@ -795,7 +795,7 @@ class SyncEnvelope extends $pb.GeneratedMessage {
   @$pb.TagNumber(2)
   $core.bool hasSnapshot() => $_has(1);
   @$pb.TagNumber(2)
-  void clearSnapshot() => $_clearField(2);
+  void clearSnapshot() => clearField(2);
   @$pb.TagNumber(2)
   StateSnapshot ensureSnapshot() => $_ensure(1);
 
@@ -806,7 +806,7 @@ class SyncEnvelope extends $pb.GeneratedMessage {
   @$pb.TagNumber(3)
   $core.bool hasDelta() => $_has(2);
   @$pb.TagNumber(3)
-  void clearDelta() => $_clearField(3);
+  void clearDelta() => clearField(3);
   @$pb.TagNumber(3)
   DeltaEvent ensureDelta() => $_ensure(2);
 
@@ -817,7 +817,7 @@ class SyncEnvelope extends $pb.GeneratedMessage {
   @$pb.TagNumber(4)
   $core.bool hasHello() => $_has(3);
   @$pb.TagNumber(4)
-  void clearHello() => $_clearField(4);
+  void clearHello() => clearField(4);
   @$pb.TagNumber(4)
   ClientHello ensureHello() => $_ensure(3);
 
@@ -828,7 +828,7 @@ class SyncEnvelope extends $pb.GeneratedMessage {
   @$pb.TagNumber(5)
   $core.bool hasConnected() => $_has(4);
   @$pb.TagNumber(5)
-  void clearConnected() => $_clearField(5);
+  void clearConnected() => clearField(5);
   @$pb.TagNumber(5)
   ClientConnected ensureConnected() => $_ensure(4);
 
@@ -839,7 +839,7 @@ class SyncEnvelope extends $pb.GeneratedMessage {
   @$pb.TagNumber(6)
   $core.bool hasDisconnected() => $_has(5);
   @$pb.TagNumber(6)
-  void clearDisconnected() => $_clearField(6);
+  void clearDisconnected() => clearField(6);
   @$pb.TagNumber(6)
   ClientDisconnected ensureDisconnected() => $_ensure(5);
 }
