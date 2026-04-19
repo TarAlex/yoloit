@@ -1,4 +1,4 @@
-import 'dart:math' show min, max;
+import 'dart:math' show max;
 import 'dart:ui' as ui;
 
 import 'package:file_picker/file_picker.dart';
@@ -718,7 +718,18 @@ class _MindMapCanvasState extends State<_MindMapCanvas> {
           // ── Group sidebar (left) ──────────────────────────────────────
           Positioned(
             top: 8, left: 8, bottom: 8,
-            child: _GroupSidebar(),
+            child: _GroupSidebar(
+              onFocusNode: (nodeId) {
+                final mm = context.read<MindMapCubit>().state;
+                final pos = mm.positions[nodeId];
+                if (pos == null) return;
+                // Reveal the node if it's hidden.
+                if (mm.hidden.contains(nodeId)) {
+                  context.read<MindMapCubit>().showNode(nodeId);
+                }
+                widget.onPanToOffset(pos);
+              },
+            ),
           ),
         ],
       );
@@ -1142,7 +1153,10 @@ class _ToolBtn extends StatelessWidget {
 // ── Workspace-tree sidebar ─────────────────────────────────────────────────
 
 class _GroupSidebar extends StatefulWidget {
-  const _GroupSidebar();
+  const _GroupSidebar({this.onFocusNode});
+
+  /// Called when the user clicks a node row — pans the canvas to that node.
+  final void Function(String nodeId)? onFocusNode;
 
   @override
   State<_GroupSidebar> createState() => _GroupSidebarState();
@@ -1284,6 +1298,7 @@ class _GroupSidebarState extends State<_GroupSidebar> {
                         ..._buildSubtree(
                           ws.id, childMap, nodeById, mm, cubit, depth: 1,
                           visited: {ws.id},
+                          onFocus: widget.onFocusNode,
                         ),
                     ],
                     // Orphan nodes (editor, plugin cards not linked to any ws).
@@ -1311,6 +1326,9 @@ class _GroupSidebarState extends State<_GroupSidebar> {
                           onToggle: () => mm.hidden.contains(n.id)
                               ? cubit.showNode(n.id)
                               : cubit.hideNode(n.id),
+                          onFocus: widget.onFocusNode != null
+                              ? () => widget.onFocusNode!(n.id)
+                              : null,
                         ),
                     ],
                   ],
@@ -1344,6 +1362,7 @@ class _GroupSidebarState extends State<_GroupSidebar> {
     MindMapCubit cubit, {
     required int depth,
     required Set<String> visited,
+    void Function(String nodeId)? onFocus,
   }) {
     final widgets = <Widget>[];
     for (final childId in (childMap[parentId] ?? <String>[])) {
@@ -1370,6 +1389,7 @@ class _GroupSidebarState extends State<_GroupSidebar> {
                 ? _expandedIds.remove(node.id)
                 : _expandedIds.add(node.id))
             : null,
+        onFocus: onFocus != null ? () => onFocus(node.id) : null,
       ));
 
       if (hasChildren && isExpanded) {
@@ -1377,6 +1397,7 @@ class _GroupSidebarState extends State<_GroupSidebar> {
           node.id, childMap, nodeById, mm, cubit,
           depth: depth + 1,
           visited: {...visited},
+          onFocus: onFocus,
         ));
       }
     }
@@ -1467,6 +1488,7 @@ class _TreeRow extends StatelessWidget {
     this.hasChildren = false,
     this.expanded = false,
     this.onToggleExpand,
+    this.onFocus,
   });
   final MindMapNodeData node;
   final int depth;
@@ -1475,6 +1497,8 @@ class _TreeRow extends StatelessWidget {
   final bool hasChildren;
   final bool expanded;
   final VoidCallback? onToggleExpand;
+  /// Called when the row label is tapped — pans the canvas to this node.
+  final VoidCallback? onFocus;
 
   ({String label, IconData icon, Color color}) get _meta => switch (node) {
     AgentNodeData    d => (
@@ -1521,7 +1545,8 @@ class _TreeRow extends StatelessWidget {
     final m = _meta;
     final indent = 10.0 + depth * 14.0;
     return InkWell(
-      onTap: hasChildren ? onToggleExpand : onToggle,
+      // Row tap: expand/collapse if it has children; otherwise focus the node.
+      onTap: hasChildren ? onToggleExpand : onFocus,
       child: Padding(
         padding: EdgeInsets.fromLTRB(indent, 3, 8, 3),
         child: Row(
@@ -1533,6 +1558,7 @@ class _TreeRow extends StatelessWidget {
               margin: const EdgeInsets.only(right: 5),
               color: const Color(0xFF2A3040),
             ),
+            // Eye icon — always toggles hide/show (independent of row tap).
             GestureDetector(
               behavior: HitTestBehavior.opaque,
               onTap: onToggle,

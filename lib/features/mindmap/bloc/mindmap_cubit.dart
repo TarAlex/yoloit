@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:yoloit/features/mindmap/bloc/mindmap_state.dart';
 import 'package:yoloit/features/mindmap/mindmap_layout_engine.dart';
 import 'package:yoloit/features/mindmap/model/mindmap_node_model.dart';
+import 'package:yoloit/features/terminal/models/agent_session.dart';
 
 class MindMapCubit extends Cubit<MindMapState> {
   MindMapCubit() : super(const MindMapState());
@@ -45,7 +46,11 @@ class MindMapCubit extends Cubit<MindMapState> {
       });
     }
     if (lockedRaw != null) locked = lockedRaw.toSet();
-    if (hiddenRaw != null) hidden = hiddenRaw.toSet();
+    // Filter out stale agent-node hides — agent cards always reappear when
+    // their session is live.  This cleans up any pre-fix persisted values too.
+    if (hiddenRaw != null) {
+      hidden = hiddenRaw.where((id) => !id.startsWith('agent:')).toSet();
+    }
     if (hiddenTypesRaw != null) hiddenTypes = hiddenTypesRaw.toSet();
     if (sizesJson != null) {
       final map = jsonDecode(sizesJson) as Map<String, dynamic>;
@@ -147,12 +152,26 @@ class MindMapCubit extends Cubit<MindMapState> {
       sizes:    state.sizes,
       locked:   state.locked,
     );
+
+    // Auto-reveal any live/active agent sessions.  A session becoming live
+    // means the user or the system spawned it — it should always be visible
+    // regardless of whether its card was previously closed (×).
+    final liveAgentIds = nodes.whereType<AgentNodeData>()
+        .where((a) => a.session.status == AgentStatus.live)
+        .map((a) => a.id)
+        .toSet();
+    final newHidden = liveAgentIds.isEmpty
+        ? state.hidden
+        : ({...state.hidden}..removeAll(liveAgentIds));
+
     emit(state.copyWith(
       nodes:       nodes,
       connections: connections,
       positions:   newPositions,
+      hidden:      newHidden,
     ));
     _savePositions(newPositions);
+    if (newHidden != state.hidden) _saveHidden(newHidden);
   }
 
   // ── Drag ──────────────────────────────────────────────────────────────────
@@ -277,7 +296,12 @@ class MindMapCubit extends Cubit<MindMapState> {
 
   Future<void> _saveHidden(Set<String> hidden) async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setStringList(_kHidden, hidden.toList());
+    // Don't persist individual agent card hides — sessions always reappear on
+    // restart and their cards should reappear too.  Type-level hides ('agent'
+    // in hiddenTypes) still persist so the user's deliberate "hide all
+    // terminals" choice is remembered.
+    final toSave = hidden.where((id) => !id.startsWith('agent:')).toList();
+    await prefs.setStringList(_kHidden, toSave);
   }
 
   Future<void> _saveHiddenTypes(Set<String> types) async {
