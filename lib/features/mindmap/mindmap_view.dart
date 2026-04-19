@@ -11,6 +11,7 @@ import 'package:yoloit/features/mindmap/bloc/mindmap_state.dart';
 import 'package:yoloit/features/mindmap/mindmap_layout_engine.dart';
 import 'package:yoloit/features/mindmap/model/mindmap_node_model.dart';
 import 'package:yoloit/features/mindmap/nodes/node_registry.dart';
+import 'package:yoloit/features/mindmap/plugin/mindmap_plugin_registry.dart';
 import 'package:yoloit/features/mindmap/widgets/mindmap_connector.dart';
 import 'package:yoloit/features/mindmap/widgets/mindmap_node.dart';
 import 'package:yoloit/features/review/bloc/review_cubit.dart';
@@ -290,10 +291,11 @@ class _MindMapViewState extends State<MindMapView>
       }
     }
 
-    // File Tree / Diffs — one card per repo (RepoNode), connecting from repo.
+    // File Tree — one card per repo (RepoNode), file browser only.
     final repoNodes = nodes.whereType<RepoNodeData>().toList();
     for (final repo in repoNodes) {
       final treeId = 'tree:${repo.repoPath}';
+      final diffId  = 'diff:${repo.repoPath}';
       if (nodes.any((n) => n.id == treeId)) continue;
       nodes.add(FileTreeNodeData(
         id:          treeId,
@@ -307,12 +309,27 @@ class _MindMapViewState extends State<MindMapView>
         style:  ConnectorStyle.dashed,
         color:  const Color(0x6034D399),
       ));
+      // Diff card — connected from File Tree.
+      if (!nodes.any((n) => n.id == diffId)) {
+        nodes.add(DiffNodeData(
+          id:          diffId,
+          workspaceId: '',
+          repoPath:    repo.repoPath,
+          repoName:    repo.repoName,
+        ));
+        conns.add(MindMapConnection(
+          fromId: treeId,
+          toId:   diffId,
+          style:  ConnectorStyle.dashed,
+          color:  const Color(0x607C6BFF),
+        ));
+      }
     }
-    // Also add one tree per standalone workspace path that has no sessions
-    // (and therefore no RepoNode).
+    // Also add one tree+diff per standalone workspace path that has no sessions.
     for (final ws in wsState.workspaces) {
       for (final path in ws.paths) {
         final treeId = 'tree:$path';
+        final diffId  = 'diff:$path';
         if (nodes.any((n) => n.id == treeId)) continue;
         nodes.add(FileTreeNodeData(
           id:          treeId,
@@ -326,6 +343,20 @@ class _MindMapViewState extends State<MindMapView>
           style:  ConnectorStyle.dashed,
           color:  const Color(0x5034D399),
         ));
+        if (!nodes.any((n) => n.id == diffId)) {
+          nodes.add(DiffNodeData(
+            id:          diffId,
+            workspaceId: ws.id,
+            repoPath:    path,
+            repoName:    p.basename(path),
+          ));
+          conns.add(MindMapConnection(
+            fromId: treeId,
+            toId:   diffId,
+            style:  ConnectorStyle.dashed,
+            color:  const Color(0x507C6BFF),
+          ));
+        }
       }
     }
 
@@ -365,6 +396,14 @@ class _MindMapViewState extends State<MindMapView>
               : const Color(0x8060A5FA),
         ));
       }
+    }
+
+    // ── Plugin-provided nodes ────────────────────────────────────────────────
+    final pluginEntries = MindMapPluginRegistry.instance.collectNodes(context);
+    for (final entry in pluginEntries) {
+      if (nodes.any((n) => n.id == entry.data.id)) continue; // dedup
+      nodes.add(entry.data);
+      conns.addAll(entry.connections);
     }
 
     return (nodes: nodes, conns: conns);
@@ -461,7 +500,7 @@ class _MindMapCanvasState extends State<_MindMapCanvas> {
   static const _canvasH = 8000.0;
 
   // Column x positions mirrored from MindMapLayoutEngine, offset right for space.
-  static const _colX = [2040.0, 2260.0, 2680.0, 2900.0, 3100.0, 3360.0, 3860.0, 4240.0];
+  static const _colX = [2040.0, 2260.0, 2680.0, 2900.0, 3100.0, 3360.0, 3860.0, 4240.0, 4580.0];
 
   /// Returns a column-based fallback so nodes are never piled at (0,0).
   Offset _fallbackPos(MindMapNodeData node) {
@@ -682,6 +721,8 @@ class _CanvasToolbar extends StatelessWidget {
           },
         ),
         const SizedBox(width: 1),
+        _ViewsButton(),
+        const SizedBox(width: 1),
       ],
     );
   }
@@ -690,6 +731,261 @@ class _CanvasToolbar extends StatelessWidget {
     final m = transformCtrl.value.clone();
     m.scaleByDouble(factor, factor, 1.0, 1.0);
     transformCtrl.value = m;
+  }
+}
+
+// ── Views popover button ───────────────────────────────────────────────────
+
+class _ViewsButton extends StatelessWidget {
+  const _ViewsButton();
+
+  @override
+  Widget build(BuildContext context) {
+    return BlocBuilder<MindMapCubit, MindMapState>(
+      buildWhen: (p, n) =>
+          p.savedViews.length != n.savedViews.length ||
+          p.activeViewName != n.activeViewName,
+      builder: (context, state) {
+        final hasViews = state.savedViews.isNotEmpty;
+        return Tooltip(
+          message: 'Views',
+          child: GestureDetector(
+            onTap: () => _showViewsMenu(context, state),
+            child: Container(
+              height: 30,
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              decoration: BoxDecoration(
+                color: hasViews ? const Color(0xFF16192A) : const Color(0xFF12151C),
+                border: Border.all(
+                  color: hasViews ? const Color(0xFF7C6BFF) : const Color(0xFF2A3040),
+                ),
+                borderRadius: BorderRadius.circular(6),
+              ),
+              child: Row(
+                children: [
+                  Icon(Icons.bookmarks_outlined, size: 13,
+                      color: hasViews ? const Color(0xFF7C6BFF) : const Color(0xFF6B7898)),
+                  const SizedBox(width: 4),
+                  Text(
+                    state.activeViewName ?? 'Views',
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: hasViews ? const Color(0xFF9D8FFF) : const Color(0xFF6B7898),
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  void _showViewsMenu(BuildContext context, MindMapState state) {
+    final cubit = context.read<MindMapCubit>();
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (ctx) => BlocProvider.value(
+        value: cubit,
+        child: _ViewsSheet(initialState: state),
+      ),
+    );
+  }
+}
+
+class _ViewsSheet extends StatefulWidget {
+  const _ViewsSheet({required this.initialState});
+  final MindMapState initialState;
+
+  @override
+  State<_ViewsSheet> createState() => _ViewsSheetState();
+}
+
+class _ViewsSheetState extends State<_ViewsSheet> {
+  final _ctrl = TextEditingController();
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Align(
+      alignment: Alignment.bottomCenter,
+      child: Container(
+        width: 320,
+        margin: const EdgeInsets.only(bottom: 60),
+        decoration: BoxDecoration(
+          color: const Color(0xFF0F1218),
+          border: Border.all(color: const Color(0xFF2A3040)),
+          borderRadius: BorderRadius.circular(12),
+          boxShadow: const [BoxShadow(color: Color(0xA0000000), blurRadius: 24)],
+        ),
+        child: BlocBuilder<MindMapCubit, MindMapState>(
+          builder: (context, state) {
+            return Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(14, 12, 14, 6),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.bookmarks_outlined, size: 14, color: Color(0xFF7C6BFF)),
+                      const SizedBox(width: 8),
+                      const Expanded(
+                        child: Text('Saved Views',
+                            style: TextStyle(
+                                fontSize: 12, fontWeight: FontWeight.w700, color: Color(0xFFE8E8FF))),
+                      ),
+                      GestureDetector(
+                        onTap: () => Navigator.pop(context),
+                        child: const Icon(Icons.close, size: 14, color: Color(0xFF6B7898)),
+                      ),
+                    ],
+                  ),
+                ),
+                const Divider(height: 1, color: Color(0xFF1E2330)),
+                // Save current layout row.
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(10, 10, 10, 4),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: _ctrl,
+                          style: const TextStyle(fontSize: 12, color: Color(0xFFE8E8FF)),
+                          decoration: InputDecoration(
+                            hintText: state.activeViewName ?? 'View name…',
+                            hintStyle: const TextStyle(fontSize: 12, color: Color(0xFF4A5680)),
+                            isDense: true,
+                            contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(6),
+                              borderSide: const BorderSide(color: Color(0xFF2A3040)),
+                            ),
+                            focusedBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(6),
+                              borderSide: const BorderSide(color: Color(0xFF7C6BFF)),
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      GestureDetector(
+                        onTap: () {
+                          final name = _ctrl.text.trim().isEmpty
+                              ? (state.activeViewName ?? 'View ${state.savedViews.length + 1}')
+                              : _ctrl.text.trim();
+                          context.read<MindMapCubit>().saveView(name);
+                          _ctrl.clear();
+                          Navigator.pop(context);
+                        },
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF7C6BFF),
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: const Text('Save', style: TextStyle(fontSize: 11, color: Colors.white, fontWeight: FontWeight.w600)),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                if (state.savedViews.isEmpty)
+                  const Padding(
+                    padding: EdgeInsets.fromLTRB(14, 6, 14, 14),
+                    child: Text('No saved views yet',
+                        style: TextStyle(fontSize: 11, color: Color(0xFF4A5680))),
+                  )
+                else ...[
+                  const Divider(height: 1, color: Color(0xFF1E2330)),
+                  ConstrainedBox(
+                    constraints: const BoxConstraints(maxHeight: 240),
+                    child: ListView(
+                      shrinkWrap: true,
+                      padding: const EdgeInsets.symmetric(vertical: 4),
+                      children: [
+                        for (final entry in state.savedViews.entries)
+                          _ViewRow(
+                            snapshot: entry.value,
+                            isActive: state.activeViewName == entry.key,
+                            onLoad: () {
+                              context.read<MindMapCubit>().loadView(entry.key);
+                              Navigator.pop(context);
+                            },
+                            onDelete: () =>
+                                context.read<MindMapCubit>().deleteView(entry.key),
+                          ),
+                      ],
+                    ),
+                  ),
+                ],
+              ],
+            );
+          },
+        ),
+      ),
+    );
+  }
+}
+
+class _ViewRow extends StatelessWidget {
+  const _ViewRow({
+    required this.snapshot,
+    required this.isActive,
+    required this.onLoad,
+    required this.onDelete,
+  });
+  final MindMapViewSnapshot snapshot;
+  final bool isActive;
+  final VoidCallback onLoad;
+  final VoidCallback onDelete;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onLoad,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+        child: Row(
+          children: [
+            Icon(
+              isActive ? Icons.bookmark : Icons.bookmark_border,
+              size: 13,
+              color: isActive ? const Color(0xFF7C6BFF) : const Color(0xFF4A5680),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                snapshot.name,
+                style: TextStyle(
+                  fontSize: 12,
+                  color: isActive ? const Color(0xFFE8E8FF) : const Color(0xFF9BAACB),
+                  fontWeight: isActive ? FontWeight.w600 : FontWeight.w400,
+                ),
+              ),
+            ),
+            Text(
+              '${snapshot.positions.length} nodes',
+              style: const TextStyle(fontSize: 10, color: Color(0xFF4A5680)),
+            ),
+            const SizedBox(width: 8),
+            GestureDetector(
+              onTap: onDelete,
+              behavior: HitTestBehavior.opaque,
+              child: const Icon(Icons.delete_outline, size: 13, color: Color(0xFF4A5680)),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }
 
@@ -733,16 +1029,31 @@ class _GroupSidebarState extends State<_GroupSidebar> {
   bool _collapsed = false;
   final _expandedGroups = <String>{};
 
-  static const _groups = [
-    ('ws',      'Workspaces',       Icons.folder_copy_outlined),
+  static const _builtinGroups = [
+    ('ws',      'Workspaces',           Icons.folder_copy_outlined),
     ('agent',   'Sessions / Terminals', Icons.terminal),
-    ('repo',    'Repositories',     Icons.source),
-    ('branch',  'Branches',         Icons.alt_route),
-    ('files',   'Files Changed',    Icons.insert_drive_file_outlined),
-    ('tree',    'File Tree / Diffs', Icons.account_tree_outlined),
-    ('editor',  'Editor',           Icons.code),
-    ('run',     'Runs',             Icons.play_circle_outline),
+    ('repo',    'Repositories',         Icons.source),
+    ('branch',  'Branches',             Icons.alt_route),
+    ('files',   'Files Changed',        Icons.insert_drive_file_outlined),
+    ('tree',    'File Tree',            Icons.account_tree_outlined),
+    ('diff',    'Diff / Git Changes',   Icons.compare_arrows_rounded),
+    ('editor',  'Editor',               Icons.code),
+    ('run',     'Runs',                 Icons.play_circle_outline),
   ];
+
+  /// Merge built-in + plugin groups (no duplicates).
+  List<(String, String, IconData)> get _groups {
+    final seen = <String>{};
+    final result = <(String, String, IconData)>[];
+    for (final g in _builtinGroups) {
+      seen.add(g.$1);
+      result.add(g);
+    }
+    for (final pg in MindMapPluginRegistry.instance.sidebarGroups) {
+      if (seen.add(pg.tag)) result.add((pg.tag, pg.label, pg.icon));
+    }
+    return result;
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -995,7 +1306,8 @@ class _IndividualRow extends StatelessWidget {
     if (data is RepoNodeData)      return data.repoName;
     if (data is BranchNodeData)    return data.branch;
     if (data is FilesNodeData)     return p.basename(data.repoPath);
-    if (data is FileTreeNodeData)  return 'Diffs';
+    if (data is FileTreeNodeData)  return data.repoName ?? 'Tree';
+    if (data is DiffNodeData)      return data.repoName != null ? 'Diff · ${data.repoName}' : 'Diff';
     if (data is EditorNodeData)    return p.basename(data.filePath);
     if (data is RunNodeData)       return data.session.config.name;
     return node.id;

@@ -164,7 +164,7 @@ class FilesNodeData extends MindMapNodeData {
   String get typeTag => 'files';
 }
 
-// ── File Tree / Diffs (embeds ReviewPanel) ─────────────────────────────────
+// ── File Tree (file browser only) ──────────────────────────────────────────
 
 class FileTreeNodeData extends MindMapNodeData {
   const FileTreeNodeData({
@@ -178,13 +178,36 @@ class FileTreeNodeData extends MindMapNodeData {
   final String? repoName;
 
   @override
-  Size get defaultSize => const Size(340, 360);
+  Size get defaultSize => const Size(300, 360);
 
   @override
   int get columnIndex => 7;
 
   @override
   String get typeTag => 'tree';
+}
+
+// ── Diff / Git Changes (diff viewer only) ──────────────────────────────────
+
+class DiffNodeData extends MindMapNodeData {
+  const DiffNodeData({
+    required super.id,
+    required this.workspaceId,
+    this.repoPath,
+    this.repoName,
+  });
+  final String workspaceId;
+  final String? repoPath;
+  final String? repoName;
+
+  @override
+  Size get defaultSize => const Size(340, 380);
+
+  @override
+  int get columnIndex => 8;
+
+  @override
+  String get typeTag => 'diff';
 }
 
 // ── File Editor ────────────────────────────────────────────────────────────
@@ -231,7 +254,36 @@ class RunNodeData extends MindMapNodeData {
   String get typeTag => 'run';
 }
 
-// ── Connection model ───────────────────────────────────────────────────────
+// ── Plugin node (external / third-party cards) ─────────────────────────────
+// All third-party cards are carried through this single sealed subclass.
+// The registry routes rendering to the right [MindMapCardPlugin] via [pluginId].
+
+class MindMapPluginNodeData extends MindMapNodeData {
+  const MindMapPluginNodeData({
+    required super.id,
+    required this.pluginId,
+    required int columnIndex,
+    required String typeTag,
+    required Size defaultSize,
+    this.payload = const {},
+  })  : _columnIndex = columnIndex,
+        _typeTag     = typeTag,
+        _defaultSize = defaultSize;
+
+  /// Reverse-domain plugin identifier — must match [MindMapCardPlugin.pluginId].
+  final String pluginId;
+
+  /// Arbitrary structured data the plugin uses to render its card.
+  final Map<String, dynamic> payload;
+
+  final int    _columnIndex;
+  final String _typeTag;
+  final Size   _defaultSize;
+
+  @override int    get columnIndex => _columnIndex;
+  @override String get typeTag     => _typeTag;
+  @override Size   get defaultSize => _defaultSize;
+}
 
 enum ConnectorStyle {
   solid,        // solid curve

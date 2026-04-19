@@ -14,7 +14,8 @@ const _columnX = [
   3100.0,  // 4 Files Changed
   3360.0,  // 5 Editor
   3860.0,  // 6 Runs (attached from session)
-  4240.0,  // 7 File Tree · Diffs (attached from repo)
+  4240.0,  // 7 File Tree (file browser only)
+  4580.0,  // 8 Diff / Git Changes
 ];
 
 const _columnMargin = 20.0;
@@ -121,6 +122,7 @@ class MindMapLayoutEngine {
     'FILES CHANGED',
     'EDITOR',
     'RUNS',
-    'FILE TREE · DIFFS',
+    'FILE TREE',
+    'DIFF / GIT CHANGES',
   ];
 }

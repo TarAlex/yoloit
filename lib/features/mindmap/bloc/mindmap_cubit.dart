@@ -15,6 +15,7 @@ class MindMapCubit extends Cubit<MindMapState> {
   static const _kSizes       = 'mindmap.sizes';
   static const _kHidden      = 'mindmap.hidden';
   static const _kHiddenTypes = 'mindmap.hiddenTypes';
+  static const _kSavedViews  = 'mindmap.saved_views';
 
   final _engine = MindMapLayoutEngine();
 
@@ -27,12 +28,14 @@ class MindMapCubit extends Cubit<MindMapState> {
     final sizesJson      = prefs.getString(_kSizes);
     final hiddenRaw      = prefs.getStringList(_kHidden);
     final hiddenTypesRaw = prefs.getStringList(_kHiddenTypes);
+    final savedViewsJson = prefs.getString(_kSavedViews);
 
     Map<String, Offset> positions = {};
     Set<String> locked = {};
     Set<String> hidden = {};
     Set<String> hiddenTypes = {};
     Map<String, Size> sizes = {};
+    Map<String, MindMapViewSnapshot> savedViews = {};
 
     if (posJson != null) {
       final map = jsonDecode(posJson) as Map<String, dynamic>;
@@ -51,6 +54,12 @@ class MindMapCubit extends Cubit<MindMapState> {
         sizes[k] = Size(list[0], list[1]);
       });
     }
+    if (savedViewsJson != null) {
+      final map = jsonDecode(savedViewsJson) as Map<String, dynamic>;
+      map.forEach((k, v) {
+        savedViews[k] = MindMapViewSnapshot.fromJson(v as Map<String, dynamic>);
+      });
+    }
 
     emit(state.copyWith(
       positions:   positions,
@@ -58,6 +67,7 @@ class MindMapCubit extends Cubit<MindMapState> {
       sizes:       sizes,
       hidden:      hidden,
       hiddenTypes: hiddenTypes,
+      savedViews:  savedViews,
     ));
 
     // If all positions are at (0,0) (corrupted save from first-open bug), clear them.
@@ -68,6 +78,61 @@ class MindMapCubit extends Cubit<MindMapState> {
       await prefs.remove(_kLocked);
       await prefs.remove(_kSizes);
     }
+  }
+
+  // ── Named views ───────────────────────────────────────────────────────────
+
+  Future<void> saveView(String name) async {
+    final snapshot = MindMapViewSnapshot(
+      name:        name,
+      positions:   Map.from(state.positions),
+      sizes:       Map.from(state.sizes),
+      locked:      Set.from(state.locked),
+      hidden:      Set.from(state.hidden),
+      hiddenTypes: Set.from(state.hiddenTypes),
+    );
+    final newViews = Map<String, MindMapViewSnapshot>.from(state.savedViews)
+      ..[name] = snapshot;
+    emit(state.copyWith(savedViews: newViews, activeViewName: name));
+    await _saveSavedViews(newViews);
+  }
+
+  void loadView(String name) {
+    final snap = state.savedViews[name];
+    if (snap == null) return;
+    final newPositions = Map<String, Offset>.from(snap.positions);
+    // Re-run layout for any nodes that aren't in the snapshot.
+    final computed = _engine.compute(
+      nodes:    state.nodes,
+      existing: newPositions,
+      sizes:    snap.sizes,
+      locked:   snap.locked,
+    );
+    emit(state.copyWith(
+      positions:      computed,
+      sizes:          Map.from(snap.sizes),
+      locked:         Set.from(snap.locked),
+      hidden:         Set.from(snap.hidden),
+      hiddenTypes:    Set.from(snap.hiddenTypes),
+      activeViewName: name,
+    ));
+    _savePositions(computed);
+    _saveLocked(snap.locked);
+    _saveSizes(snap.sizes);
+    _saveHidden(snap.hidden);
+    _saveHiddenTypes(snap.hiddenTypes);
+  }
+
+  Future<void> deleteView(String name) async {
+    final newViews = Map<String, MindMapViewSnapshot>.from(state.savedViews)
+      ..remove(name);
+    final newActive = state.activeViewName == name ? null : state.activeViewName;
+    emit(state.copyWith(
+      savedViews:           newViews,
+      activeViewName:       newActive,
+      clearActiveViewName: newActive == null,
+    ));
+    await _saveSavedViews(newViews);
   }
 
   // ── Update nodes (called when blocs emit) ─────────────────────────────────
@@ -218,5 +283,11 @@ class MindMapCubit extends Cubit<MindMapState> {
   Future<void> _saveHiddenTypes(Set<String> types) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setStringList(_kHiddenTypes, types.toList());
+  }
+
+  Future<void> _saveSavedViews(Map<String, MindMapViewSnapshot> views) async {
+    final prefs = await SharedPreferences.getInstance();
+    final map = views.map((k, v) => MapEntry(k, v.toJson()));
+    await prefs.setString(_kSavedViews, jsonEncode(map));
   }
 }

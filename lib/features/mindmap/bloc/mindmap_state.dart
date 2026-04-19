@@ -2,6 +2,54 @@ import 'package:equatable/equatable.dart';
 import 'package:flutter/material.dart';
 import 'package:yoloit/features/mindmap/model/mindmap_node_model.dart';
 
+/// Snapshot of the canvas layout at a point in time.
+class MindMapViewSnapshot {
+  const MindMapViewSnapshot({
+    required this.name,
+    required this.positions,
+    required this.sizes,
+    required this.locked,
+    required this.hidden,
+    required this.hiddenTypes,
+  });
+  final String name;
+  final Map<String, Offset> positions;
+  final Map<String, Size> sizes;
+  final Set<String> locked;
+  final Set<String> hidden;
+  final Set<String> hiddenTypes;
+
+  Map<String, dynamic> toJson() => {
+    'name': name,
+    'positions': positions.map((k, v) => MapEntry(k, [v.dx, v.dy])),
+    'sizes': sizes.map((k, v) => MapEntry(k, [v.width, v.height])),
+    'locked': locked.toList(),
+    'hidden': hidden.toList(),
+    'hiddenTypes': hiddenTypes.toList(),
+  };
+
+  factory MindMapViewSnapshot.fromJson(Map<String, dynamic> j) {
+    Map<String, Offset> positions = {};
+    Map<String, Size> sizes = {};
+    (j['positions'] as Map<String, dynamic>? ?? {}).forEach((k, v) {
+      final l = (v as List).cast<double>();
+      positions[k] = Offset(l[0], l[1]);
+    });
+    (j['sizes'] as Map<String, dynamic>? ?? {}).forEach((k, v) {
+      final l = (v as List).cast<double>();
+      sizes[k] = Size(l[0], l[1]);
+    });
+    return MindMapViewSnapshot(
+      name:        j['name'] as String,
+      positions:   positions,
+      sizes:       sizes,
+      locked:      ((j['locked'] as List?) ?? []).cast<String>().toSet(),
+      hidden:      ((j['hidden'] as List?) ?? []).cast<String>().toSet(),
+      hiddenTypes: ((j['hiddenTypes'] as List?) ?? []).cast<String>().toSet(),
+    );
+  }
+}
+
 class MindMapState extends Equatable {
   const MindMapState({
     this.positions = const {},
@@ -11,6 +59,8 @@ class MindMapState extends Equatable {
     this.hiddenTypes = const {},
     this.nodes     = const [],
     this.connections = const [],
+    this.savedViews  = const {},
+    this.activeViewName,
   });
 
   /// Node id → canvas offset (top-left corner).
@@ -34,6 +84,12 @@ class MindMapState extends Equatable {
   /// Connections between nodes.
   final List<MindMapConnection> connections;
 
+  /// Named layout snapshots.
+  final Map<String, MindMapViewSnapshot> savedViews;
+
+  /// Currently active view name, null = unsaved / default.
+  final String? activeViewName;
+
   MindMapState copyWith({
     Map<String, Offset>? positions,
     Map<String, Size>?   sizes,
@@ -42,18 +98,26 @@ class MindMapState extends Equatable {
     Set<String>?         hiddenTypes,
     List<MindMapNodeData>? nodes,
     List<MindMapConnection>? connections,
+    Map<String, MindMapViewSnapshot>? savedViews,
+    String? activeViewName,
+    bool clearActiveViewName = false,
   }) {
     return MindMapState(
-      positions:   positions   ?? this.positions,
-      sizes:       sizes       ?? this.sizes,
-      locked:      locked      ?? this.locked,
-      hidden:      hidden      ?? this.hidden,
-      hiddenTypes: hiddenTypes ?? this.hiddenTypes,
-      nodes:       nodes       ?? this.nodes,
-      connections: connections ?? this.connections,
+      positions:      positions      ?? this.positions,
+      sizes:          sizes          ?? this.sizes,
+      locked:         locked         ?? this.locked,
+      hidden:         hidden         ?? this.hidden,
+      hiddenTypes:    hiddenTypes    ?? this.hiddenTypes,
+      nodes:          nodes          ?? this.nodes,
+      connections:    connections    ?? this.connections,
+      savedViews:     savedViews     ?? this.savedViews,
+      activeViewName: clearActiveViewName ? null : (activeViewName ?? this.activeViewName),
     );
   }
 
   @override
-  List<Object?> get props => [positions, sizes, locked, hidden, hiddenTypes, nodes, connections];
+  List<Object?> get props => [
+    positions, sizes, locked, hidden, hiddenTypes,
+    nodes, connections, savedViews, activeViewName,
+  ];
 }
