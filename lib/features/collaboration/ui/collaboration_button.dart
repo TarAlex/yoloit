@@ -296,8 +296,8 @@ class _HostActiveView extends StatelessWidget {
   const _HostActiveView({required this.state});
   final CollaborationState state;
 
-  Future<void> _openInBrowser() async {
-    final url = state.webClientUrl;
+  Future<void> _openLocally() async {
+    final url = state.localUrl;
     if (url.isEmpty) return;
     try {
       if (Platform.isMacOS) {
@@ -312,7 +312,8 @@ class _HostActiveView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final browserUrl = state.webClientUrl;
+    final remoteUrl = state.webClientUrl;
+    final localUrl  = state.localUrl;
 
     return Column(
       mainAxisSize: MainAxisSize.min,
@@ -351,40 +352,45 @@ class _HostActiveView extends StatelessWidget {
           ),
         ),
 
-        if (browserUrl.isNotEmpty) ...[
+        if (remoteUrl.isNotEmpty) ...[
           const SizedBox(height: 12),
-          // ── "How to connect" section ─────────────────────────────
+
+          // ── Open on THIS Mac ──────────────────────────────────────
           Container(
-            padding: const EdgeInsets.all(12),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
             decoration: BoxDecoration(
               color:  const Color(0xFF0A0F1A),
-              border: Border.all(color: const Color(0xFF2D4060)),
+              border: Border.all(color: const Color(0xFF1E3A20)),
               borderRadius: BorderRadius.circular(8),
             ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+            child: Row(
               children: [
-                const Row(children: [
-                  Icon(Icons.info_outline, size: 13, color: Color(0xFF4B9EFF)),
-                  SizedBox(width: 6),
-                  Text('How to connect from another device:',
-                      style: TextStyle(color: Color(0xFF4B9EFF),
-                          fontSize: 11, fontWeight: FontWeight.w600)),
-                ]),
-                const SizedBox(height: 8),
-                const Text(
-                  '1. Make sure both devices are on the same Wi-Fi\n'
-                  '2. Open the URL below in a browser on the other device\n'
-                  '3. Click "Connect" — the mindmap will sync in real time',
-                  style: TextStyle(color: Color(0xFF94A3B8), fontSize: 11,
-                      height: 1.6),
+                const Icon(Icons.laptop_mac, size: 14, color: Color(0xFF34D399)),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text('Open on this Mac:',
+                          style: TextStyle(color: Color(0xFF34D399),
+                              fontSize: 10, fontWeight: FontWeight.w600)),
+                      Text(localUrl,
+                          style: const TextStyle(color: Color(0xFFE8E8FF),
+                              fontSize: 12, fontFamily: 'monospace')),
+                    ],
+                  ),
+                ),
+                _UrlActionBtn(
+                  icon: Icons.open_in_browser,
+                  tooltip: 'Open in browser on this Mac',
+                  onTap: _openLocally,
                 ),
               ],
             ),
           ),
-          const SizedBox(height: 10),
+          const SizedBox(height: 8),
 
-          // ── Browser URL row ──────────────────────────────────────
+          // ── Share URL for remote devices ─────────────────────────
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
             decoration: BoxDecoration(
@@ -395,18 +401,21 @@ class _HostActiveView extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text('Share this URL:',
-                    style: TextStyle(color: Color(0xFF7B9EFF),
-                        fontSize: 10, fontWeight: FontWeight.w600,
-                        letterSpacing: 0.5)),
+                const Row(children: [
+                  Icon(Icons.share, size: 12, color: Color(0xFF7B9EFF)),
+                  SizedBox(width: 6),
+                  Text('Share with other devices (same Wi-Fi):',
+                      style: TextStyle(color: Color(0xFF7B9EFF),
+                          fontSize: 10, fontWeight: FontWeight.w600)),
+                ]),
                 const SizedBox(height: 4),
                 Row(
                   children: [
                     Expanded(
-                      child: Text(browserUrl,
+                      child: Text(remoteUrl,
                           style: const TextStyle(
                               color: Color(0xFFE8E8FF),
-                              fontSize: 13,
+                              fontSize: 12,
                               fontFamily: 'monospace',
                               fontWeight: FontWeight.w600)),
                     ),
@@ -415,13 +424,7 @@ class _HostActiveView extends StatelessWidget {
                       icon: Icons.copy,
                       tooltip: 'Copy URL',
                       onTap: () =>
-                          Clipboard.setData(ClipboardData(text: browserUrl)),
-                    ),
-                    const SizedBox(width: 4),
-                    _UrlActionBtn(
-                      icon: Icons.open_in_browser,
-                      tooltip: 'Open in browser on this Mac',
-                      onTap: _openInBrowser,
+                          Clipboard.setData(ClipboardData(text: remoteUrl)),
                     ),
                   ],
                 ),

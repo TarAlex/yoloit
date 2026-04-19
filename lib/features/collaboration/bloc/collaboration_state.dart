@@ -8,6 +8,7 @@ class CollaborationState {
     this.mode         = CollaborationMode.idle,
     this.address      = '',
     this.webClientUrl = '',
+    this.localUrl     = '',
     this.peerCount    = 0,
     this.error        = '',
     this.peers        = const {},
@@ -18,9 +19,11 @@ class CollaborationState {
   /// For host: "192.168.1.10:40401". For client: the host address used.
   final String address;
 
-  /// HTTP URL where the browser guest UI is served (host mode only).
-  /// Empty if web build is not found.
+  /// HTTP URL to share with REMOTE devices on the LAN (host mode only).
   final String webClientUrl;
+
+  /// HTTP URL to open in a browser on THIS machine (uses localhost).
+  final String localUrl;
 
   /// Number of currently connected remote peers.
   final int peerCount;
@@ -39,6 +42,7 @@ class CollaborationState {
     CollaborationMode? mode,
     String?            address,
     String?            webClientUrl,
+    String?            localUrl,
     int?               peerCount,
     String?            error,
     Map<String, String>? peers,
@@ -46,6 +50,7 @@ class CollaborationState {
     mode:         mode         ?? this.mode,
     address:      address      ?? this.address,
     webClientUrl: webClientUrl ?? this.webClientUrl,
+    localUrl:     localUrl     ?? this.localUrl,
     peerCount:    peerCount    ?? this.peerCount,
     error:        error        ?? this.error,
     peers:        peers        ?? this.peers,

@@ -44,9 +44,16 @@ class CollaborationServer {
     return '$_resolvedIp:$port';
   }
 
+  /// URL to share with remote devices on the same LAN.
   String get webClientUrl {
     if (_staticServerSocket == null) return '';
     return 'http://$_resolvedIp:$httpPort';
+  }
+
+  /// URL to open in a browser on THIS machine (localhost avoids macOS self-connect bug).
+  String get localUrl {
+    if (_staticServerSocket == null) return '';
+    return 'http://localhost:$httpPort';
   }
 
   Future<void> stop() async {
