@@ -243,7 +243,7 @@ class _GuestTab extends StatelessWidget {
         children: [
           _DarkTextField(
             controller: ctrl,
-            hint: 'Host IP  e.g. 192.168.1.10',
+            hint: 'Host IP or IP:port  e.g. 192.168.1.10',
             enabled: !connecting,
           ),
           if (state.error.isNotEmpty)
@@ -259,10 +259,22 @@ class _GuestTab extends StatelessWidget {
             onTap: connecting
                 ? null
                 : () async {
-                    final ip = ctrl.text.trim();
-                    if (ip.isEmpty) return;
+                    final raw = ctrl.text.trim();
+                    if (raw.isEmpty) return;
+                    // Allow "192.168.1.10:40401" — extract host and port
+                    final colonIdx = raw.lastIndexOf(':');
+                    String host = raw;
+                    int port = 40401;
+                    if (colonIdx > 0) {
+                      final maybePart = raw.substring(colonIdx + 1);
+                      final maybePort = int.tryParse(maybePart);
+                      if (maybePort != null) {
+                        host = raw.substring(0, colonIdx);
+                        port = maybePort;
+                      }
+                    }
                     onConnecting(true);
-                    await ctx.read<CollaborationCubit>().connect(ip);
+                    await ctx.read<CollaborationCubit>().connect(host, port: port);
                     onConnecting(false);
                     if (ctx.mounted &&
                         ctx.read<CollaborationCubit>().state.isGuest) {
