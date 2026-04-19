@@ -1,10 +1,6 @@
 import 'dart:async';
 import 'dart:io';
 
-import 'package:shelf/shelf.dart' as shelf;
-import 'package:shelf/shelf_io.dart' as shelf_io;
-import 'package:shelf_static/shelf_static.dart';
-
 import '../model/sync_message.dart';
 
 /// WebSocket server (port [port]) + static HTTP server (port [httpPort]).
@@ -118,37 +114,79 @@ class CollaborationServer {
     broadcastRaw(SyncMessage.disconnected(clientId));
   }
 
-  /// Tries to start a static file server for the Flutter web build.
+  // ── Static HTTP server (pure dart:io, no shelf) ──────────────────────────
+
+  /// Starts a minimal HTTP file server on [httpPort] for the Flutter web build.
   Future<void> _startStaticServer() async {
     final webDir = await _findWebClientDir();
     if (webDir == null) return;
     try {
-      final staticHandler = createStaticHandler(
-        webDir,
-        defaultDocument: 'index.html',
-        serveFilesOutsidePath: false,
+      _staticServer = await HttpServer.bind(InternetAddress.anyIPv4, httpPort);
+      _staticServer!.listen(
+        (req) => _serveFile(req, webDir).catchError((_) {}),
+        onError: (_) {},
       );
-      // Wrap with CORS headers so the browser can load the JS from the same server.
-      final corsHandler = shelf.Pipeline()
-          .addMiddleware(_corsMiddleware())
-          .addHandler(staticHandler);
-      _staticServer = await shelf_io.serve(
-          corsHandler, InternetAddress.anyIPv4, httpPort);
     } catch (_) {
-      // Static server is optional.
+      _staticServer = null; // Optional — don't fail hosting.
     }
   }
 
-  static shelf.Middleware _corsMiddleware() {
-    return (handler) => (request) async {
-          final resp = await handler(request);
-          return resp.change(headers: {
-            'Access-Control-Allow-Origin': '*',
-            'Access-Control-Allow-Methods': 'GET, OPTIONS',
-            'Access-Control-Allow-Headers': 'Content-Type',
-            ...resp.headers,
-          });
-        };
+  /// Serves a single file request from [webDir] with CORS headers.
+  static Future<void> _serveFile(HttpRequest req, String webDir) async {
+    // OPTIONS preflight
+    if (req.method == 'OPTIONS') {
+      req.response
+        ..statusCode = HttpStatus.noContent
+        ..headers.set('Access-Control-Allow-Origin', '*')
+        ..headers.set('Access-Control-Allow-Methods', 'GET, OPTIONS')
+        ..headers.set('Access-Control-Allow-Headers', 'Content-Type');
+      await req.response.close();
+      return;
+    }
+
+    var urlPath = req.uri.path;
+    // SPA routing: serve index.html for all non-file paths.
+    if (urlPath == '/' || urlPath.isEmpty || !urlPath.contains('.')) {
+      urlPath = '/index.html';
+    }
+    // Sanitise: strip query, collapse "..", disallow escaping webDir.
+    final safePath = Uri.decodeFull(urlPath.split('?').first)
+        .replaceAll(RegExp(r'\.\.[\\/]'), '');
+    final filePath = '$webDir$safePath';
+    final file = File(filePath);
+
+    req.response.headers.set('Access-Control-Allow-Origin', '*');
+    req.response.headers.set('Cache-Control', 'no-cache');
+
+    if (await file.exists()) {
+      req.response
+        ..statusCode = HttpStatus.ok
+        ..headers.contentType = _mimeType(safePath);
+      await req.response.addStream(file.openRead());
+    } else {
+      // SPA fallback — serve index.html so Flutter router takes over.
+      final index = File('$webDir/index.html');
+      req.response
+        ..statusCode = HttpStatus.ok
+        ..headers.contentType = ContentType.html;
+      await req.response.addStream(index.openRead());
+    }
+    await req.response.close();
+  }
+
+  static ContentType _mimeType(String path) {
+    final ext = path.split('.').last.toLowerCase();
+    return switch (ext) {
+      'html' => ContentType.html,
+      'js'   => ContentType('application', 'javascript', charset: 'utf-8'),
+      'css'  => ContentType('text', 'css', charset: 'utf-8'),
+      'json' => ContentType.json,
+      'png'  => ContentType('image', 'png'),
+      'ico'  => ContentType('image', 'x-icon'),
+      'svg'  => ContentType('image', 'svg+xml'),
+      'wasm' => ContentType('application', 'wasm'),
+      _      => ContentType.binary,
+    };
   }
 
   /// Auto-copies the web client from build/web to ~/.yoloit/web_client if needed.
