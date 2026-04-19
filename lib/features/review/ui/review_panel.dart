@@ -1068,3 +1068,45 @@ class _PrButton extends StatelessWidget {
     );
   }
 }
+
+// ── Public standalone panels for embedding in mindmap cards ─────────────────
+
+/// Shows only the file-tree tab (no diff, no runs).
+class ReviewFileTreePanel extends StatelessWidget {
+  const ReviewFileTreePanel({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return BlocBuilder<ReviewCubit, ReviewState>(
+      builder: (context, state) {
+        if (state is ReviewLoaded) {
+          return Container(
+            color: context.appColors.surface,
+            child: _FileTreeSection(state: state),
+          );
+        }
+        return _EmptyReview();
+      },
+    );
+  }
+}
+
+/// Shows only the git-changes / diff tab (no file tree, no runs).
+class ReviewDiffPanel extends StatelessWidget {
+  const ReviewDiffPanel({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return BlocBuilder<ReviewCubit, ReviewState>(
+      builder: (context, state) {
+        if (state is ReviewLoaded) {
+          return Container(
+            color: context.appColors.surface,
+            child: _GitChangesSection(state: state),
+          );
+        }
+        return _EmptyReview();
+      },
+    );
+  }
+}

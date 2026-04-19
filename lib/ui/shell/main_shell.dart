@@ -13,6 +13,7 @@ import 'package:yoloit/core/theme/app_colors.dart';
 import 'package:yoloit/features/editor/bloc/file_editor_cubit.dart';
 import 'package:yoloit/features/editor/bloc/file_editor_state.dart';
 import 'package:yoloit/features/editor/ui/file_editor_panel.dart';
+import 'package:yoloit/features/mindmap/mindmap_view.dart';
 import 'package:yoloit/features/review/bloc/review_cubit.dart';
 import 'package:yoloit/features/review/ui/review_panel.dart';
 import 'package:yoloit/features/search/ui/file_search_overlay.dart';
@@ -46,6 +47,7 @@ class _MainShellState extends State<MainShell> with WindowListener {
   PanelVisibility _agentsVis    = PanelVisibility.open;
   PanelVisibility _fileTreeVis  = PanelVisibility.open;
   SessionSnapshot? _sessionSnapshot;
+  bool _isMindMapView = false;
 
   // ── Silent auto-update state ───────────────────────────────────────────────
   UpdateInfo? _updateInfo;
@@ -269,6 +271,7 @@ class _MainShellState extends State<MainShell> with WindowListener {
                   workspaceVis: _workspaceVis,
                   agentsVis: _agentsVis,
                   fileTreeVis: _fileTreeVis,
+                  isMindMapView: _isMindMapView,
                   onToggleWorkspace: () {
                     final next = _workspaceVis == PanelVisibility.open
                         ? PanelVisibility.closed
@@ -287,6 +290,7 @@ class _MainShellState extends State<MainShell> with WindowListener {
                         : PanelVisibility.open;
                     _setPanelVis('filetree', next);
                   },
+                  onToggleMapView: () => setState(() => _isMindMapView = !_isMindMapView),
                   onSearch: _openFileSearch,
                 ),
                 if (_updatePhase != null && _updateInfo != null)
@@ -301,15 +305,17 @@ class _MainShellState extends State<MainShell> with WindowListener {
                     },
                   ),
                 Expanded(
-                  child: _FourPaneLayout(
-                    workspacePanelKey: _workspacePanelKey,
-                    terminalFocusNode: _terminalFocusNode,
-                    workspaceVis: _workspaceVis,
-                    agentsVis: _agentsVis,
-                    fileTreeVis: _fileTreeVis,
-                    initialSnapshot: _sessionSnapshot,
-                    onSetPanelVis: _setPanelVis,
-                  ),
+                  child: _isMindMapView
+                      ? const MindMapView()
+                      : _FourPaneLayout(
+                          workspacePanelKey: _workspacePanelKey,
+                          terminalFocusNode: _terminalFocusNode,
+                          workspaceVis: _workspaceVis,
+                          agentsVis: _agentsVis,
+                          fileTreeVis: _fileTreeVis,
+                          initialSnapshot: _sessionSnapshot,
+                          onSetPanelVis: _setPanelVis,
+                        ),
                 ),
               ],
             ),
@@ -825,18 +831,22 @@ class _TitleBar extends StatelessWidget {
     required this.workspaceVis,
     required this.agentsVis,
     required this.fileTreeVis,
+    required this.isMindMapView,
     required this.onToggleWorkspace,
     required this.onToggleAgents,
     required this.onToggleFileTree,
+    required this.onToggleMapView,
     required this.onSearch,
   });
   final VoidCallback onSettings;
   final PanelVisibility workspaceVis;
   final PanelVisibility agentsVis;
   final PanelVisibility fileTreeVis;
+  final bool isMindMapView;
   final VoidCallback onToggleWorkspace;
   final VoidCallback onToggleAgents;
   final VoidCallback onToggleFileTree;
+  final VoidCallback onToggleMapView;
   final VoidCallback onSearch;
 
   @override
@@ -910,6 +920,15 @@ class _TitleBar extends StatelessWidget {
               ),
             ),
             // Right panel buttons (fixed, always right-anchored)
+            // Map view toggle button
+            _PanelToggleButton(
+              icon: Icons.hub_outlined,
+              tooltip: 'Map View',
+              semanticsLabel: 'Toggle Miro-like map view',
+              active: isMindMapView,
+              onTap: onToggleMapView,
+            ),
+            const SizedBox(width: 4),
             const _ResourceChip(),
             const SizedBox(width: 8),
             BlocBuilder<FileEditorCubit, FileEditorState>(

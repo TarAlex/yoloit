@@ -53,6 +53,38 @@ class TerminalCubit extends Cubit<TerminalState> {
     _emitLoaded([], 0);
   }
 
+  /// Loads persisted session metadata for other (non-active) workspaces so
+  /// the mindmap view can render them as idle cards without spawning PTYs.
+  /// Existing sessions are preserved; new stubs get status=idle.
+  Future<void> loadPersistedMetadataForWorkspaces(List<String> workspaceIds) async {
+    var added = false;
+    final existingIds = _allSessions.map((s) => s.id).toSet();
+    for (final wsId in workspaceIds) {
+      if (wsId == _activeWorkspaceId) continue;
+      final saved = await _persistence.load(wsId);
+      for (final s in saved) {
+        if (existingIds.contains(s.id)) continue;
+        _allSessions.add(AgentSession(
+          id: s.id,
+          type: s.type,
+          workspacePath: s.workspacePath,
+          workspaceId: s.workspaceId ?? wsId,
+          status: AgentStatus.idle,
+        ));
+        existingIds.add(s.id);
+        added = true;
+      }
+    }
+    if (added) {
+      final cur = _loaded;
+      if (cur != null) {
+        _emitLoaded(cur.sessions, cur.activeIndex);
+      } else {
+        _emitLoaded(const [], 0);
+      }
+    }
+  }
+
   /// Switch to a workspace: load its sessions or spawn a default terminal.
   Future<void> setActiveWorkspace({
     required String workspaceId,
@@ -165,6 +197,8 @@ class TerminalCubit extends Cubit<TerminalState> {
     unawaited(_logging.startSession(sessionId, '${type.displayName} @ $effectivePath'));
     _attachPtyToSession(pty, session);
 
+    // Remove any idle metadata stub with the same id (from loadPersistedMetadata).
+    _allSessions.removeWhere((s) => s.id == sessionId);
     _allSessions.add(session);
     final visible = _workspaceSessions;
     _emitLoaded(visible, visible.length - 1);

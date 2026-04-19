@@ -34,7 +34,17 @@ import 'package:yoloit/features/editor/utils/file_type_utils.dart';
 import 'package:yoloit/features/review/models/review_models.dart';
 
 class FileEditorPanel extends StatefulWidget {
-  const FileEditorPanel({super.key});
+  const FileEditorPanel({
+    super.key,
+    this.immersive = false,
+    this.onToggleImmersive,
+  });
+
+  /// When true the tab bar and toggle bar are hidden so only raw content shows.
+  final bool immersive;
+
+  /// Called by buttons inside the panel to enter/exit immersive mode.
+  final VoidCallback? onToggleImmersive;
 
   @override
   State<FileEditorPanel> createState() => _FileEditorPanelState();
@@ -50,6 +60,8 @@ class _FileEditorPanelState extends State<FileEditorPanel>
   bool _suppressControllerUpdates = false;
   /// File paths currently showing Markdown/SVG preview instead of raw code.
   final Set<String> _previewPaths = {};
+  /// Paths we have already auto-decided preview mode for (prevents repeated auto-toggle).
+  final Set<String> _seenPaths = {};
   double _scaleBase = 13.0;
   final _fontSizeNotifier = ValueNotifier<double>(13.0);
   /// True after first frame renders for the current file (prevents toggle bar
@@ -63,6 +75,10 @@ class _FileEditorPanelState extends State<FileEditorPanel>
     WidgetsBinding.instance.addObserver(this);
     SessionPrefs.load().then((snap) {
       if (mounted) _fontSizeNotifier.value = snap.editorFontSize;
+    });
+    // Restore which files were in preview mode.
+    SessionPrefs.loadPreviewPaths().then((saved) {
+      if (mounted) setState(() => _previewPaths.addAll(saved));
     });
   }
 
@@ -172,6 +188,20 @@ class _FileEditorPanelState extends State<FileEditorPanel>
           WidgetsBinding.instance.addPostFrameCallback((_) {
             if (mounted) setState(() => _editorReady = true);
           });
+          // Auto-default to preview for previewable files the first time they open.
+          final path = activeTab.filePath;
+          if (!_seenPaths.contains(path)) {
+            _seenPaths.add(path);
+            if (!_previewPaths.contains(path) &&
+                (_isMarkdown(path) || _isSvg(path) || _isImage(path))) {
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                if (mounted) {
+                  setState(() => _previewPaths.add(path));
+                  SessionPrefs.savePreviewPaths(_previewPaths.toList());
+                }
+              });
+            }
+          }
         }
 
         final toggleVisible = _editorReady &&
@@ -179,6 +209,15 @@ class _FileEditorPanelState extends State<FileEditorPanel>
             !activeTab.isLoading &&
             !_isImage(activeTab.filePath) &&
             (_isMarkdown(activeTab.filePath) || _isSvg(activeTab.filePath));
+
+        final isVisualPreview = !activeTab.isLoading &&
+            !activeTab.isDiff &&
+            (_isImage(activeTab.filePath) ||
+             _isSvg(activeTab.filePath) ||
+             _isMarkdown(activeTab.filePath)) &&
+            (_isImage(activeTab.filePath) || _previewPaths.contains(activeTab.filePath));
+
+        final immersive = widget.immersive;
 
         return GestureDetector(
           onScaleStart: (d) => _scaleBase = _fontSizeNotifier.value,
@@ -190,7 +229,8 @@ class _FileEditorPanelState extends State<FileEditorPanel>
           },
           child: Column(
             children: [
-              _TabBar(state: state),
+              // Tab bar — hidden in immersive mode.
+              if (!immersive) _TabBar(state: state),
               Expanded(
                 child: Stack(
                   children: [
@@ -210,24 +250,46 @@ class _FileEditorPanelState extends State<FileEditorPanel>
                                               : _MarkdownPreview(content: activeTab.content ?? ''))
                                           : _EditorBody(key: ValueKey(activeTab.filePath), tab: activeTab, codeController: controller!, fontSizeNotifier: _fontSizeNotifier),
                     ),
-                    // Toggle bar: floats at top, fades in/out without affecting layout
-                    Positioned(
-                      top: 0, left: 0, right: 0,
-                      child: _AnimatedToggleBar(
-                        visible: toggleVisible,
-                        child: _MarkdownToggleBar(
-                          isPreview: _previewPaths.contains(activeTab.filePath),
-                          onToggle: () => setState(() {
-                            final path = activeTab.filePath;
-                            if (_previewPaths.contains(path)) {
-                              _previewPaths.remove(path);
-                            } else {
-                              _previewPaths.add(path);
-                            }
-                          }),
+                    // Toggle bar: floats at top, fades in/out — hidden in immersive mode.
+                    if (!immersive)
+                      Positioned(
+                        top: 0, left: 0, right: 0,
+                        child: _AnimatedToggleBar(
+                          visible: toggleVisible,
+                          child: _MarkdownToggleBar(
+                            isPreview: _previewPaths.contains(activeTab.filePath),
+                            onToggle: () => setState(() {
+                              final path = activeTab.filePath;
+                              if (_previewPaths.contains(path)) {
+                                _previewPaths.remove(path);
+                              } else {
+                                _previewPaths.add(path);
+                              }
+                              SessionPrefs.savePreviewPaths(_previewPaths.toList());
+                            }),
+                          ),
                         ),
                       ),
-                    ),
+                    // Immersive-mode exit button (top-right corner).
+                    if (immersive && widget.onToggleImmersive != null)
+                      Positioned(
+                        top: 8, right: 8,
+                        child: _ImmersiveButton(
+                          icon: Icons.close_fullscreen_rounded,
+                          tooltip: 'Exit focus mode',
+                          onTap: widget.onToggleImmersive!,
+                        ),
+                      ),
+                    // Enter-immersive button — shown when in a visual preview and not already immersive.
+                    if (!immersive && isVisualPreview && widget.onToggleImmersive != null)
+                      Positioned(
+                        bottom: 8, right: 8,
+                        child: _ImmersiveButton(
+                          icon: Icons.open_in_full_rounded,
+                          tooltip: 'Focus mode — hide chrome',
+                          onTap: widget.onToggleImmersive!,
+                        ),
+                      ),
                   ],
                 ),
               ),
@@ -408,6 +470,65 @@ class _ModeButton extends StatelessWidget {
               ),
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+// ── Immersive mode toggle button ───────────────────────────────────────────
+
+class _ImmersiveButton extends StatefulWidget {
+  const _ImmersiveButton({
+    required this.icon,
+    required this.tooltip,
+    required this.onTap,
+  });
+  final IconData icon;
+  final String tooltip;
+  final VoidCallback onTap;
+
+  @override
+  State<_ImmersiveButton> createState() => _ImmersiveButtonState();
+}
+
+class _ImmersiveButtonState extends State<_ImmersiveButton> {
+  bool _hovered = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: widget.tooltip,
+      waitDuration: const Duration(milliseconds: 600),
+      child: MouseRegion(
+        cursor: SystemMouseCursors.click,
+        onEnter: (_) => setState(() => _hovered = true),
+        onExit: (_) => setState(() => _hovered = false),
+        child: GestureDetector(
+          onTap: widget.onTap,
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 140),
+            width: 26,
+            height: 26,
+            decoration: BoxDecoration(
+              color: _hovered
+                  ? const Color(0xFF1E2330)
+                  : const Color(0xCC0B0D12),
+              borderRadius: BorderRadius.circular(6),
+              border: Border.all(
+                color: _hovered
+                    ? const Color(0xFF60A5FA)
+                    : const Color(0x4060A5FA),
+              ),
+            ),
+            child: Icon(
+              widget.icon,
+              size: 14,
+              color: _hovered
+                  ? const Color(0xFF60A5FA)
+                  : const Color(0x9060A5FA),
+            ),
+          ),
         ),
       ),
     );
