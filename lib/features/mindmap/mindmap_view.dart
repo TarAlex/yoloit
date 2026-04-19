@@ -701,11 +701,16 @@ class _MindMapCanvasState extends State<_MindMapCanvas> {
                 // ── Mini-map ───────────────────────────────────────────
                 BlocBuilder<MindMapCubit, MindMapState>(
                   buildWhen: (prev, next) =>
-                      prev.positions != next.positions || prev.sizes != next.sizes,
+                      prev.positions   != next.positions   ||
+                      prev.sizes       != next.sizes       ||
+                      prev.hidden      != next.hidden      ||
+                      prev.hiddenTypes != next.hiddenTypes,
                   builder: (ctx, mm) => _MiniMap(
-                    nodes:         widget.nodes,
-                    positions:     mm.positions,
-                    sizes:         mm.sizes,
+                    nodes:        widget.nodes,
+                    positions:    mm.positions,
+                    sizes:        mm.sizes,
+                    hidden:       mm.hidden,
+                    hiddenTypes:  mm.hiddenTypes,
                     transformCtrl: widget.transformCtrl,
                     viewportSize:  viewportSize,
                     onPanTo:       widget.onPanToOffset,
@@ -1774,6 +1779,8 @@ class _MiniMap extends StatelessWidget {
     required this.nodes,
     required this.positions,
     required this.sizes,
+    required this.hidden,
+    required this.hiddenTypes,
     required this.transformCtrl,
     required this.viewportSize,
     required this.onPanTo,
@@ -1782,6 +1789,8 @@ class _MiniMap extends StatelessWidget {
   final List<MindMapNodeData> nodes;
   final Map<String, Offset> positions;
   final Map<String, Size> sizes;
+  final Set<String> hidden;
+  final Set<String> hiddenTypes;
   final TransformationController transformCtrl;
   final Size viewportSize;
   final void Function(Offset canvasCenter) onPanTo;
@@ -1790,13 +1799,20 @@ class _MiniMap extends StatelessWidget {
   static const double _mapH    = 130.0;
   static const double _padding = 240.0;
 
+  bool _isVisible(MindMapNodeData n) =>
+      !hidden.contains(n.id) && !hiddenTypes.contains(n.typeTag);
+
   Rect _canvasBounds() {
-    if (positions.isEmpty) {
+    final visiblePositions = {
+      for (final n in nodes)
+        if (_isVisible(n) && positions.containsKey(n.id)) n.id: positions[n.id]!,
+    };
+    if (visiblePositions.isEmpty) {
       return const Rect.fromLTWH(1800.0, 1800.0, 3500.0, 2000.0);
     }
     double minX = double.infinity,  minY = double.infinity;
     double maxX = -double.infinity, maxY = -double.infinity;
-    for (final e in positions.entries) {
+    for (final e in visiblePositions.entries) {
       final pos = e.value;
       final sz  = sizes[e.key] ?? const Size(200, 150);
       if (pos.dx < minX) minX = pos.dx;
@@ -1844,7 +1860,7 @@ class _MiniMap extends StatelessWidget {
               borderRadius: BorderRadius.circular(7),
               child: CustomPaint(
                 painter: _MiniMapPainter(
-                  nodes:        nodes,
+                  nodes:        nodes.where(_isVisible).toList(),
                   positions:    positions,
                   sizes:        sizes,
                   bounds:       bounds,
