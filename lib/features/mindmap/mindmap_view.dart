@@ -600,7 +600,7 @@ class _MindMapCanvasState extends State<_MindMapCanvas> {
           // ── Group sidebar (left) ──────────────────────────────────────
           Positioned(
             top: 8, left: 8, bottom: 8,
-            child: _GroupSidebar(nodes: widget.nodes),
+            child: _GroupSidebar(),
           ),
         ],
       ),
@@ -1017,9 +1017,10 @@ class _ToolBtn extends StatelessWidget {
 
 // ── Group sidebar ──────────────────────────────────────────────────────────
 
+// ── Workspace-tree sidebar ─────────────────────────────────────────────────
+
 class _GroupSidebar extends StatefulWidget {
-  const _GroupSidebar({required this.nodes});
-  final List<MindMapNodeData> nodes;
+  const _GroupSidebar();
 
   @override
   State<_GroupSidebar> createState() => _GroupSidebarState();
@@ -1027,46 +1028,12 @@ class _GroupSidebar extends StatefulWidget {
 
 class _GroupSidebarState extends State<_GroupSidebar> {
   bool _collapsed = false;
-  final _expandedGroups = <String>{};
-
-  static const _builtinGroups = [
-    ('ws',      'Workspaces',           Icons.folder_copy_outlined),
-    ('agent',   'Sessions / Terminals', Icons.terminal),
-    ('repo',    'Repositories',         Icons.source),
-    ('branch',  'Branches',             Icons.alt_route),
-    ('files',   'Files Changed',        Icons.insert_drive_file_outlined),
-    ('tree',    'File Tree',            Icons.account_tree_outlined),
-    ('diff',    'Diff / Git Changes',   Icons.compare_arrows_rounded),
-    ('editor',  'Editor',               Icons.code),
-    ('run',     'Runs',                 Icons.play_circle_outline),
-  ];
-
-  /// Merge built-in + plugin groups (no duplicates).
-  List<(String, String, IconData)> get _groups {
-    final seen = <String>{};
-    final result = <(String, String, IconData)>[];
-    for (final g in _builtinGroups) {
-      seen.add(g.$1);
-      result.add(g);
-    }
-    for (final pg in MindMapPluginRegistry.instance.sidebarGroups) {
-      if (seen.add(pg.tag)) result.add((pg.tag, pg.label, pg.icon));
-    }
-    return result;
-  }
+  // Set of node ids whose children are expanded in the tree.
+  final _expandedIds = <String>{};
 
   @override
   Widget build(BuildContext context) {
-    // Count nodes per tag.
-    final counts = <String, int>{};
-    for (final n in widget.nodes) {
-      counts[n.typeTag] = (counts[n.typeTag] ?? 0) + 1;
-    }
-
     return BlocBuilder<MindMapCubit, MindMapState>(
-      buildWhen: (p, n) =>
-          p.hiddenTypes != n.hiddenTypes ||
-          p.hidden      != n.hidden,
       builder: (context, mm) {
         if (_collapsed) {
           return _SidebarToggle(
@@ -1074,6 +1041,35 @@ class _GroupSidebarState extends State<_GroupSidebar> {
             onTap: () => setState(() => _collapsed = false),
           );
         }
+
+        // ── Build adjacency from connections ──────────────────────────────
+        final nodeById = <String, MindMapNodeData>{
+          for (final n in mm.nodes) n.id: n,
+        };
+        final childMap = <String, List<String>>{};
+        for (final c in mm.connections) {
+          (childMap[c.fromId] ??= []).add(c.toId);
+        }
+
+        final workspaces = mm.nodes.whereType<WorkspaceNodeData>().toList();
+
+        // Auto-expand workspaces that have never been seen before.
+        for (final ws in workspaces) {
+          _expandedIds.add(ws.id); // add is a no-op if already present
+        }
+
+        // Nodes reachable from any workspace (excluding workspace itself).
+        final reachable = <String>{};
+        for (final ws in workspaces) {
+          _collectIds(ws.id, childMap, reachable);
+        }
+        // Orphans: not a workspace AND not reachable from any workspace.
+        final orphans = mm.nodes
+            .where((n) => n is! WorkspaceNodeData && !reachable.contains(n.id))
+            .toList();
+
+        final cubit = context.read<MindMapCubit>();
+
         return Container(
           width: 220,
           decoration: BoxDecoration(
@@ -1085,12 +1081,12 @@ class _GroupSidebarState extends State<_GroupSidebar> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              // Header
+              // ── Header ────────────────────────────────────────────────
               Padding(
                 padding: const EdgeInsets.fromLTRB(10, 8, 4, 8),
                 child: Row(
                   children: [
-                    const Icon(Icons.filter_list, size: 14, color: Color(0xFF7C6BFF)),
+                    const Icon(Icons.account_tree, size: 14, color: Color(0xFF7C6BFF)),
                     const SizedBox(width: 6),
                     const Expanded(
                       child: Text(
@@ -1105,13 +1101,11 @@ class _GroupSidebarState extends State<_GroupSidebar> {
                     ),
                     if (mm.hidden.isNotEmpty || mm.hiddenTypes.isNotEmpty)
                       InkWell(
-                        onTap: () => context.read<MindMapCubit>().showAllNodes(),
+                        onTap: () => cubit.showAllNodes(),
                         child: const Padding(
                           padding: EdgeInsets.all(4),
-                          child: Text(
-                            'Show all',
-                            style: TextStyle(fontSize: 9, color: Color(0xFF7C6BFF)),
-                          ),
+                          child: Text('Show all',
+                              style: TextStyle(fontSize: 9, color: Color(0xFF7C6BFF))),
                         ),
                       ),
                     InkWell(
@@ -1125,46 +1119,68 @@ class _GroupSidebarState extends State<_GroupSidebar> {
                 ),
               ),
               const Divider(height: 1, color: Color(0xFF1E2330)),
-              // Quick-create actions row
+              // ── + Workspace action ────────────────────────────────────
               Padding(
                 padding: const EdgeInsets.fromLTRB(8, 8, 8, 4),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: _SidebarAction(
-                        icon: Icons.create_new_folder_outlined,
-                        label: '+ Workspace',
-                        onTap: () => _createWorkspace(context),
-                      ),
-                    ),
-                  ],
+                child: _SidebarAction(
+                  icon: Icons.create_new_folder_outlined,
+                  label: '+ Workspace',
+                  onTap: () => _createWorkspace(context),
                 ),
               ),
-              // Group list
+              // ── Tree list ─────────────────────────────────────────────
               Flexible(
                 child: ListView(
-                  padding: const EdgeInsets.symmetric(vertical: 4),
+                  padding: const EdgeInsets.only(bottom: 8),
                   children: [
-                    for (final g in _groups)
-                      _GroupRow(
-                        tag:      g.$1,
-                        label:    g.$2,
-                        icon:     g.$3,
-                        count:    counts[g.$1] ?? 0,
-                        hidden:   mm.hiddenTypes.contains(g.$1),
-                        expanded: _expandedGroups.contains(g.$1),
-                        onToggleHidden: () =>
-                            context.read<MindMapCubit>().toggleType(g.$1),
+                    for (final ws in workspaces) ...[
+                      _WsRow(
+                        ws:             ws,
+                        expanded:       _expandedIds.contains(ws.id),
+                        hidden:         mm.hidden.contains(ws.id) ||
+                                        mm.hiddenTypes.contains(ws.typeTag),
                         onToggleExpand: () => setState(() {
-                          if (_expandedGroups.contains(g.$1)) {
-                            _expandedGroups.remove(g.$1);
-                          } else {
-                            _expandedGroups.add(g.$1);
-                          }
+                          _expandedIds.contains(ws.id)
+                              ? _expandedIds.remove(ws.id)
+                              : _expandedIds.add(ws.id);
                         }),
-                        items: widget.nodes.where((n) => n.typeTag == g.$1).toList(),
-                        individualHidden: mm.hidden,
+                        onToggleHide: () => mm.hidden.contains(ws.id)
+                            ? cubit.showNode(ws.id)
+                            : cubit.hideNode(ws.id),
                       ),
+                      if (_expandedIds.contains(ws.id))
+                        ..._buildSubtree(
+                          ws.id, childMap, nodeById, mm, cubit, depth: 1,
+                          visited: {ws.id},
+                        ),
+                    ],
+                    // Orphan nodes (editor, plugin cards not linked to any ws).
+                    if (orphans.isNotEmpty) ...[
+                      const Padding(
+                        padding: EdgeInsets.fromLTRB(10, 8, 8, 2),
+                        child: Text(
+                          'OTHER',
+                          style: TextStyle(
+                            fontSize: 9,
+                            fontWeight: FontWeight.w700,
+                            color: Color(0xFF4A5680),
+                            letterSpacing: 1,
+                          ),
+                        ),
+                      ),
+                      for (final n in orphans)
+                        _TreeRow(
+                          node: n,
+                          depth: 1,
+                          hidden: mm.hidden.contains(n.id) ||
+                              mm.hiddenTypes.contains(n.typeTag),
+                          hasChildren: false,
+                          expanded: false,
+                          onToggle: () => mm.hidden.contains(n.id)
+                              ? cubit.showNode(n.id)
+                              : cubit.hideNode(n.id),
+                        ),
+                    ],
                   ],
                 ),
               ),
@@ -1174,7 +1190,251 @@ class _GroupSidebarState extends State<_GroupSidebar> {
       },
     );
   }
+
+  /// DFS through the connection graph, building [_TreeRow] widgets.
+  List<Widget> _buildSubtree(
+    String parentId,
+    Map<String, List<String>> childMap,
+    Map<String, MindMapNodeData> nodeById,
+    MindMapState mm,
+    MindMapCubit cubit, {
+    required int depth,
+    required Set<String> visited,
+  }) {
+    final widgets = <Widget>[];
+    for (final childId in (childMap[parentId] ?? [])) {
+      if (!visited.add(childId)) continue;
+      final node = nodeById[childId];
+      if (node == null) continue;
+      final isHidden = mm.hidden.contains(node.id) ||
+          mm.hiddenTypes.contains(node.typeTag);
+      final hasChildren = (childMap[node.id] ?? [])
+          .any((id) => !visited.contains(id) && nodeById.containsKey(id));
+      final isExpanded = _expandedIds.contains(node.id);
+
+      widgets.add(_TreeRow(
+        node: node,
+        depth: depth,
+        hidden: isHidden,
+        hasChildren: hasChildren,
+        expanded: isExpanded,
+        onToggle: () => mm.hidden.contains(node.id)
+            ? cubit.showNode(node.id)
+            : cubit.hideNode(node.id),
+        onToggleExpand: hasChildren
+            ? () => setState(() => isExpanded
+                ? _expandedIds.remove(node.id)
+                : _expandedIds.add(node.id))
+            : null,
+      ));
+
+      if (hasChildren && isExpanded) {
+        widgets.addAll(_buildSubtree(
+          node.id, childMap, nodeById, mm, cubit,
+          depth: depth + 1,
+          visited: {...visited},
+        ));
+      }
+    }
+    return widgets;
+  }
+
+  /// Collect all node ids reachable from [id] via [childMap].
+  void _collectIds(String id, Map<String, List<String>> childMap, Set<String> out) {
+    for (final child in (childMap[id] ?? [])) {
+      if (out.add(child)) _collectIds(child, childMap, out);
+    }
+  }
 }
+
+// ── Workspace header row ───────────────────────────────────────────────────
+
+class _WsRow extends StatelessWidget {
+  const _WsRow({
+    required this.ws,
+    required this.expanded,
+    required this.hidden,
+    required this.onToggleExpand,
+    required this.onToggleHide,
+  });
+  final WorkspaceNodeData ws;
+  final bool expanded;
+  final bool hidden;
+  final VoidCallback onToggleExpand;
+  final VoidCallback onToggleHide;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onToggleExpand,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+        child: Row(
+          children: [
+            GestureDetector(
+              onTap: onToggleHide,
+              child: Padding(
+                padding: const EdgeInsets.all(2),
+                child: Icon(
+                  hidden ? Icons.visibility_off : Icons.visibility,
+                  size: 13,
+                  color: hidden ? const Color(0xFF4A5680) : const Color(0xFF7C6BFF),
+                ),
+              ),
+            ),
+            const SizedBox(width: 6),
+            Icon(
+              Icons.folder_copy_outlined,
+              size: 13,
+              color: hidden ? const Color(0xFF4A5680) : const Color(0xFF7C6BFF),
+            ),
+            const SizedBox(width: 6),
+            Expanded(
+              child: Text(
+                ws.workspace.name,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w700,
+                  color: hidden ? const Color(0xFF4A5680) : const Color(0xFFE8E8FF),
+                ),
+              ),
+            ),
+            Icon(
+              expanded ? Icons.expand_less : Icons.expand_more,
+              size: 13,
+              color: const Color(0xFF6B7898),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ── Child node row (with depth indent) ────────────────────────────────────
+
+class _TreeRow extends StatelessWidget {
+  const _TreeRow({
+    required this.node,
+    required this.depth,
+    required this.hidden,
+    required this.onToggle,
+    this.hasChildren = false,
+    this.expanded = false,
+    this.onToggleExpand,
+  });
+  final MindMapNodeData node;
+  final int depth;
+  final bool hidden;
+  final VoidCallback onToggle;
+  final bool hasChildren;
+  final bool expanded;
+  final VoidCallback? onToggleExpand;
+
+  ({String label, IconData icon, Color color}) get _meta => switch (node) {
+    AgentNodeData    d => (
+        label: d.session.displayName,
+        icon:  Icons.terminal,
+        color: d.isRunning ? const Color(0xFF34D399) : const Color(0xFF6B7898),
+      ),
+    RepoNodeData     d => (label: d.repoName, icon: Icons.source, color: const Color(0xFF9AA3BF)),
+    BranchNodeData   d => (label: d.branch, icon: Icons.alt_route, color: const Color(0xFF60A5FA)),
+    FilesNodeData    d => (
+        label: p.basename(d.repoPath),
+        icon:  Icons.insert_drive_file_outlined,
+        color: const Color(0xFFFFAA33),
+      ),
+    FileTreeNodeData d => (
+        label: d.repoName ?? 'Tree',
+        icon:  Icons.account_tree_outlined,
+        color: const Color(0xFF34D399),
+      ),
+    DiffNodeData     d => (
+        label: d.repoName ?? 'Diff',
+        icon:  Icons.compare_arrows_rounded,
+        color: const Color(0xFF7C6BFF),
+      ),
+    EditorNodeData   d => (
+        label: p.basename(d.filePath),
+        icon:  Icons.code,
+        color: const Color(0xFFFFCC44),
+      ),
+    RunNodeData      d => (
+        label: d.session.config.name,
+        icon:  Icons.play_circle_outline,
+        color: d.session.status == RunStatus.running
+            ? const Color(0xFFFF6B6B)
+            : const Color(0xFF6B7898),
+      ),
+    SessionNodeData  d => (label: d.session.displayName, icon: Icons.terminal, color: const Color(0xFF6B7898)),
+    MindMapPluginNodeData _ => (label: node.id, icon: Icons.extension_outlined, color: const Color(0xFF9AA3BF)),
+    WorkspaceNodeData  _   => (label: node.id, icon: Icons.folder_outlined, color: const Color(0xFF7C6BFF)),
+  };
+
+  @override
+  Widget build(BuildContext context) {
+    final m = _meta;
+    final indent = 10.0 + depth * 14.0;
+    return InkWell(
+      onTap: hasChildren ? onToggleExpand : onToggle,
+      child: Padding(
+        padding: EdgeInsets.fromLTRB(indent, 3, 8, 3),
+        child: Row(
+          children: [
+            // Vertical tree line hint
+            Container(
+              width: 1,
+              height: 16,
+              margin: const EdgeInsets.only(right: 5),
+              color: const Color(0xFF2A3040),
+            ),
+            GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: onToggle,
+              child: Padding(
+                padding: const EdgeInsets.all(2),
+                child: Icon(
+                  hidden ? Icons.visibility_off : Icons.visibility,
+                  size: 11,
+                  color: hidden ? const Color(0xFF4A5680) : const Color(0x997C6BFF),
+                ),
+              ),
+            ),
+            const SizedBox(width: 4),
+            Icon(
+              m.icon,
+              size: 11,
+              color: hidden ? const Color(0xFF3D475E) : m.color,
+            ),
+            const SizedBox(width: 5),
+            Expanded(
+              child: Text(
+                m.label,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 10,
+                  color: hidden ? const Color(0xFF4A5680) : const Color(0xFFB0B8D0),
+                ),
+              ),
+            ),
+            if (hasChildren) ...[
+              const SizedBox(width: 2),
+              Icon(
+                expanded ? Icons.expand_less : Icons.expand_more,
+                size: 11,
+                color: const Color(0xFF6B7898),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+
+// ── Sidebar collapsed toggle ───────────────────────────────────────────────
 
 class _SidebarToggle extends StatelessWidget {
   const _SidebarToggle({required this.collapsed, required this.onTap});
@@ -1198,153 +1458,6 @@ class _SidebarToggle extends StatelessWidget {
             ),
           ),
           child: const Icon(Icons.chevron_right, size: 16, color: Color(0xFF7C6BFF)),
-        ),
-      ),
-    );
-  }
-}
-
-class _GroupRow extends StatelessWidget {
-  const _GroupRow({
-    required this.tag,
-    required this.label,
-    required this.icon,
-    required this.count,
-    required this.hidden,
-    required this.expanded,
-    required this.onToggleHidden,
-    required this.onToggleExpand,
-    required this.items,
-    required this.individualHidden,
-  });
-  final String tag;
-  final String label;
-  final IconData icon;
-  final int count;
-  final bool hidden;
-  final bool expanded;
-  final VoidCallback onToggleHidden;
-  final VoidCallback onToggleExpand;
-  final List<MindMapNodeData> items;
-  final Set<String> individualHidden;
-
-  @override
-  Widget build(BuildContext context) {
-    final faded = hidden || count == 0;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        InkWell(
-          onTap: count == 0 ? null : onToggleExpand,
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
-            child: Row(
-              children: [
-                GestureDetector(
-                  onTap: count == 0 ? null : onToggleHidden,
-                  child: Padding(
-                    padding: const EdgeInsets.all(2),
-                    child: Icon(
-                      hidden ? Icons.visibility_off : Icons.visibility,
-                      size: 13,
-                      color: hidden ? const Color(0xFF4A5680) : const Color(0xFF7C6BFF),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 6),
-                Icon(icon, size: 12, color: faded ? const Color(0xFF4A5680) : const Color(0xFF9AA3BF)),
-                const SizedBox(width: 6),
-                Expanded(
-                  child: Text(
-                    label,
-                    style: TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w600,
-                      color: faded ? const Color(0xFF4A5680) : const Color(0xFFCECEEE),
-                    ),
-                  ),
-                ),
-                Text(
-                  count.toString(),
-                  style: TextStyle(
-                    fontSize: 10,
-                    color: faded ? const Color(0xFF3D475E) : const Color(0xFF6B7898),
-                  ),
-                ),
-                if (count > 0) ...[
-                  const SizedBox(width: 4),
-                  Icon(
-                    expanded ? Icons.expand_less : Icons.expand_more,
-                    size: 13,
-                    color: const Color(0xFF6B7898),
-                  ),
-                ],
-              ],
-            ),
-          ),
-        ),
-        if (expanded && count > 0)
-          for (final n in items)
-            _IndividualRow(
-              node: n,
-              hidden: individualHidden.contains(n.id),
-            ),
-      ],
-    );
-  }
-}
-
-class _IndividualRow extends StatelessWidget {
-  const _IndividualRow({required this.node, required this.hidden});
-  final MindMapNodeData node;
-  final bool hidden;
-
-  String _label() {
-    final data = node;
-    if (data is WorkspaceNodeData) return data.workspace.name;
-    if (data is AgentNodeData)     return data.session.displayName;
-    if (data is RepoNodeData)      return data.repoName;
-    if (data is BranchNodeData)    return data.branch;
-    if (data is FilesNodeData)     return p.basename(data.repoPath);
-    if (data is FileTreeNodeData)  return data.repoName ?? 'Tree';
-    if (data is DiffNodeData)      return data.repoName != null ? 'Diff · ${data.repoName}' : 'Diff';
-    if (data is EditorNodeData)    return p.basename(data.filePath);
-    if (data is RunNodeData)       return data.session.config.name;
-    return node.id;
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return InkWell(
-      onTap: () {
-        final cubit = context.read<MindMapCubit>();
-        if (hidden) {
-          cubit.showNode(node.id);
-        } else {
-          cubit.hideNode(node.id);
-        }
-      },
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(32, 3, 8, 3),
-        child: Row(
-          children: [
-            Icon(
-              hidden ? Icons.visibility_off : Icons.visibility,
-              size: 11,
-              color: hidden ? const Color(0xFF4A5680) : const Color(0x997C6BFF),
-            ),
-            const SizedBox(width: 6),
-            Expanded(
-              child: Text(
-                _label(),
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  fontSize: 10,
-                  color: hidden ? const Color(0xFF4A5680) : const Color(0xFFB0B8D0),
-                ),
-              ),
-            ),
-          ],
         ),
       ),
     );
