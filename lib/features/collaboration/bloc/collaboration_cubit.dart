@@ -5,16 +5,18 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../../mindmap/bloc/mindmap_cubit.dart';
 import '../../mindmap/bloc/mindmap_state.dart';
-import '../generated/mindmap_sync.pb.dart';
+import '../model/sync_message.dart';
 import '../services/collaboration_client.dart';
 import '../services/collaboration_server.dart';
 import 'collaboration_state.dart';
 
-/// Orchestrates real-time collaboration:
-/// - **Host mode**: starts a [CollaborationServer], subscribes to [MindMapCubit]
-///   state changes, and broadcasts proto snapshots/deltas to all clients.
-/// - **Guest mode**: starts a [CollaborationClient], receives proto messages,
-///   and applies them to the local [MindMapCubit].
+/// Orchestrates real-time collaboration over a local WebSocket connection.
+///
+/// **Host mode**: starts [CollaborationServer], subscribes to [MindMapCubit]
+/// changes, and broadcasts JSON snapshots/deltas to all connected clients.
+///
+/// **Guest mode**: starts [CollaborationClient], receives JSON messages, and
+/// applies them to the local [MindMapCubit].
 class CollaborationCubit extends Cubit<CollaborationState> {
   CollaborationCubit({required this.mindMapCubit})
       : super(const CollaborationState());
@@ -24,29 +26,21 @@ class CollaborationCubit extends Cubit<CollaborationState> {
   CollaborationServer? _server;
   CollaborationClient? _client;
   StreamSubscription<MindMapState>? _stateSub;
-
   MindMapState? _lastBroadcast;
 
   // ── Host ─────────────────────────────────────────────────────────────────
 
-  /// Starts the WebSocket server and begins broadcasting mindmap state.
   Future<void> startHosting({int port = 40401}) async {
     if (!state.isIdle) return;
     emit(state.copyWith(error: ''));
     try {
       _server = CollaborationServer(
-        port:          port,
-        onClientEvent: _onClientEvent,
+        port:            port,
+        onClientMessage: _onClientMessage,
       );
       final address = await _server!.start();
-
-      // Subscribe to MindMapCubit changes and broadcast deltas.
       _stateSub = mindMapCubit.stream.listen(_onMindMapStateChanged);
-
-      emit(state.copyWith(
-        mode:    CollaborationMode.hosting,
-        address: address,
-      ));
+      emit(state.copyWith(mode: CollaborationMode.hosting, address: address));
     } catch (e) {
       _server = null;
       emit(state.copyWith(error: 'Failed to start server: $e'));
@@ -56,20 +50,19 @@ class CollaborationCubit extends Cubit<CollaborationState> {
   Future<void> stopHosting() async {
     await _server?.stop();
     await _stateSub?.cancel();
-    _server   = null;
-    _stateSub = null;
+    _server        = null;
+    _stateSub      = null;
     _lastBroadcast = null;
     emit(const CollaborationState());
   }
 
   // ── Guest ────────────────────────────────────────────────────────────────
 
-  /// Connects to a host at [host]:[port] and mirrors its mindmap state locally.
   Future<void> connect(String host, {int port = 40401}) async {
     if (!state.isIdle) return;
     emit(state.copyWith(error: ''));
     try {
-      _client = CollaborationClient(onEnvelope: _onEnvelopeFromHost);
+      _client = CollaborationClient(onMessage: _onMessageFromHost);
       await _client!.connect(host, port);
       emit(state.copyWith(
         mode:    CollaborationMode.connected,
@@ -87,7 +80,7 @@ class CollaborationCubit extends Cubit<CollaborationState> {
     emit(const CollaborationState());
   }
 
-  // ── State → proto (host side) ─────────────────────────────────────────────
+  // ── Host: MindMap → broadcast ─────────────────────────────────────────────
 
   void _onMindMapStateChanged(MindMapState mmState) {
     final prev = _lastBroadcast;
@@ -95,131 +88,127 @@ class CollaborationCubit extends Cubit<CollaborationState> {
     if (_server == null || _server!.clientCount == 0) return;
 
     if (prev == null) {
-      // First broadcast — send full snapshot.
-      _server!.broadcastSnapshot(_makeSnapshot(mmState));
+      _server!.broadcastRaw(_buildSnapshot(mmState));
       return;
     }
 
-    // Send fine-grained delta events for changed positions and sizes.
     for (final entry in mmState.positions.entries) {
-      final id  = entry.key;
-      final pos = entry.value;
-      final old = prev.positions[id];
-      if (old == null || old.dx != pos.dx || old.dy != pos.dy) {
-        _server!.broadcastDelta(SyncEnvelope(
-          senderId: 'host',
-          delta: DeltaEvent(
-            moved: NodeMoved(nodeId: id, x: pos.dx.toFloat(), y: pos.dy.toFloat()),
-          ),
-        ));
+      final old = prev.positions[entry.key];
+      if (old == null || old != entry.value) {
+        _server!.broadcastRaw(SyncMessage.move(
+            entry.key, entry.value.dx, entry.value.dy));
       }
     }
     for (final entry in mmState.sizes.entries) {
-      final id  = entry.key;
-      final sz  = entry.value;
-      final old = prev.sizes[id];
-      if (old == null || old.width != sz.width || old.height != sz.height) {
-        _server!.broadcastDelta(SyncEnvelope(
-          senderId: 'host',
-          delta: DeltaEvent(
-            resized: NodeResized(
-              nodeId: id,
-              width:   sz.width.toFloat(),
-              height:  sz.height.toFloat(),
-            ),
-          ),
-        ));
+      final old = prev.sizes[entry.key];
+      if (old == null || old != entry.value) {
+        _server!.broadcastRaw(SyncMessage.resize(
+            entry.key, entry.value.width, entry.value.height));
       }
     }
-    // Hidden set changes.
-    final newHidden = mmState.hidden.difference(prev.hidden);
-    final nowShown  = prev.hidden.difference(mmState.hidden);
-    for (final id in newHidden) {
-      _server!.broadcastDelta(SyncEnvelope(
-        senderId: 'host',
-        delta: DeltaEvent(toggled: NodeToggled(nodeId: id, hidden: true)),
-      ));
+    for (final id in mmState.hidden.difference(prev.hidden)) {
+      _server!.broadcastRaw(SyncMessage.toggle(id, hidden: true));
     }
-    for (final id in nowShown) {
-      _server!.broadcastDelta(SyncEnvelope(
-        senderId: 'host',
-        delta: DeltaEvent(toggled: NodeToggled(nodeId: id, hidden: false)),
-      ));
+    for (final id in prev.hidden.difference(mmState.hidden)) {
+      _server!.broadcastRaw(SyncMessage.toggle(id, hidden: false));
     }
   }
 
-  SyncEnvelope _makeSnapshot(MindMapState mm) => SyncEnvelope(
-    senderId: 'host',
-    snapshot: StateSnapshot(
-      positions:    mm.positions.entries.map((e) => MapEntry(e.key, Vec2(x: e.value.dx.toFloat(), y: e.value.dy.toFloat()))),
-      sizes:        mm.sizes.entries.map((e) => MapEntry(e.key, Vec2(x: e.value.width.toFloat(), y: e.value.height.toFloat()))),
-      hidden:       mm.hidden.toList(),
-      hiddenTypes: mm.hiddenTypes.toList(),
-    ),
+  SyncMessage _buildSnapshot(MindMapState mm) => SyncMessage.snapshot(
+    positions:   mm.positions.map((k, v) => MapEntry(k, [v.dx, v.dy])),
+    sizes:       mm.sizes.map((k, v) => MapEntry(k, [v.width, v.height])),
+    hidden:      mm.hidden.toList(),
+    hiddenTypes: mm.hiddenTypes.toList(),
   );
 
-  // ── Proto → state (guest side) ─────────────────────────────────────────────
+  // ── Guest: received from host ─────────────────────────────────────────────
 
-  void _onEnvelopeFromHost(SyncEnvelope env) {
-    if (env.hasSnapshot()) {
-      _applySnapshot(env.snapshot);
-    } else if (env.hasDelta()) {
-      _applyDelta(env.delta);
-    } else if (env.hasDisconnected()) {
-      // Server disconnected — fall back to idle.
-      disconnect();
+  void _onMessageFromHost(SyncMessage msg) {
+    switch (msg.type) {
+      case SyncMessage.kSnapshot:
+        _applySnapshot(msg.payload);
+      case SyncMessage.kDeltaMove:
+        _applyMove(msg.payload);
+      case SyncMessage.kDeltaResize:
+        _applyResize(msg.payload);
+      case SyncMessage.kDeltaToggle:
+        _applyToggle(msg.payload);
+      case SyncMessage.kConnected:
+        final map = Map<String, String>.from(state.peers)
+          ..[msg.payload['id'] as String] = msg.payload['name'] as String;
+        emit(state.copyWith(peers: map, peerCount: map.length));
+      case SyncMessage.kDisconnected:
+        if (msg.payload['id'] == 'server') {
+          disconnect();
+        } else {
+          final map = Map<String, String>.from(state.peers)
+            ..remove(msg.payload['id']);
+          emit(state.copyWith(peers: map, peerCount: map.length));
+        }
     }
   }
 
-  void _applySnapshot(StateSnapshot snap) {
-    final positions = snap.positions.map(
-        (k, v) => MapEntry(k, Offset(v.x.toDouble(), v.y.toDouble())));
-    final sizes = snap.sizes.map(
-        (k, v) => MapEntry(k, Size(v.x.toDouble(), v.y.toDouble())));
+  void _applySnapshot(Map<String, dynamic> p) {
+    final posRaw  = (p['positions']  as Map<String, dynamic>?) ?? {};
+    final szRaw   = (p['sizes']      as Map<String, dynamic>?) ?? {};
+    final hidden  = ((p['hidden']    as List?) ?? []).cast<String>().toSet();
+    final hTypes  = ((p['hiddenTypes'] as List?) ?? []).cast<String>().toSet();
+
+    final positions = posRaw.map((k, v) {
+      final l = (v as List).cast<num>();
+      return MapEntry(k, Offset(l[0].toDouble(), l[1].toDouble()));
+    });
+    final sizes = szRaw.map((k, v) {
+      final l = (v as List).cast<num>();
+      return MapEntry(k, Size(l[0].toDouble(), l[1].toDouble()));
+    });
     mindMapCubit.applyRemoteSnapshot(
       positions:   positions,
       sizes:       sizes,
-      hidden:      snap.hidden.toSet(),
-      hiddenTypes: snap.hiddenTypes.toSet(),
+      hidden:      hidden,
+      hiddenTypes: hTypes,
     );
   }
 
-  void _applyDelta(DeltaEvent delta) {
-    if (delta.hasMoved()) {
-      final m = delta.moved;
-      mindMapCubit.applyRemoteMove(
-          m.nodeId, Offset(m.x.toDouble(), m.y.toDouble()));
-    } else if (delta.hasResized()) {
-      final r = delta.resized;
-      mindMapCubit.applyRemoteResize(
-          r.nodeId, Size(r.width.toDouble(), r.height.toDouble()));
-    } else if (delta.hasToggled()) {
-      final t = delta.toggled;
-      if (t.hidden) {
-        mindMapCubit.hideNode(t.nodeId);
-      } else {
-        mindMapCubit.showNode(t.nodeId);
-      }
+  void _applyMove(Map<String, dynamic> p) => mindMapCubit.applyRemoteMove(
+    p['id'] as String,
+    Offset((p['x'] as num).toDouble(), (p['y'] as num).toDouble()),
+  );
+
+  void _applyResize(Map<String, dynamic> p) => mindMapCubit.applyRemoteResize(
+    p['id'] as String,
+    Size((p['w'] as num).toDouble(), (p['h'] as num).toDouble()),
+  );
+
+  void _applyToggle(Map<String, dynamic> p) {
+    final id     = p['id'] as String;
+    final hidden = p['hidden'] as bool;
+    if (hidden) {
+      mindMapCubit.hideNode(id);
+    } else {
+      mindMapCubit.showNode(id);
     }
   }
 
-  // ── Client events received by host ────────────────────────────────────────
+  // ── Host: client messages ─────────────────────────────────────────────────
 
-  void _onClientEvent(SyncEnvelope env) {
-    if (env.hasHello()) {
-      final h   = env.hello;
-      final map = Map<String, String>.from(state.peers)
-        ..[h.clientId] = h.clientName;
-      emit(state.copyWith(peers: map, peerCount: map.length));
-      // Send full snapshot to the newly connected client.
-      _server!.broadcastSnapshot(_makeSnapshot(mindMapCubit.state));
-    } else if (env.hasDisconnected()) {
-      final id  = env.disconnected.clientId;
-      final map = Map<String, String>.from(state.peers)..remove(id);
-      emit(state.copyWith(peers: map, peerCount: map.length));
-    } else if (env.hasDelta()) {
-      // Client is moving a node — apply locally and re-broadcast.
-      _applyDelta(env.delta);
+  void _onClientMessage(String clientId, SyncMessage msg) {
+    switch (msg.type) {
+      case SyncMessage.kHello:
+        final id   = msg.payload['id']   as String;
+        final name = msg.payload['name'] as String;
+        final map  = Map<String, String>.from(state.peers)..[id] = name;
+        emit(state.copyWith(peers: map, peerCount: map.length));
+        // Send full snapshot to newly connected client.
+        _server!.sendTo(clientId, _buildSnapshot(mindMapCubit.state));
+      case SyncMessage.kDeltaMove:
+        _applyMove(msg.payload);
+      case SyncMessage.kDeltaResize:
+        _applyResize(msg.payload);
+      case SyncMessage.kDeltaToggle:
+        _applyToggle(msg.payload);
+      default:
+        break;
     }
   }
 
@@ -229,8 +218,4 @@ class CollaborationCubit extends Cubit<CollaborationState> {
     await disconnect();
     await super.close();
   }
-}
-
-extension _DoubleToFloat on double {
-  double toFloat() => this; // proto float is 32-bit, but Dart double is fine here
 }

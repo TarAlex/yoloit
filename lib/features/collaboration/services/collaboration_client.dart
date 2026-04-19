@@ -2,15 +2,14 @@ import 'dart:async';
 
 import 'package:web_socket_channel/web_socket_channel.dart';
 
-import '../generated/mindmap_sync.pb.dart';
+import '../model/sync_message.dart';
 
-/// WebSocket client that runs on the guest machine.
-/// Connects to a host's [CollaborationServer] and receives [SyncEnvelope]
-/// messages. The host's state is applied to the guest's BLoC via [onEnvelope].
+/// WebSocket client for the guest machine.
+/// Sends JSON text frames and receives [SyncMessage] callbacks.
 class CollaborationClient {
-  CollaborationClient({required this.onEnvelope});
+  CollaborationClient({required this.onMessage});
 
-  final void Function(SyncEnvelope env) onEnvelope;
+  final void Function(SyncMessage msg) onMessage;
 
   WebSocketChannel? _channel;
   StreamSubscription<dynamic>? _sub;
@@ -18,40 +17,28 @@ class CollaborationClient {
 
   bool get isConnected => _channel != null;
 
-  /// Connects to ws://[host]:[port] and returns when the WS handshake is done.
-  /// Throws on connection failure.
   Future<void> connect(String host, int port) async {
     final uri = Uri.parse('ws://$host:$port');
-    _channel = WebSocketChannel.connect(uri);
+    _channel  = WebSocketChannel.connect(uri);
     await _channel!.ready; // throws if unreachable
 
     _sub = _channel!.stream.listen(
-      (data) {
-        try {
-          final bytes = data is List<int> ? data : (data as dynamic).cast<int>();
-          final env   = SyncEnvelope.fromBuffer(bytes);
-          onEnvelope(env);
-        } catch (_) {}
+      (raw) {
+        final msg = SyncMessage.decode(raw);
+        if (msg != null) onMessage(msg);
       },
       onDone: () {
-        if (!_disposed) onEnvelope(SyncEnvelope(
-          senderId: 'server',
-          disconnected: ClientDisconnected(clientId: 'server'),
-        ));
+        if (!_disposed) onMessage(SyncMessage.disconnected('server'));
         _channel = null;
       },
       onError: (_) => _channel = null,
       cancelOnError: true,
     );
 
-    // Send hello handshake.
-    _send(SyncEnvelope(
-      senderId: 'guest',
-      hello: ClientHello(
-        clientId:   'guest_${DateTime.now().millisecondsSinceEpoch}',
-        clientName: 'Remote Guest',
-        version:    '1.0',
-      ),
+    // Handshake
+    _send(SyncMessage.hello(
+      clientId:   'guest_${DateTime.now().millisecondsSinceEpoch}',
+      clientName: 'Remote Guest',
     ));
   }
 
@@ -62,14 +49,9 @@ class CollaborationClient {
     _channel = null;
   }
 
-  /// Sends a delta event to the host (e.g., node drag from the guest).
-  void sendDelta(DeltaEvent delta) {
-    _send(SyncEnvelope(senderId: 'guest', delta: delta));
-  }
+  void sendMessage(SyncMessage msg) => _send(msg);
 
-  void _send(SyncEnvelope env) {
-    try {
-      _channel?.sink.add(env.writeToBuffer());
-    } catch (_) {}
+  void _send(SyncMessage msg) {
+    try { _channel?.sink.add(msg.encode()); } catch (_) {}
   }
 }
