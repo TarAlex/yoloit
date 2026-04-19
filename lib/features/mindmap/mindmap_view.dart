@@ -371,6 +371,20 @@ class _MindMapViewState extends State<MindMapView>
         content:  activeTab.content ?? '',
         language: _detectLanguage(activeTab.filePath),
       ));
+      // Connect from the matching FileTree card (longest matching repoPath wins).
+      final filePath = activeTab.filePath;
+      final matchingTree = nodes.whereType<FileTreeNodeData>()
+          .where((t) => filePath.startsWith(t.repoPath))
+          .fold<FileTreeNodeData?>(null, (best, t) =>
+              best == null || t.repoPath.length > best.repoPath.length ? t : best);
+      if (matchingTree != null) {
+        conns.add(MindMapConnection(
+          fromId: matchingTree.id,
+          toId:   editorId,
+          style:  ConnectorStyle.dashed,
+          color:  const Color(0x7060A5FA),
+        ));
+      }
     }
 
     // Run sessions — connect from the matching session/agent card.
