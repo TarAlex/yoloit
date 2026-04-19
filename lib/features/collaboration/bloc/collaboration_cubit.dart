@@ -153,22 +153,24 @@ class CollaborationCubit extends Cubit<CollaborationState> {
     }
   }
 
-  SyncMessage _buildSnapshot(MindMapState mm) => SyncMessage.snapshot(
-    positions:   mm.positions.map((k, v) => MapEntry(k, [v.dx, v.dy])),
-    sizes:       mm.sizes.map((k, v) => MapEntry(k, [v.width, v.height])),
-    hidden:      mm.hidden.toList(),
-    hiddenTypes: mm.hiddenTypes.toList(),
-    connections: mm.connections.map((c) => {
-      'from': c.fromId,
-      'to':   c.toId,
-      'style': c.style.name,
-      'color': c.color.toARGB32(),
-    }).toList(),
-    nodeContent: Map.fromEntries(mm.nodes.map((n) {
-      final content = _serializeNodeContent(n);
-      return MapEntry(n.id, content);
-    })),
-  );
+  SyncMessage _buildSnapshot(MindMapState mm) {
+    final ncEntries = mm.nodes.map((n) {
+      return MapEntry(n.id, _serializeNodeContent(n));
+    }).toList();
+    return SyncMessage.snapshot(
+      positions:   mm.positions.map((k, v) => MapEntry(k, [v.dx, v.dy])),
+      sizes:       mm.sizes.map((k, v) => MapEntry(k, [v.width, v.height])),
+      hidden:      mm.hidden.toList(),
+      hiddenTypes: mm.hiddenTypes.toList(),
+      connections: mm.connections.map((c) => {
+        'from': c.fromId,
+        'to':   c.toId,
+        'style': c.style.name,
+        'color': c.color.toARGB32(),
+      }).toList(),
+      nodeContent: Map.fromEntries(ncEntries),
+    );
+  }
 
   Map<String, dynamic> _serializeNodeContent(MindMapNodeData node) {
     return switch (node) {
@@ -447,8 +449,9 @@ class CollaborationCubit extends Cubit<CollaborationState> {
   void _onClientMessage(String clientId, SyncMessage msg) {
     switch (msg.type) {
       case SyncMessage.kHello:
-        final id   = msg.payload['id']   as String;
-        final name = msg.payload['name'] as String;
+        // Accept both wrapped {"payload":{"id":..}} and flat {"id":..} hello.
+        final id   = (msg.payload['id'] as String?) ?? (msg.senderId.isNotEmpty ? msg.senderId : clientId);
+        final name = (msg.payload['name'] as String?) ?? 'Remote';
         final map  = Map<String, String>.from(state.peers)..[id] = name;
         emit(state.copyWith(peers: map, peerCount: map.length));
         // Populate mind map from workspace/terminal state if not yet done,
@@ -476,8 +479,6 @@ class CollaborationCubit extends Cubit<CollaborationState> {
   /// terminal state (for users who haven't opened the Map View yet), then
   /// sends the full snapshot to [clientId].
   Future<void> _sendSnapshotAfterPopulate(String clientId) async {
-    // Populate both when no positions AND when nodes list is empty (positions
-    // may be restored from shared_preferences but the nodes list is transient).
     if (mindMapCubit.state.nodes.isEmpty) {
       await ensureNodesPopulated?.call();
     }

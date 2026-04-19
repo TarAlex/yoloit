@@ -88,10 +88,16 @@ class SyncMessage {
   static SyncMessage? decode(dynamic raw) {
     try {
       final m = jsonDecode(raw as String) as Map<String, dynamic>;
+      // Support both wrapped ({"type","payload":{..}}) and flat ({"type","name",...}) messages.
+      var payload = (m['payload'] as Map<String, dynamic>?) ?? <String, dynamic>{};
+      if (payload.isEmpty && m['type'] == kHello) {
+        // Flat hello: {"type":"hello","name":"X"} → wrap into payload format.
+        payload = Map<String, dynamic>.from(m)..remove('type')..remove('from');
+      }
       return SyncMessage(
         type:     m['type'] as String,
         senderId: (m['from'] as String?) ?? '',
-        payload:  (m['payload'] as Map<String, dynamic>?) ?? {},
+        payload:  payload,
       );
     } catch (_) {
       return null;
