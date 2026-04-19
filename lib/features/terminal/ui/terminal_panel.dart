@@ -700,7 +700,33 @@ class TerminalWidgetState extends State<TerminalWidget> {
       return true;
     }
 
+    // Cmd+A → select all terminal buffer content
+    if (isCmd && !isCtrl && !isAlt && key == LogicalKeyboardKey.keyA) {
+      _selectAll();
+      return true;
+    }
+
+    // Cmd+C → copy selection if one exists; otherwise let xterm send ^C
+    if (isCmd && !isCtrl && !isAlt && key == LogicalKeyboardKey.keyC) {
+      final selection = _controller.selection;
+      if (selection != null) {
+        final text = widget.session.terminal.buffer.getText(selection);
+        Clipboard.setData(ClipboardData(text: text));
+        return true;
+      }
+      // No selection — fall through so xterm sends ^C (SIGINT)
+    }
+
     return false;
+  }
+
+  void _selectAll() {
+    final terminal = widget.session.terminal;
+    _controller.setSelection(
+      terminal.buffer.createAnchor(0, terminal.buffer.height - terminal.viewHeight),
+      terminal.buffer.createAnchor(terminal.viewWidth, terminal.buffer.height - 1),
+      mode: SelectionMode.line,
+    );
   }
 
   void _writePty(String sequence) {
@@ -774,6 +800,15 @@ class TerminalWidgetState extends State<TerminalWidget> {
     final hasSelection = selection != null;
 
     final items = <PopupMenuEntry<_TermCtxAction>>[
+      const PopupMenuItem(
+        value: _TermCtxAction.selectAll,
+        height: 36,
+        child: Row(children: [
+          Icon(Icons.select_all, size: 14, color: AppColors.textSecondary),
+          SizedBox(width: 8),
+          Text('Select All', style: TextStyle(fontSize: 13, color: AppColors.textPrimary)),
+        ]),
+      ),
       if (hasSelection)
         const PopupMenuItem(
           value: _TermCtxAction.copy,
@@ -833,6 +868,8 @@ class TerminalWidgetState extends State<TerminalWidget> {
     if (!mounted) return;
 
     switch (action) {
+      case _TermCtxAction.selectAll:
+        _selectAll();
       case _TermCtxAction.copy:
         if (selection != null) {
           final text = widget.session.terminal.buffer.getText(selection);
@@ -1644,4 +1681,4 @@ class _WorkspaceColorPickerDialogState
   }
 }
 
-enum _TermCtxAction { copy, paste, clearSelection, search }
+enum _TermCtxAction { selectAll, copy, paste, clearSelection, search }
