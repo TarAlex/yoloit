@@ -147,10 +147,11 @@ class MindMapCubit extends Cubit<MindMapState> {
     List<MindMapConnection> connections,
   ) {
     final newPositions = _engine.compute(
-      nodes:    nodes,
-      existing: state.positions,
-      sizes:    state.sizes,
-      locked:   state.locked,
+      nodes:       nodes,
+      existing:    state.positions,
+      sizes:       state.sizes,
+      locked:      state.locked,
+      connections: connections,
     );
 
     // Auto-reveal any live/active agent sessions.  A session becoming live
@@ -263,10 +264,11 @@ class MindMapCubit extends Cubit<MindMapState> {
 
   void resetLayout() {
     final newPositions = _engine.compute(
-      nodes:    state.nodes,
-      existing: {},
-      sizes:    state.sizes,
-      locked:   {},
+      nodes:       state.nodes,
+      existing:    {},
+      sizes:       state.sizes,
+      locked:      {},
+      connections: state.connections,
     );
     emit(state.copyWith(positions: newPositions, locked: {}, hidden: {}, hiddenTypes: {}));
     _savePositions(newPositions);

@@ -20,6 +20,7 @@ const _columnX = [
 
 const _columnMargin = 20.0;
 const _nodeVMargin  = 20.0;
+const _nodeHMargin  = 24.0;
 const _canvasStartY = 2000.0; // large offset so users can pan upward freely
 
 /// Per-column override for vertical node spacing. Workspaces use a larger
@@ -29,66 +30,174 @@ const _columnVMargin = <int, double>{
 };
 
 /// Computes collision-free positions for nodes.
-/// - Each node type maps to a fixed column (x).
-/// - Y is determined by finding the first free vertical slot in that column.
-/// - Existing (user-dragged) positions are preserved when [locked] contains the id.
+///
+/// NEW: when [connections] are provided and a node appears for the first time
+/// (not in [existing]), its initial position is placed *near its connection
+/// source* instead of the default column x.  This makes new panels "pop up"
+/// next to the card that triggered them.
 class MindMapLayoutEngine {
   MindMapLayoutEngine();
 
   /// Compute positions for [nodes].
   /// [existing] provides previously saved/user-dragged positions (preserved).
+  /// [connections] are used to find source-hint positions for new nodes.
   /// Returns a new map with all node ids mapped to their assigned Offset.
   Map<String, Offset> compute({
     required List<MindMapNodeData> nodes,
     required Map<String, Offset> existing,
     required Map<String, Size> sizes,
     Set<String> locked = const {},
+    List<MindMapConnection> connections = const [],
   }) {
     final result = <String, Offset>{};
 
-    // Group already-placed rects per column for overlap detection.
+    // All placed rects (for global overlap/push detection).
+    final allRects = <String, Rect>{};   // id → rect
+
+    // Group already-placed rects per column for per-column free-Y search.
     final columnRects = <int, List<Rect>>{};
 
-    // Seed column rects with locked (user-moved) nodes.
-    for (final node in nodes) {
-      if (locked.contains(node.id) && existing.containsKey(node.id)) {
-        final pos  = existing[node.id]!;
-        final size = sizes[node.id] ?? node.defaultSize;
-        columnRects.putIfAbsent(node.columnIndex, () => []);
-        columnRects[node.columnIndex]!.add(Rect.fromLTWH(pos.dx, pos.dy, size.width, size.height));
-        result[node.id] = pos;
-      }
+    // Build source-hint map from connections: toId → from-node position hint.
+    // Used when the toId node has no existing position yet.
+    final Map<String, String> toFromId = {
+      for (final c in connections) c.toId: c.fromId,
+    };
+
+    // ── Pass 1: seed with already-positioned nodes (locked first) ────────────
+    void seedNode(MindMapNodeData node) {
+      if (!existing.containsKey(node.id)) return;
+      final pos  = existing[node.id]!;
+      final size = sizes[node.id] ?? node.defaultSize;
+      final rect = Rect.fromLTWH(pos.dx, pos.dy, size.width, size.height);
+      result[node.id] = pos;
+      allRects[node.id] = rect;
+      columnRects.putIfAbsent(node.columnIndex, () => [])
+          .add(rect);
     }
 
-    // Place unlocked nodes.
-    for (final node in nodes) {
-      if (locked.contains(node.id) && existing.containsKey(node.id)) continue;
+    for (final n in nodes) {
+      if (locked.contains(n.id)) seedNode(n);
+    }
+    for (final n in nodes) {
+      if (!locked.contains(n.id)) seedNode(n);
+    }
 
-      // Preserve existing position if it exists and isn't locked out.
-      if (existing.containsKey(node.id)) {
-        final pos  = existing[node.id]!;
-        final size = sizes[node.id] ?? node.defaultSize;
-        columnRects.putIfAbsent(node.columnIndex, () => []);
-        columnRects[node.columnIndex]!.add(Rect.fromLTWH(pos.dx, pos.dy, size.width, size.height));
-        result[node.id] = pos;
-        continue;
+    // ── Pass 2: place new nodes ───────────────────────────────────────────────
+    for (final node in nodes) {
+      if (result.containsKey(node.id)) continue; // already positioned above
+
+      final size    = sizes[node.id] ?? node.defaultSize;
+      final colIdx  = node.columnIndex;
+      final vMargin = _columnVMargin[colIdx] ?? _nodeVMargin;
+
+      // Try to find the source node's position as a placement hint.
+      final sourceId  = toFromId[node.id];
+      final sourcePos = sourceId != null ? result[sourceId] : null;
+      final sourceSize = sourceId != null
+          ? (sizes[sourceId] ?? nodes.firstWhere(
+              (n) => n.id == sourceId,
+              orElse: () => node).defaultSize)
+          : null;
+
+      Offset pos;
+
+      if (sourcePos != null && sourceSize != null) {
+        // Place to the RIGHT of the source node, near its vertical center.
+        final hintX = sourcePos.dx + sourceSize.width + _nodeHMargin;
+        final hintY = sourcePos.dy;
+        pos = _findFreeNear(hintX, hintY, size, allRects, vMargin);
+      } else {
+        // Fall back to column-based placement.
+        final x = colIdx < _columnX.length
+            ? _columnX[colIdx]
+            : _columnX.last + _columnMargin;
+        final occupied = columnRects[colIdx] ?? [];
+        pos = Offset(x, _findFreeY(x, size, occupied, vMargin));
       }
 
-      final colIdx = node.columnIndex;
-      final x      = colIdx < _columnX.length ? _columnX[colIdx] : _columnX.last + _columnMargin;
-      final size   = sizes[node.id] ?? node.defaultSize;
-
-      final occupied = columnRects[colIdx] ?? [];
-      final vMargin  = _columnVMargin[colIdx] ?? _nodeVMargin;
-      final y = _findFreeY(x, size, occupied, vMargin);
-
-      final pos = Offset(x, y);
       result[node.id] = pos;
-      columnRects.putIfAbsent(colIdx, () => []);
-      columnRects[colIdx]!.add(Rect.fromLTWH(pos.dx, pos.dy, size.width, size.height));
+      final rect = Rect.fromLTWH(pos.dx, pos.dy, size.width, size.height);
+      allRects[node.id] = rect;
+      columnRects.putIfAbsent(colIdx, () => []).add(rect);
+
+      // ── Push overlapping UNLOCKED neighbours out of the way ──────────────
+      _pushOverlapping(node.id, rect, result, allRects, locked, nodes, sizes,
+          vMargin);
     }
 
     return result;
+  }
+
+  // ── Helpers ──────────────────────────────────────────────────────────────
+
+  /// Find a free slot near (hintX, hintY), searching outward in concentric
+  /// rings so the new node lands as close to the hint as possible.
+  Offset _findFreeNear(
+    double hintX,
+    double hintY,
+    Size size,
+    Map<String, Rect> allRects,
+    double margin,
+  ) {
+    // Try the hint directly, then spiral outward in steps.
+    const step = 40.0;
+    const maxRings = 20;
+
+    for (int ring = 0; ring <= maxRings; ring++) {
+      final offsets = ring == 0
+          ? [const Offset(0, 0)]
+          : _ringOffsets(ring, step);
+      for (final off in offsets) {
+        final x = hintX + off.dx;
+        final y = hintY + off.dy;
+        final rect = Rect.fromLTWH(x, y, size.width, size.height);
+        final blocked = allRects.values
+            .any((r) => r.inflate(margin / 2).overlaps(rect));
+        if (!blocked) return Offset(x, y);
+      }
+    }
+    // Fallback: just place at hint (extremely unlikely to get here).
+    return Offset(hintX, hintY);
+  }
+
+  /// Candidate offsets for a given search ring.
+  static List<Offset> _ringOffsets(int ring, double step) {
+    // Prefer horizontal axis (place to the right first) then top/bottom.
+    final r = ring * step;
+    return [
+      Offset(0, -r),  Offset(0, r),
+      Offset(r, 0),   Offset(-r, 0),
+      Offset(r, -r),  Offset(r, r),
+      Offset(-r, -r), Offset(-r, r),
+    ];
+  }
+
+  /// Nudge any unlocked nodes that overlap [rect] away from it.
+  void _pushOverlapping(
+    String newId,
+    Rect rect,
+    Map<String, Offset> result,
+    Map<String, Rect> allRects,
+    Set<String> locked,
+    List<MindMapNodeData> nodes,
+    Map<String, Size> sizes,
+    double margin,
+  ) {
+    for (final other in List<MapEntry<String, Rect>>.from(allRects.entries)) {
+      if (other.key == newId) continue;
+      if (locked.contains(other.key)) continue;
+      if (!rect.inflate(margin).overlaps(other.value)) continue;
+
+      // Push the overlapping node downward (or rightward if same column).
+      final pushY = rect.bottom + margin;
+      final newPos = Offset(other.value.left, pushY);
+      result[other.key] = newPos;
+      final node = nodes.firstWhere((n) => n.id == other.key,
+          orElse: () => nodes.first);
+      final size = sizes[other.key] ?? node.defaultSize;
+      allRects[other.key] =
+          Rect.fromLTWH(newPos.dx, newPos.dy, size.width, size.height);
+    }
   }
 
   double _findFreeY(double x, Size size, List<Rect> occupied, double vMargin) {
@@ -101,7 +210,6 @@ class MindMapLayoutEngine {
       if (!collision) {
         fits = true;
       } else {
-        // Jump to the bottom of the blocking rect.
         final blockers = occupied.where((r) => r.inflate(vMargin).overlaps(rect));
         final maxBottom = blockers.map((r) => r.bottom).reduce(math.max);
         candidate = maxBottom + vMargin;
@@ -126,3 +234,4 @@ class MindMapLayoutEngine {
     'DIFF / GIT CHANGES',
   ];
 }
+
