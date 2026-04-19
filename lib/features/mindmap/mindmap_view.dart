@@ -1,3 +1,4 @@
+import 'dart:math' show min, max;
 import 'dart:ui' as ui;
 
 import 'package:file_picker/file_picker.dart';
@@ -135,7 +136,29 @@ class _MindMapViewState extends State<MindMapView>
     _panCtrl.forward(from: 0.0);
   }
 
-  // ── Build node + connection lists from blocs ───────────────────────────
+  /// Smoothly pans so [canvasCenter] appears at the center of the viewport.
+  /// Called by the minimap when the user taps/drags on it.
+  void _animateToCenterOffset(Offset canvasCenter) {
+    final renderBox = context.findRenderObject() as RenderBox?;
+    if (renderBox == null) return;
+    final screenSize = renderBox.size;
+    final scale = _transformCtrl.value.getMaxScaleOnAxis();
+    final tx = canvasCenter.dx - screenSize.width  / (2 * scale);
+    final ty = canvasCenter.dy - screenSize.height / (2 * scale);
+    final targetMatrix = Matrix4.identity()
+      ..scale(scale)
+      ..translate(-tx, -ty);
+
+    _panCtrl.stop();
+    _panAnim?.removeListener(_applyPanAnim);
+    _panAnim = Matrix4Tween(
+      begin: _transformCtrl.value.clone(),
+      end:   targetMatrix,
+    ).animate(CurvedAnimation(parent: _panCtrl, curve: Curves.easeInOutCubic))
+      ..addListener(_applyPanAnim);
+    _panCtrl.forward(from: 0.0);
+  }
+
 
   ({List<MindMapNodeData> nodes, List<MindMapConnection> conns}) _buildData(
     WorkspaceState wsState,
@@ -526,6 +549,7 @@ class _MindMapViewState extends State<MindMapView>
                           transformCtrl:  _transformCtrl,
                           dashAnimation:  _dashAnim,
                           onResetView:    _animateToIdentity,
+                          onPanToOffset:  _animateToCenterOffset,
                         );
                       },
                     );
@@ -549,12 +573,14 @@ class _MindMapCanvas extends StatefulWidget {
     required this.transformCtrl,
     required this.dashAnimation,
     required this.onResetView,
+    required this.onPanToOffset,
   });
   final List<MindMapNodeData> nodes;
   final List<MindMapConnection> conns;
   final TransformationController transformCtrl;
   final Animation<double> dashAnimation;
   final VoidCallback onResetView;
+  final void Function(Offset canvasCenter) onPanToOffset;
 
   @override
   State<_MindMapCanvas> createState() => _MindMapCanvasState();
@@ -582,18 +608,21 @@ class _MindMapCanvasState extends State<_MindMapCanvas> {
   Widget build(BuildContext context) {
     return Container(
       color: const Color(0xFF0D0F14),
-      child: Stack(
-        children: [
-          // ── Canvas (pan + pinch zoom) ────────────────────────────────
-          InteractiveViewer(
-            transformationController: widget.transformCtrl,
-            // Infinite boundary — user can pan in any direction freely.
-            boundaryMargin: const EdgeInsets.all(double.infinity),
-            minScale: 0.1,
-            maxScale: 3.0,
-            panEnabled: !_nodeDragging,
-            scaleEnabled: true,
-            constrained: false,
+      child: LayoutBuilder(
+        builder: (ctx, constraints) {
+          final viewportSize = Size(constraints.maxWidth, constraints.maxHeight);
+          return Stack(
+            children: [
+              // ── Canvas (pan + pinch zoom) ────────────────────────────────
+              InteractiveViewer(
+                transformationController: widget.transformCtrl,
+                // Infinite boundary — user can pan in any direction freely.
+                boundaryMargin: const EdgeInsets.all(double.infinity),
+                minScale: 0.1,
+                maxScale: 3.0,
+                panEnabled: !_nodeDragging,
+                scaleEnabled: true,
+                constrained: false,
             child: SizedBox(
               width:  _canvasW,
               height: _canvasH,
@@ -661,9 +690,28 @@ class _MindMapCanvasState extends State<_MindMapCanvas> {
           // ── Toolbar overlay ───────────────────────────────────────────
           Positioned(
             top: 8, right: 8,
-            child: _CanvasToolbar(
-              transformCtrl: widget.transformCtrl,
-              onResetView:   widget.onResetView,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                _CanvasToolbar(
+                  transformCtrl: widget.transformCtrl,
+                  onResetView:   widget.onResetView,
+                ),
+                const SizedBox(height: 8),
+                // ── Mini-map ───────────────────────────────────────────
+                BlocBuilder<MindMapCubit, MindMapState>(
+                  buildWhen: (prev, next) =>
+                      prev.positions != next.positions || prev.sizes != next.sizes,
+                  builder: (ctx, mm) => _MiniMap(
+                    nodes:         widget.nodes,
+                    positions:     mm.positions,
+                    sizes:         mm.sizes,
+                    transformCtrl: widget.transformCtrl,
+                    viewportSize:  viewportSize,
+                    onPanTo:       widget.onPanToOffset,
+                  ),
+                ),
+              ],
             ),
           ),
 
@@ -673,11 +721,12 @@ class _MindMapCanvasState extends State<_MindMapCanvas> {
             child: _GroupSidebar(),
           ),
         ],
+      );
+        },
       ),
     );
   }
 }
-
 // ── Dot-grid background ────────────────────────────────────────────────────
 
 class _DotGrid extends StatefulWidget {
@@ -1688,4 +1737,178 @@ class _SidebarActionState extends State<_SidebarAction> {
       ),
     );
   }
+}
+
+// ── Mini-map ───────────────────────────────────────────────────────────────
+
+class _MiniMap extends StatelessWidget {
+  const _MiniMap({
+    required this.nodes,
+    required this.positions,
+    required this.sizes,
+    required this.transformCtrl,
+    required this.viewportSize,
+    required this.onPanTo,
+  });
+
+  final List<MindMapNodeData> nodes;
+  final Map<String, Offset> positions;
+  final Map<String, Size> sizes;
+  final TransformationController transformCtrl;
+  final Size viewportSize;
+  final void Function(Offset canvasCenter) onPanTo;
+
+  static const double _mapW    = 210.0;
+  static const double _mapH    = 130.0;
+  static const double _padding = 240.0;
+
+  Rect _canvasBounds() {
+    if (positions.isEmpty) {
+      return const Rect.fromLTWH(1800.0, 1800.0, 3500.0, 2000.0);
+    }
+    double minX = double.infinity,  minY = double.infinity;
+    double maxX = -double.infinity, maxY = -double.infinity;
+    for (final e in positions.entries) {
+      final pos = e.value;
+      final sz  = sizes[e.key] ?? const Size(200, 150);
+      if (pos.dx < minX) minX = pos.dx;
+      if (pos.dy < minY) minY = pos.dy;
+      if (pos.dx + sz.width  > maxX) maxX = pos.dx + sz.width;
+      if (pos.dy + sz.height > maxY) maxY = pos.dy + sz.height;
+    }
+    return Rect.fromLTRB(minX - _padding, minY - _padding,
+                         maxX + _padding, maxY + _padding);
+  }
+
+  void _handleGesture(Offset local, Rect bounds) {
+    final cx = bounds.left + local.dx / _mapW * bounds.width;
+    final cy = bounds.top  + local.dy / _mapH * bounds.height;
+    onPanTo(Offset(cx, cy));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: transformCtrl,
+      builder: (ctx, _) {
+        final bounds = _canvasBounds();
+        final vpTL = transformCtrl.toScene(Offset.zero);
+        final vpBR = transformCtrl.toScene(
+            Offset(viewportSize.width, viewportSize.height));
+        final viewportRect =
+            Rect.fromLTRB(vpTL.dx, vpTL.dy, vpBR.dx, vpBR.dy);
+
+        return GestureDetector(
+          onTapDown:   (d) => _handleGesture(d.localPosition, bounds),
+          onPanUpdate: (d) => _handleGesture(d.localPosition, bounds),
+          child: Container(
+            width: _mapW,
+            height: _mapH,
+            decoration: BoxDecoration(
+              color: const Color(0xE50B0D12),
+              border: Border.all(color: const Color(0x3060A5FA)),
+              borderRadius: BorderRadius.circular(8),
+              boxShadow: const [
+                BoxShadow(color: Color(0x66000000), blurRadius: 10),
+              ],
+            ),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(7),
+              child: CustomPaint(
+                painter: _MiniMapPainter(
+                  nodes:        nodes,
+                  positions:    positions,
+                  sizes:        sizes,
+                  bounds:       bounds,
+                  viewportRect: viewportRect,
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _MiniMapPainter extends CustomPainter {
+  const _MiniMapPainter({
+    required this.nodes,
+    required this.positions,
+    required this.sizes,
+    required this.bounds,
+    required this.viewportRect,
+  });
+
+  final List<MindMapNodeData> nodes;
+  final Map<String, Offset> positions;
+  final Map<String, Size> sizes;
+  final Rect bounds;
+  final Rect viewportRect;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (bounds.isEmpty) return;
+    final scaleX = size.width  / bounds.width;
+    final scaleY = size.height / bounds.height;
+
+    // ── Node rectangles ────────────────────────────────────────────────────
+    for (final node in nodes) {
+      final pos = positions[node.id];
+      if (pos == null) continue;
+      final nodeSize = sizes[node.id] ?? node.defaultSize;
+      final mx = (pos.dx - bounds.left) * scaleX;
+      final my = (pos.dy - bounds.top)  * scaleY;
+      final mw = max(3.0, nodeSize.width  * scaleX);
+      final mh = max(2.0, nodeSize.height * scaleY);
+
+      canvas.drawRRect(
+        RRect.fromRectAndRadius(
+          Rect.fromLTWH(mx, my, mw, mh),
+          const Radius.circular(1.5),
+        ),
+        Paint()..color = _colorForType(node.typeTag),
+      );
+    }
+
+    // ── Viewport rectangle ─────────────────────────────────────────────────
+    final vx = (viewportRect.left - bounds.left) * scaleX;
+    final vy = (viewportRect.top  - bounds.top)  * scaleY;
+    final vw = max(8.0, viewportRect.width  * scaleX);
+    final vh = max(8.0, viewportRect.height * scaleY);
+
+    final vpRRect = RRect.fromRectAndRadius(
+      Rect.fromLTWH(vx, vy, vw, vh),
+      const Radius.circular(3),
+    );
+    canvas.drawRRect(vpRRect, Paint()..color = const Color(0x2060A5FA));
+    canvas.drawRRect(
+      vpRRect,
+      Paint()
+        ..color = const Color(0xCC60A5FA)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.5,
+    );
+  }
+
+  static Color _colorForType(String typeTag) => switch (typeTag) {
+    'ws'      => const Color(0xCC7C3AED),
+    'agent'   => const Color(0xCC34D399),
+    'branch'  => const Color(0xCC60A5FA),
+    'tree'    => const Color(0xCC10B981),
+    'diff'    => const Color(0xCC7C6BFF),
+    'files'   => const Color(0xCCF59E0B),
+    'run'     => const Color(0xCCF87171),
+    'editor'  => const Color(0xCCE879F9),
+    'session' => const Color(0xCC93C5FD),
+    'repo'    => const Color(0xCC94A3B8),
+    _         => const Color(0xCC64748B),
+  };
+
+  @override
+  bool shouldRepaint(_MiniMapPainter old) =>
+      old.viewportRect != viewportRect ||
+      old.positions    != positions    ||
+      old.nodes.length != nodes.length ||
+      old.bounds       != bounds;
 }
