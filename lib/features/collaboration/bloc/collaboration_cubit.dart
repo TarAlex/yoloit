@@ -240,14 +240,14 @@ class CollaborationCubit extends Cubit<CollaborationState> {
         'workspaceId': d.workspaceId,
         'repoPath':    d.repoPath,
         'repoName':    d.repoName,
-        'entries':     _serializeFileTree(),
+        'entries':     _serializeFileTree(d.repoPath ?? ''),
       },
       DiffNodeData d => {
         'type':        'diff',
         'workspaceId': d.workspaceId,
         'repoPath':    d.repoPath,
         'repoName':    d.repoName,
-        'hunks':       _serializeDiffHunks(),
+        'hunks':       _serializeDiffHunks(d.repoPath ?? ''),
       },
       RunNodeData d => {
         'type':      'run',
@@ -269,11 +269,15 @@ class CollaborationCubit extends Cubit<CollaborationState> {
     };
   }
 
-  /// Flattens the ReviewCubit file tree into serializable entries.
-  List<Map<String, dynamic>> _serializeFileTree() {
+  /// Flattens the ReviewCubit file tree for [repoPath] into serializable entries.
+  List<Map<String, dynamic>> _serializeFileTree(String repoPath) {
     if (reviewCubit == null) return const [];
     try {
       final state = reviewCubit!.state;
+      // ReviewCubit stores the currently-active repo's tree.
+      // Only return entries if the tree matches the requested repo.
+      final activeRepo = (state.repoPath as String?) ?? '';
+      if (activeRepo.isNotEmpty && activeRepo != repoPath) return const [];
       final fileTree = state.fileTree as List?;
       if (fileTree == null || fileTree.isEmpty) return const [];
       final entries = <Map<String, dynamic>>[];
@@ -302,11 +306,13 @@ class CollaborationCubit extends Cubit<CollaborationState> {
     }
   }
 
-  /// Serializes diff hunks from ReviewCubit state.
-  List<Map<String, dynamic>> _serializeDiffHunks() {
+  /// Serializes diff hunks from ReviewCubit state for [repoPath].
+  List<Map<String, dynamic>> _serializeDiffHunks(String repoPath) {
     if (reviewCubit == null) return const [];
     try {
       final state = reviewCubit!.state;
+      final activeRepo = (state.repoPath as String?) ?? '';
+      if (activeRepo.isNotEmpty && activeRepo != repoPath) return const [];
       final hunks = state.diffHunks as List?;
       if (hunks == null || hunks.isEmpty) return const [];
       return hunks.map<Map<String, dynamic>>((h) => {
