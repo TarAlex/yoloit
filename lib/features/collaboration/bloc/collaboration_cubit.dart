@@ -7,7 +7,7 @@ import '../../mindmap/bloc/mindmap_cubit.dart';
 import '../../mindmap/bloc/mindmap_state.dart';
 import '../model/sync_message.dart';
 import '../services/collaboration_client.dart';
-import '../services/collaboration_server.dart';
+import '../services/collaboration_server_platform.dart';
 import 'collaboration_state.dart';
 
 /// Orchestrates real-time collaboration over a local WebSocket connection.
@@ -40,7 +40,11 @@ class CollaborationCubit extends Cubit<CollaborationState> {
       );
       final address = await _server!.start();
       _stateSub = mindMapCubit.stream.listen(_onMindMapStateChanged);
-      emit(state.copyWith(mode: CollaborationMode.hosting, address: address));
+      emit(state.copyWith(
+        mode:         CollaborationMode.hosting,
+        address:      address,
+        webClientUrl: _server!.webClientUrl,
+      ));
     } catch (e) {
       _server = null;
       emit(state.copyWith(error: 'Failed to start server: $e'));
@@ -72,6 +76,16 @@ class CollaborationCubit extends Cubit<CollaborationState> {
       _client = null;
       emit(state.copyWith(error: 'Connection failed: $e'));
     }
+  }
+
+  /// Guest: send a node move to the host (used from web/remote canvas).
+  void sendGuestMove(String nodeId, Offset pos) {
+    _client?.sendMessage(SyncMessage.move(nodeId, pos.dx, pos.dy, senderId: 'guest'));
+  }
+
+  /// Guest: send a node resize to the host.
+  void sendGuestResize(String nodeId, Size size) {
+    _client?.sendMessage(SyncMessage.resize(nodeId, size.width, size.height, senderId: 'guest'));
   }
 
   Future<void> disconnect() async {

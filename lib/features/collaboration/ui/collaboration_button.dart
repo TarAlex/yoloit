@@ -339,6 +339,49 @@ class _HostActiveView extends StatelessWidget {
                 ],
               ),
             ),
+        // ── Browser URL ──────────────────────────────────────────────
+        if (state.webClientUrl.isNotEmpty) ...[
+          const SizedBox(height: 12),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            decoration: BoxDecoration(
+              color:  const Color(0xFF0A0F1A),
+              border: Border.all(color: const Color(0xFF1E2D4A)),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.open_in_browser, size: 14,
+                    color: Color(0xFF4B9EFF)),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text('Open in browser',
+                          style: TextStyle(color: Color(0xFF4B9EFF),
+                              fontSize: 10, fontWeight: FontWeight.w600)),
+                      Text(state.webClientUrl,
+                          style: const TextStyle(
+                              color: Color(0xFFE8E8FF),
+                              fontSize: 11,
+                              fontFamily: 'monospace')),
+                    ],
+                  ),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.copy, size: 12,
+                      color: Color(0xFF64748B)),
+                  tooltip: 'Copy browser URL',
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(),
+                  onPressed: () => Clipboard.setData(
+                      ClipboardData(text: state.webClientUrl)),
+                ),
+              ],
+            ),
+          ),
+        ],
         const SizedBox(height: 16),
         _SecondaryBtn(
           label: 'Stop Hosting',
