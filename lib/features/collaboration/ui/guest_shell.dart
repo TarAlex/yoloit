@@ -1,0 +1,286 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
+
+import '../../mindmap/bloc/mindmap_cubit.dart';
+import '../bloc/collaboration_cubit.dart';
+import '../bloc/collaboration_state.dart';
+import 'web_mindmap_canvas.dart';
+
+/// Full-screen shell shown when the app runs in browser / non-desktop mode.
+/// - Before connect: shows a connect form
+/// - After connect:  shows the live mindmap canvas (read/write via WebSocket)
+class GuestShell extends StatefulWidget {
+  const GuestShell({super.key});
+
+  @override
+  State<GuestShell> createState() => _GuestShellState();
+}
+
+class _GuestShellState extends State<GuestShell> {
+  final _hostCtrl = TextEditingController(text: '192.168.1.');
+  final _portCtrl = TextEditingController(text: '40401');
+  final _nameCtrl = TextEditingController(text: 'Remote Guest');
+
+  @override
+  void dispose() {
+    _hostCtrl.dispose();
+    _portCtrl.dispose();
+    _nameCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _connect(CollaborationCubit cubit) async {
+    final host = _hostCtrl.text.trim();
+    final port = int.tryParse(_portCtrl.text.trim()) ?? 40401;
+    if (host.isEmpty) return;
+    await cubit.connect(host, port: port);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return BlocBuilder<CollaborationCubit, CollaborationState>(
+      builder: (ctx, collab) {
+        if (collab.mode == CollaborationMode.connected) {
+          return _buildCanvas(ctx, collab);
+        }
+        return _buildConnectScreen(ctx, collab);
+      },
+    );
+  }
+
+  // ── Connect screen ────────────────────────────────────────────────────────
+
+  Widget _buildConnectScreen(BuildContext ctx, CollaborationState collab) {
+    final cubit = ctx.read<CollaborationCubit>();
+    return Scaffold(
+      backgroundColor: const Color(0xFF070714),
+      body: Center(
+        child: Container(
+          width: 420,
+          padding: const EdgeInsets.all(36),
+          decoration: BoxDecoration(
+            color: const Color(0xFF0D1117),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: const Color(0xFF1E2330), width: 1),
+            boxShadow: const [
+              BoxShadow(
+                color: Color(0x60000000),
+                blurRadius: 40,
+                offset: Offset(0, 16),
+              ),
+            ],
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              // ── Logo / title ─────────────────────────────────────────
+              Row(
+                children: [
+                  Container(
+                    width: 36, height: 36,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF4B9EFF).withAlpha(20),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(
+                          color: const Color(0xFF4B9EFF).withAlpha(80)),
+                    ),
+                    child: const Icon(Icons.hub_rounded,
+                        color: Color(0xFF4B9EFF), size: 20),
+                  ),
+                  const SizedBox(width: 12),
+                  const Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('YoLoIT Space',
+                          style: TextStyle(
+                              color: Color(0xFFE8E8FF),
+                              fontSize: 18,
+                              fontWeight: FontWeight.w700)),
+                      Text('Connect to a running desktop session',
+                          style: TextStyle(
+                              color: Color(0xFF6B7898), fontSize: 11)),
+                    ],
+                  ),
+                ],
+              ),
+              const SizedBox(height: 32),
+
+              // ── Fields ────────────────────────────────────────────────
+              _label('Host IP'),
+              const SizedBox(height: 6),
+              _field(_hostCtrl, 'e.g. 192.168.1.42'),
+              const SizedBox(height: 16),
+              _label('Port'),
+              const SizedBox(height: 6),
+              _field(_portCtrl, '40401', number: true),
+              const SizedBox(height: 16),
+              _label('Your name'),
+              const SizedBox(height: 6),
+              _field(_nameCtrl, 'Guest'),
+              const SizedBox(height: 28),
+
+              // ── Error message ────────────────────────────────────────
+              if (collab.error.isNotEmpty) ...[
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFF4F6A).withAlpha(15),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(
+                        color: const Color(0xFFFF4F6A).withAlpha(60)),
+                  ),
+                  child: Row(children: [
+                    const Icon(Icons.error_outline,
+                        color: Color(0xFFFF4F6A), size: 14),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(collab.error,
+                          style: const TextStyle(
+                              color: Color(0xFFFF4F6A), fontSize: 12)),
+                    ),
+                  ]),
+                ),
+                const SizedBox(height: 16),
+              ],
+
+              // ── Connect button ────────────────────────────────────────
+              SizedBox(
+                height: 44,
+                child: ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF4B9EFF),
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10)),
+                    elevation: 0,
+                  ),
+                  onPressed: () => _connect(cubit),
+                  child: const Text('Connect to Space',
+                      style: TextStyle(
+                          fontSize: 14, fontWeight: FontWeight.w600)),
+                ),
+              ),
+
+              // ── Hint ─────────────────────────────────────────────────
+              const SizedBox(height: 20),
+              const Text(
+                'The YoLoIT desktop app must be running and sharing the Space\n'
+                '(toolbar → Share → Start Hosting).',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: Color(0xFF4A5568), fontSize: 11),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _label(String text) => Text(text,
+      style: const TextStyle(
+          color: Color(0xFF6B7898), fontSize: 12, fontWeight: FontWeight.w500));
+
+  Widget _field(TextEditingController c, String hint,
+      {bool number = false}) =>
+      TextField(
+        controller: c,
+        keyboardType: number ? TextInputType.number : TextInputType.text,
+        style: const TextStyle(color: Color(0xFFE8E8FF), fontSize: 14),
+        decoration: InputDecoration(
+          hintText: hint,
+          hintStyle: const TextStyle(color: Color(0xFF3D4A6B), fontSize: 14),
+          filled: true,
+          fillColor: const Color(0xFF0A0F1A),
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(8),
+            borderSide: const BorderSide(color: Color(0xFF1E2330)),
+          ),
+          enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(8),
+            borderSide: const BorderSide(color: Color(0xFF1E2330)),
+          ),
+          focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(8),
+            borderSide:
+                const BorderSide(color: Color(0xFF4B9EFF), width: 1.5),
+          ),
+          contentPadding:
+              const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+        ),
+      );
+
+  // ── Connected canvas ─────────────────────────────────────────────────────
+
+  Widget _buildCanvas(BuildContext ctx, CollaborationState collab) {
+    return Scaffold(
+      backgroundColor: const Color(0xFF070714),
+      body: Column(
+        children: [
+          _buildTopBar(ctx, collab),
+          const Expanded(child: WebMindMapCanvas()),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTopBar(BuildContext ctx, CollaborationState collab) {
+    return Container(
+      height: 44,
+      color: const Color(0xFF0D1117),
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: Row(
+        children: [
+          const Icon(Icons.hub_rounded, color: Color(0xFF4B9EFF), size: 16),
+          const SizedBox(width: 8),
+          const Text('YoLoIT Space',
+              style: TextStyle(
+                  color: Color(0xFFE8E8FF),
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600)),
+          const SizedBox(width: 16),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+            decoration: BoxDecoration(
+              color: const Color(0xFF00FF9F).withAlpha(20),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                  color: const Color(0xFF00FF9F).withAlpha(60), width: 1),
+            ),
+            child: Row(children: [
+              Container(
+                  width: 6,
+                  height: 6,
+                  decoration: const BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: Color(0xFF00FF9F))),
+              const SizedBox(width: 5),
+              Text('Connected · ${collab.address}',
+                  style: const TextStyle(
+                      color: Color(0xFF00FF9F),
+                      fontSize: 11,
+                      fontWeight: FontWeight.w500)),
+            ]),
+          ),
+          if (collab.peerCount > 0) ...[
+            const SizedBox(width: 12),
+            Text('${collab.peerCount} peer${collab.peerCount > 1 ? 's' : ''}',
+                style: const TextStyle(
+                    color: Color(0xFF6B7898), fontSize: 11)),
+          ],
+          const Spacer(),
+          TextButton.icon(
+            icon: const Icon(Icons.link_off, size: 14),
+            label: const Text('Disconnect'),
+            style: TextButton.styleFrom(
+              foregroundColor: const Color(0xFF6B7898),
+              textStyle: const TextStyle(fontSize: 12),
+            ),
+            onPressed: () => ctx.read<CollaborationCubit>().disconnect(),
+          ),
+        ],
+      ),
+    );
+  }
+}
