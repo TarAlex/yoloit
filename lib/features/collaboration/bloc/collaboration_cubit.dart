@@ -396,7 +396,9 @@ class CollaborationCubit extends Cubit<CollaborationState> {
   /// terminal state (for users who haven't opened the Map View yet), then
   /// sends the full snapshot to [clientId].
   Future<void> _sendSnapshotAfterPopulate(String clientId) async {
-    if (mindMapCubit.state.positions.isEmpty) {
+    // Populate both when no positions AND when nodes list is empty (positions
+    // may be restored from shared_preferences but the nodes list is transient).
+    if (mindMapCubit.state.nodes.isEmpty) {
       await ensureNodesPopulated?.call();
     }
     _server?.sendTo(clientId, _buildSnapshot(mindMapCubit.state));

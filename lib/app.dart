@@ -64,7 +64,9 @@ class App extends StatelessWidget {
     WorkspaceState wsState,
     TerminalState termState,
   ) async {
-    if (mindMapCubit.state.positions.isNotEmpty) return;
+    // Skip only when both positions and nodes are already populated.
+    if (mindMapCubit.state.positions.isNotEmpty &&
+        mindMapCubit.state.nodes.isNotEmpty) return;
     if (wsState is! WorkspaceLoaded) return;
 
     final nodes = <MindMapNodeData>[];
