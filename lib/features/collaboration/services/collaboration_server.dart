@@ -32,8 +32,15 @@ class CollaborationServer {
   /// Also starts the static HTTP server if a web-client directory exists.
   Future<String> start() async {
     _wsServer = await HttpServer.bind(InternetAddress.anyIPv4, port);
-    _wsServer!.listen(_handleRequest);
+    // Wrap async handler so unhandled Future errors don't crash the isolate.
+    _wsServer!.listen(
+      (req) => _handleRequest(req).catchError((_) {}),
+      onError: (_) {},
+    );
     _resolvedIp = await _localIp();
+
+    // Auto-install web client to ~/.yoloit/web_client if not present yet.
+    await _ensureWebClientInstalled();
 
     await _startStaticServer();
     return '$_resolvedIp:$port';
@@ -72,17 +79,17 @@ class CollaborationServer {
 
   Future<void> _handleRequest(HttpRequest request) async {
     if (!WebSocketTransformer.isUpgradeRequest(request)) {
-      // Return 200 for health-checks from the static server / browser preflight
+      // Health-check / browser preflight
       request.response
         ..statusCode = HttpStatus.ok
         ..headers.set('Access-Control-Allow-Origin', '*')
-        ..write('YoLoIT collaboration server')
-        ..close();
+        ..write('YoLoIT collaboration server');
+      await request.response.close();
       return;
     }
     try {
-      final ws        = await WebSocketTransformer.upgrade(request);
-      final clientId  = 'c_${DateTime.now().millisecondsSinceEpoch}';
+      final ws       = await WebSocketTransformer.upgrade(request);
+      final clientId = 'c_${DateTime.now().millisecondsSinceEpoch}';
       _clients[clientId] = ws;
 
       ws.listen(
@@ -94,14 +101,15 @@ class CollaborationServer {
             broadcastRaw(msg, exclude: clientId);
           }
         },
-        onDone:    () => _onDisconnect(clientId),
-        onError:   (_) => _onDisconnect(clientId),
+        onDone:        () => _onDisconnect(clientId),
+        onError:       (_) => _onDisconnect(clientId),
         cancelOnError: true,
       );
 
+      // Send full state snapshot to the new client.
       broadcastRaw(SyncMessage.connected(clientId, 'Remote'));
-    } catch (e) {
-      // ignore failed upgrade
+    } catch (_) {
+      // ignore failed upgrade (e.g. client sent non-WS request to WS port)
     }
   }
 
@@ -143,26 +151,70 @@ class CollaborationServer {
         };
   }
 
+  /// Auto-copies the web client from build/web to ~/.yoloit/web_client if needed.
+  static Future<void> _ensureWebClientInstalled() async {
+    final home = Platform.environment['HOME'];
+    if (home == null) return;
+    final dest = '$home/.yoloit/web_client';
+    if (await File('$dest/index.html').exists()) return; // already installed
+
+    // Search for build/web relative to executable — go up the dir tree.
+    final exe = Platform.resolvedExecutable;
+    var dir = File(exe).parent;
+    for (int i = 0; i < 12; i++) {
+      final candidate = '${dir.path}/build/web';
+      if (await File('$candidate/index.html').exists()) {
+        try {
+          await Directory(dest).create(recursive: true);
+          await _copyDirectory(Directory(candidate), Directory(dest));
+        } catch (_) {}
+        return;
+      }
+      dir = dir.parent;
+    }
+  }
+
+  static Future<void> _copyDirectory(Directory src, Directory dest) async {
+    await dest.create(recursive: true);
+    await for (final entity in src.list(recursive: false)) {
+      final target = '${dest.path}/${entity.uri.pathSegments.last}';
+      if (entity is Directory) {
+        await _copyDirectory(entity, Directory(target));
+      } else if (entity is File) {
+        await entity.copy(target);
+      }
+    }
+  }
+
   /// Candidate directories where the Flutter web build might live.
   static Future<String?> _findWebClientDir() async {
+    final home   = Platform.environment['HOME'] ?? '';
     final exe    = Platform.resolvedExecutable;
     final appDir = File(exe).parent.path;
 
-    final candidates = [
-      '$appDir/../Resources/web_client',
-      '$appDir/web_client',
-      '${Directory.current.path}/build/web',
-      '${Platform.environment['HOME']}/.yoloit/web_client',
+    // Fixed-priority candidates.
+    final fixed = [
+      '$appDir/../Resources/web_client',  // macOS app bundle Resources
+      '$appDir/web_client',               // sibling to executable
+      '$home/.yoloit/web_client',         // user install / auto-copy
+      '${Directory.current.path}/build/web', // flutter run dev
     ];
+    for (final path in fixed) {
+      if (await File('$path/index.html').exists()) return _resolved(path);
+    }
 
-    for (final path in candidates) {
-      final dir = Directory(path);
-      if (await dir.exists() && await File('$path/index.html').exists()) {
-        return dir.resolveSymbolicLinksSync();
-      }
+    // Traverse up from executable to find project build/web.
+    var dir = File(exe).parent;
+    for (int i = 0; i < 12; i++) {
+      final path = '${dir.path}/build/web';
+      if (await File('$path/index.html').exists()) return _resolved(path);
+      dir = dir.parent;
     }
     return null;
   }
+
+  static String _resolved(String path) =>
+      Directory(path).resolveSymbolicLinksSync();
 
   static Future<String> _localIp() async {
     final interfaces = await NetworkInterface.list(
