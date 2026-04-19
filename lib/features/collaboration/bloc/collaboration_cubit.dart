@@ -58,20 +58,30 @@ class CollaborationCubit extends Cubit<CollaborationState> {
         port:            port,
         onClientMessage: _onClientMessage,
       );
-      final address = await _server!.start();
-      _stateSub = mindMapCubit.stream.listen(_onMindMapStateChanged);
-      // Stream live terminal output to all connected browser guests.
-      _terminalSub = TerminalOutputBus.instance.stream.listen(_onTerminalData);
-      emit(state.copyWith(
-        mode:         CollaborationMode.hosting,
-        address:      address,
-        webClientUrl: _server!.webClientUrl,
-        localUrl:     _server!.localUrl,
-      ));
+      // Retry once after a short delay if the port is still held by a dying process.
+      try {
+        final address = await _server!.start();
+        _finishHosting(address);
+      } catch (_) {
+        await Future<void>.delayed(const Duration(milliseconds: 800));
+        final address = await _server!.start();
+        _finishHosting(address);
+      }
     } catch (e) {
       _server = null;
       emit(state.copyWith(error: 'Failed to start server: $e'));
     }
+  }
+
+  void _finishHosting(String address) {
+    _stateSub = mindMapCubit.stream.listen(_onMindMapStateChanged);
+    _terminalSub = TerminalOutputBus.instance.stream.listen(_onTerminalData);
+    emit(state.copyWith(
+      mode:         CollaborationMode.hosting,
+      address:      address,
+      webClientUrl: _server!.webClientUrl,
+      localUrl:     _server!.localUrl,
+    ));
   }
 
   Future<void> stopHosting() async {
