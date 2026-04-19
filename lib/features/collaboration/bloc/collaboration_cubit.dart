@@ -35,12 +35,16 @@ class CollaborationCubit extends Cubit<CollaborationState> {
     this.ensureNodesPopulated,
     this.onTerminalInput,
     this.reviewCubit,
+    this.listDirectory,
   }) : super(const CollaborationState());
 
   final MindMapCubit mindMapCubit;
   final Future<void> Function()? ensureNodesPopulated;
   final void Function(String sessionId, String data)? onTerminalInput;
   final dynamic reviewCubit; // ReviewCubit on desktop, null on web
+  /// Lists top-level directory entries for a repo path (host only).
+  /// Returns list of {name, path, isDir} maps, or null if unavailable.
+  final List<Map<String, dynamic>> Function(String repoPath)? listDirectory;
 
   CollaborationServer? _server;
   CollaborationClient? _client;
@@ -280,22 +284,30 @@ class CollaborationCubit extends Cubit<CollaborationState> {
   }
 
   /// Flattens the ReviewCubit file tree for [repoPath] into serializable entries.
+  /// Falls back to [listDirectory] if ReviewCubit doesn't have the requested repo.
   List<Map<String, dynamic>> _serializeFileTree(String repoPath) {
-    if (reviewCubit == null) return const [];
-    try {
-      final state = reviewCubit!.state;
-      // ReviewCubit stores the currently-active repo's tree.
-      // Only return entries if the tree matches the requested repo.
-      final activeRepo = (state.repoPath as String?) ?? '';
-      if (activeRepo.isNotEmpty && activeRepo != repoPath) return const [];
-      final fileTree = state.fileTree as List?;
-      if (fileTree == null || fileTree.isEmpty) return const [];
-      final entries = <Map<String, dynamic>>[];
-      _flattenTreeNodes(fileTree, entries, 0);
-      return entries;
-    } catch (_) {
-      return const [];
+    // First try ReviewCubit (has expand/collapse state for active repo)
+    if (reviewCubit != null) {
+      try {
+        final state = reviewCubit!.state;
+        final activeRepo = (state.repoPath as String?) ?? '';
+        if (activeRepo == repoPath || (activeRepo.isEmpty && repoPath.isNotEmpty)) {
+          final fileTree = state.fileTree as List?;
+          if (fileTree != null && fileTree.isNotEmpty) {
+            final entries = <Map<String, dynamic>>[];
+            _flattenTreeNodes(fileTree, entries, 0);
+            return entries;
+          }
+        }
+      } catch (_) {}
     }
+    // Fallback: read top-level directory listing from host filesystem
+    if (listDirectory != null && repoPath.isNotEmpty) {
+      try {
+        return listDirectory!(repoPath);
+      } catch (_) {}
+    }
+    return const [];
   }
 
   void _flattenTreeNodes(List<dynamic> nodes, List<Map<String, dynamic>> out, int depth) {

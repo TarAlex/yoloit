@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:path/path.dart' as p;
@@ -35,6 +37,7 @@ class App extends StatelessWidget {
             mindMapCubit: ctx.read<MindMapCubit>(),
             onTerminalInput: PtyService.instance.write,
             reviewCubit: ctx.read<ReviewCubit>(),
+            listDirectory: _listRepoDir,
             ensureNodesPopulated: () => _populateMindMap(
               ctx.read<MindMapCubit>(),
               ctx.read<WorkspaceCubit>().state,
@@ -55,6 +58,45 @@ class App extends StatelessWidget {
         },
       ),
     );
+  }
+
+  /// Lists top-level directory entries for a repo path (depth 0 + depth 1).
+  /// Used by CollaborationCubit to populate file-tree cards for ALL repos,
+  /// not just the one active in ReviewCubit.
+  static List<Map<String, dynamic>> _listRepoDir(String repoPath) {
+    final dir = Directory(repoPath);
+    if (!dir.existsSync()) return const [];
+    final entries = <Map<String, dynamic>>[];
+    // Root entry
+    entries.add({
+      'name': p.basename(repoPath),
+      'path': repoPath,
+      'isDir': true,
+      'depth': 0,
+      'isExpanded': true,
+    });
+    // Children (depth 1, sorted: dirs first, then files)
+    try {
+      final children = dir.listSync()
+        ..sort((a, b) {
+          final aDir = a is Directory;
+          final bDir = b is Directory;
+          if (aDir != bDir) return aDir ? -1 : 1;
+          return p.basename(a.path).compareTo(p.basename(b.path));
+        });
+      for (final child in children.take(50)) {
+        final name = p.basename(child.path);
+        if (name.startsWith('.') && name != '.github') continue;
+        entries.add({
+          'name': name,
+          'path': child.path,
+          'isDir': child is Directory,
+          'depth': 1,
+          'isExpanded': false,
+        });
+      }
+    } catch (_) {}
+    return entries;
   }
 
   /// Populates [mindMapCubit] with nodes derived from workspace and terminal

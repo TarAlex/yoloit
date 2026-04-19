@@ -1115,40 +1115,41 @@ class _SidebarRow extends StatelessWidget {
   final VoidCallback onFocus;
 
   static const _typeIcons = <String, IconData>{
-    'workspace': Icons.folder_special,
+    'workspace': Icons.folder_copy_outlined,
     'agent':     Icons.smart_toy,
     'session':   Icons.terminal,
     'repo':      Icons.source,
-    'branch':    Icons.fork_right,
-    'run':       Icons.play_circle,
-    'files':     Icons.insert_drive_file,
-    'tree':      Icons.account_tree,
-    'diff':      Icons.difference,
+    'branch':    Icons.alt_route,
+    'run':       Icons.play_circle_outline,
+    'files':     Icons.insert_drive_file_outlined,
+    'tree':      Icons.account_tree_outlined,
+    'diff':      Icons.compare_arrows_rounded,
     'editor':    Icons.code,
   };
 
   static const _typeColors = <String, Color>{
-    'workspace': Color(0xFF7C3AED),
+    'workspace': Color(0xFF7C6BFF),
     'agent':     Color(0xFF34D399),
-    'session':   Color(0xFF93C5FD),
-    'repo':      Color(0xFF94A3B8),
+    'session':   Color(0xFF6B7898),
+    'repo':      Color(0xFF9AA3BF),
     'branch':    Color(0xFF60A5FA),
     'run':       Color(0xFFF87171),
-    'files':     Color(0xFFF59E0B),
-    'tree':      Color(0xFF10B981),
+    'files':     Color(0xFFFFAA33),
+    'tree':      Color(0xFF34D399),
     'diff':      Color(0xFF7C6BFF),
-    'editor':    Color(0xFFE879F9),
+    'editor':    Color(0xFFFFCC44),
   };
 
   @override
   Widget build(BuildContext context) {
     final icon = _typeIcons[type] ?? Icons.circle;
     final color = _typeColors[type] ?? const Color(0xFF64748B);
+    final isWs = type == 'workspace';
 
     return InkWell(
-      onTap: onFocus,
+      onTap: hasChildren ? onToggleExpand : onFocus,
       child: Padding(
-        padding: EdgeInsets.only(left: 8.0 + depth * 14.0, right: 4, top: 2, bottom: 2),
+        padding: EdgeInsets.fromLTRB(8.0 + depth * 14.0, 3, 4, 3),
         child: Row(
           children: [
             // Expand/collapse arrow
@@ -1158,15 +1159,40 @@ class _SidebarRow extends StatelessWidget {
                 child: Padding(
                   padding: const EdgeInsets.only(right: 2),
                   child: Icon(
-                    expanded ? Icons.expand_more : Icons.chevron_right,
-                    size: 14,
+                    expanded ? Icons.expand_less : Icons.expand_more,
+                    size: 13,
                     color: const Color(0xFF6B7898),
                   ),
                 ),
               )
-            else
-              const SizedBox(width: 16),
-            Icon(icon, size: 12, color: color),
+            else ...[
+              // Vertical tree line hint for non-root items
+              if (depth > 0)
+                Container(
+                  width: 1, height: 16,
+                  margin: const EdgeInsets.only(right: 5),
+                  color: const Color(0xFF2A3040),
+                ),
+              SizedBox(width: depth > 0 ? 10 : 16),
+            ],
+            // Eye icon (before node icon, matching macOS)
+            GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: onToggleHide,
+              child: Padding(
+                padding: const EdgeInsets.all(2),
+                child: Icon(
+                  hidden ? Icons.visibility_off : Icons.visibility,
+                  size: isWs ? 13 : 11,
+                  color: hidden
+                      ? const Color(0xFF4A5680)
+                      : (isWs ? const Color(0xFF7C6BFF) : const Color(0x997C6BFF)),
+                ),
+              ),
+            ),
+            const SizedBox(width: 5),
+            Icon(icon, size: isWs ? 13 : 11,
+                color: hidden ? const Color(0xFF4A5680) : color),
             const SizedBox(width: 6),
             Expanded(
               child: Text(
@@ -1174,23 +1200,20 @@ class _SidebarRow extends StatelessWidget {
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(
                   fontSize: 11,
-                  color: hidden ? const Color(0xFF3D4A6B) : const Color(0xFFCBD5E1),
-                  decoration: hidden ? TextDecoration.lineThrough : null,
+                  fontWeight: isWs ? FontWeight.w700 : FontWeight.normal,
+                  color: hidden
+                      ? const Color(0xFF4A5680)
+                      : (isWs ? const Color(0xFFE8E8FF) : const Color(0xFFCBD5E1)),
                 ),
               ),
             ),
-            // Eye toggle
-            GestureDetector(
-              onTap: onToggleHide,
-              child: Padding(
-                padding: const EdgeInsets.all(4),
-                child: Icon(
-                  hidden ? Icons.visibility_off : Icons.visibility,
-                  size: 12,
-                  color: hidden ? const Color(0xFF3D4A6B) : const Color(0xFF6B7898),
-                ),
+            // Expand chevron for workspaces (right side)
+            if (isWs)
+              Icon(
+                expanded ? Icons.expand_less : Icons.expand_more,
+                size: 13,
+                color: const Color(0xFF6B7898),
               ),
-            ),
           ],
         ),
       ),
