@@ -250,7 +250,7 @@ class CollaborationServer {
     _writeRaw(socket,
       'HTTP/1.1 200 OK\r\n'
       'Access-Control-Allow-Origin: *\r\n'
-      'Cache-Control: no-cache\r\n'
+      'Cache-Control: no-store, no-cache, must-revalidate\r\n'
       'Content-Type: $mimeStr\r\n'
       'Content-Length: ${bytes.length}\r\n'
       'Connection: close\r\n'
