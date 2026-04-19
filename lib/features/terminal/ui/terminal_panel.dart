@@ -88,7 +88,9 @@ class _EmptyTerminal extends StatelessWidget {
                           style: TextStyle(color: AppColors.textMuted, fontSize: 12),
                         );
                       }
-                      return Row(
+                      return SingleChildScrollView(
+                        scrollDirection: Axis.horizontal,
+                        child: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: AgentType.values.map((type) {
                           return Padding(
@@ -100,7 +102,8 @@ class _EmptyTerminal extends StatelessWidget {
                             ),
                           );
                         }).toList(),
-                      );
+                        ),
+                        );
                     },
                   ),
                 ],
