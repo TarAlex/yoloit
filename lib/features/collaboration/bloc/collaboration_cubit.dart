@@ -44,6 +44,7 @@ class CollaborationCubit extends Cubit<CollaborationState> {
         mode:         CollaborationMode.hosting,
         address:      address,
         webClientUrl: _server!.webClientUrl,
+        localUrl:     _server!.localUrl,
       ));
     } catch (e) {
       _server = null;
