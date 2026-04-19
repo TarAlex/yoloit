@@ -143,7 +143,7 @@ class _TerminalViewState extends State<_TerminalView> {
                     index: activeIndex,
                     children: sessions.asMap().entries.map((e) {
                       return RepaintBoundary(
-                        child: _TerminalWidget(
+                        child: TerminalWidget(
                           key: ValueKey(e.value.id),
                           session: e.value,
                           isActive: e.key == activeIndex,
@@ -472,16 +472,16 @@ class _SessionInfoBar extends StatelessWidget {
   }
 }
 
-class _TerminalWidget extends StatefulWidget {
-  const _TerminalWidget({super.key, required this.session, required this.isActive});
+class TerminalWidget extends StatefulWidget {
+  const TerminalWidget({super.key, required this.session, required this.isActive});
   final AgentSession session;
   final bool isActive;
 
   @override
-  State<_TerminalWidget> createState() => _TerminalWidgetState();
+  State<TerminalWidget> createState() => TerminalWidgetState();
 }
 
-class _TerminalWidgetState extends State<_TerminalWidget> {
+class TerminalWidgetState extends State<TerminalWidget> {
   final _controller = TerminalController(
     pointerInputs: const PointerInputs.none(),
   );
@@ -511,9 +511,17 @@ class _TerminalWidgetState extends State<_TerminalWidget> {
   List<CellOffset> _searchHits = [];
   int _currentHitIndex = -1;
 
+  // Identity-checked callbacks stored as fields so we can null them safely in
+  // dispose without clobbering another TerminalWidget that rebound the same
+  // shared `session.terminal` (e.g. panel + mindmap viewing same session).
+  void Function(String)? _boundOnOutput;
+  void Function(int, int, int, int)? _boundOnResize;
+
   @override
   void initState() {
     super.initState();
+    _focusNode.addListener(() {
+    });
     _bindTerminal();
     _requestFocusAfterFrame();
     HardwareKeyboard.instance.addHandler(_handleHardwareKey);
@@ -524,11 +532,10 @@ class _TerminalWidgetState extends State<_TerminalWidget> {
   }
 
   @override
-  void didUpdateWidget(_TerminalWidget old) {
+  void didUpdateWidget(TerminalWidget old) {
     super.didUpdateWidget(old);
     if (old.session.id != widget.session.id) {
-      old.session.terminal.onOutput = null;
-      old.session.terminal.onResize = null;
+      _unbindTerminalIfOurs(old.session);
       HardwareKeyboard.instance.removeHandler(_handleHardwareKey);
       _bindTerminal();
       HardwareKeyboard.instance.addHandler(_handleHardwareKey);
@@ -541,7 +548,9 @@ class _TerminalWidgetState extends State<_TerminalWidget> {
 
   void _requestFocusAfterFrame() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _focusNode.requestFocus();
+      if (mounted) {
+        _focusNode.requestFocus();
+      }
     });
     // Retry after dialog dismiss animation (e.g. NewAgentSessionDialog pop).
     _focusRetryTimer?.cancel();
@@ -553,13 +562,27 @@ class _TerminalWidgetState extends State<_TerminalWidget> {
   }
 
   void _bindTerminal() {
-    widget.session.terminal.onOutput = (data) {
+    _boundOnOutput = (data) {
       PtyService.instance.write(widget.session.id, data);
     };
-    // Keep PTY size in sync with the xterm viewport so TUI apps render correctly.
-    widget.session.terminal.onResize = (cols, rows, pixelWidth, pixelHeight) {
+    _boundOnResize = (cols, rows, pixelWidth, pixelHeight) {
       PtyService.instance.resize(widget.session.id, cols, rows);
     };
+    widget.session.terminal.onOutput = _boundOnOutput;
+    widget.session.terminal.onResize = _boundOnResize;
+  }
+
+  void _unbindTerminalIfOurs(AgentSession session) {
+    // Only clear if the bound callback is still ours — otherwise another
+    // TerminalWidget (e.g. panel vs mindmap) has since rebound and we'd wipe
+    // its binding.
+    if (identical(session.terminal.onOutput, _boundOnOutput)) {
+      session.terminal.onOutput = null;
+    } else {
+    }
+    if (identical(session.terminal.onResize, _boundOnResize)) {
+      session.terminal.onResize = null;
+    }
   }
 
   /// Intercepts macOS keyboard shortcuts and translates them to PTY control
@@ -831,8 +854,7 @@ class _TerminalWidgetState extends State<_TerminalWidget> {
   void dispose() {
     _focusRetryTimer?.cancel();
     HardwareKeyboard.instance.removeHandler(_handleHardwareKey);
-    widget.session.terminal.onOutput = null;
-    widget.session.terminal.onResize = null;
+    _unbindTerminalIfOurs(widget.session);
     _controller.dispose();
     _focusNode.dispose();
     _searchController.dispose();

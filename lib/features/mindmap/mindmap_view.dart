@@ -1,0 +1,1110 @@
+import 'package:file_picker/file_picker.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:path/path.dart' as p;
+import 'package:yoloit/features/editor/bloc/file_editor_cubit.dart';
+import 'package:yoloit/features/editor/bloc/file_editor_state.dart';
+import 'package:yoloit/features/mindmap/bloc/mindmap_cubit.dart';
+import 'package:yoloit/features/mindmap/bloc/mindmap_state.dart';
+import 'package:yoloit/features/mindmap/mindmap_layout_engine.dart';
+import 'package:yoloit/features/mindmap/model/mindmap_node_model.dart';
+import 'package:yoloit/features/mindmap/nodes/node_registry.dart';
+import 'package:yoloit/features/mindmap/widgets/mindmap_connector.dart';
+import 'package:yoloit/features/mindmap/widgets/mindmap_node.dart';
+import 'package:yoloit/features/review/bloc/review_cubit.dart';
+import 'package:yoloit/features/review/bloc/review_state.dart';
+import 'package:yoloit/features/runs/bloc/run_cubit.dart';
+import 'package:yoloit/features/runs/bloc/run_state.dart';
+import 'package:yoloit/features/runs/models/run_session.dart';
+import 'package:yoloit/features/terminal/bloc/terminal_cubit.dart';
+import 'package:yoloit/features/terminal/bloc/terminal_state.dart';
+import 'package:yoloit/features/terminal/models/agent_session.dart';
+import 'package:yoloit/features/workspaces/bloc/workspace_cubit.dart';
+import 'package:yoloit/features/workspaces/bloc/workspace_state.dart';
+
+/// The Miro-like mind-map canvas view.
+/// Shows all workspaces, sessions, repos, branches, agents (with live terminals),
+/// changed files, and the active editor as interconnected draggable cards.
+class MindMapView extends StatefulWidget {
+  const MindMapView({super.key});
+
+  @override
+  State<MindMapView> createState() => _MindMapViewState();
+}
+
+class _MindMapViewState extends State<MindMapView>
+    with SingleTickerProviderStateMixin {
+  final _transformCtrl = TransformationController();
+  late AnimationController _dashCtrl;
+  late Animation<double>   _dashAnim;
+
+  @override
+  void initState() {
+    super.initState();
+    _dashCtrl = AnimationController(
+      vsync:    this,
+      duration: const Duration(milliseconds: 900),
+    )..repeat();
+    _dashAnim = Tween<double>(begin: 0.0, end: 1.0).animate(_dashCtrl);
+
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      await context.read<MindMapCubit>().loadPersistedPositions();
+      if (!mounted) return;
+      // Preload persisted session metadata for all non-active workspaces so
+      // the mindmap can render their terminals as idle cards.
+      final wsState = context.read<WorkspaceCubit>().state;
+      if (wsState is WorkspaceLoaded) {
+        await context
+            .read<TerminalCubit>()
+            .loadPersistedMetadataForWorkspaces(
+              wsState.workspaces.map((w) => w.id).toList(),
+            );
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _transformCtrl.dispose();
+    _dashCtrl.dispose();
+    super.dispose();
+  }
+
+  /// Pans the canvas so [nodeId] is roughly centered on screen.
+  void _scrollToNode(String nodeId, MindMapState mmState) {
+    final pos = mmState.positions[nodeId];
+    if (pos == null) return;
+    final renderBox = context.findRenderObject() as RenderBox?;
+    if (renderBox == null) return;
+    final screenSize = renderBox.size;
+    const editorW = 460.0;
+    const editorH = 348.0;
+    final targetX = pos.dx + editorW / 2 - screenSize.width  / 2;
+    final targetY = pos.dy + editorH / 2 - screenSize.height / 2;
+    final scale = _transformCtrl.value.getMaxScaleOnAxis();
+    _transformCtrl.value = Matrix4.identity()
+      ..scale(scale)
+      ..translate(-targetX, -targetY);
+  }
+
+  // ── Build node + connection lists from blocs ───────────────────────────
+
+  ({List<MindMapNodeData> nodes, List<MindMapConnection> conns}) _buildData(
+    WorkspaceState wsState,
+    TerminalState  termState,
+    ReviewState    reviewState,
+    FileEditorState editorState,
+    RunState       runState,
+  ) {
+    final nodes  = <MindMapNodeData>[];
+    final conns  = <MindMapConnection>[];
+
+    if (wsState is! WorkspaceLoaded) return (nodes: nodes, conns: conns);
+
+    for (final ws in wsState.workspaces) {
+      final wsNodeId = 'ws:${ws.id}';
+      nodes.add(WorkspaceNodeData(id: wsNodeId, workspace: ws));
+
+      // Sessions (terminal sessions) belonging to this workspace.
+      // Match by workspaceId when set; fall back to workspacePath prefix when
+      // workspaceId is null (older sessions may not have it populated).
+      final sessions = termState is TerminalLoaded
+          ? termState.allSessions.where((s) {
+              if (s.workspaceId != null) return s.workspaceId == ws.id;
+              return ws.paths.any((p2) => s.workspacePath.startsWith(p2));
+            }).toList()
+          : <AgentSession>[];
+
+      for (final session in sessions) {
+        // MERGED session+terminal card (single card per session, since sessions
+        // are 1:1 with terminals in our data model).
+        final agentNodeId = 'agent:${session.id}';
+        nodes.add(AgentNodeData(
+          id:               agentNodeId,
+          session:          session,
+          workspaceId:      ws.id,
+          workspacePaths:   ws.paths,
+          workspaceBranch:  ws.gitBranch,
+        ));
+
+        final isLive = session.status == AgentStatus.live;
+        final agentConnStyle = isLive ? ConnectorStyle.animated : ConnectorStyle.solid;
+        final agentColor     = isLive ? const Color(0xFF34D399) : const Color(0xFF60A5FA);
+
+        // Workspace → session/agent
+        conns.add(MindMapConnection(
+          fromId: wsNodeId,
+          toId:   agentNodeId,
+          style:  agentConnStyle,
+          color:  agentColor.withAlpha(100),
+        ));
+
+        // ── Repos & branches ──────────────────────────────────────────
+        // Prefer worktreeContexts; fall back to workspace paths.
+        final wt = session.worktreeContexts;
+        final repoPaths = <String, String>{}; // repoPath → branchPath (or gitBranch)
+
+        if (wt != null && wt.isNotEmpty) {
+          for (final e in wt.entries) {
+            repoPaths[e.key] = e.value;
+          }
+        } else {
+          for (final rp in ws.paths) {
+            repoPaths[rp] = ws.gitBranch ?? 'main';
+          }
+        }
+
+        final allBranchNodeIds = <String>[];
+        for (final entry in repoPaths.entries) {
+          final repoPath     = entry.key;
+          final branchRef    = entry.value;
+          final repoName     = p.basename(repoPath);
+          final repoNodeId   = 'repo:${ws.id}:$repoPath';
+          final branchNodeId = 'branch:${ws.id}:$repoPath';
+
+          if (!nodes.any((n) => n.id == repoNodeId)) {
+            nodes.add(RepoNodeData(
+              id:        repoNodeId,
+              sessionId: session.id,
+              repoPath:  repoPath,
+              repoName:  repoName,
+              branch:    p.basename(branchRef),
+            ));
+          }
+          conns.add(MindMapConnection(
+            fromId: agentNodeId,
+            toId:   repoNodeId,
+            style:  ConnectorStyle.solid,
+            color:  const Color(0x59C084FC),
+          ));
+
+          if (!nodes.any((n) => n.id == branchNodeId)) {
+            nodes.add(BranchNodeData(
+              id:         branchNodeId,
+              repoId:     repoNodeId,
+              repoName:   repoName,
+              branch:     p.basename(branchRef),
+              commitHash: '',
+            ));
+          }
+          conns.add(MindMapConnection(
+            fromId: repoNodeId,
+            toId:   branchNodeId,
+            style:  ConnectorStyle.dashed,
+            color:  const Color(0x597C6BFF),
+          ));
+
+          allBranchNodeIds.add(branchNodeId);
+        }
+      }
+
+      // No sessions → show only the workspace card, no repos/branches.
+    }
+
+    // Orphan sessions — sessions that don't match any known workspace by id
+    // or by any path prefix. Render them anyway so the user sees all terminals.
+    if (termState is TerminalLoaded) {
+      final existingAgents = nodes.whereType<AgentNodeData>().map((a) => a.session.id).toSet();
+      for (final session in termState.allSessions) {
+        if (existingAgents.contains(session.id)) continue;
+        final agentNodeId = 'agent:${session.id}';
+        // Try to match workspace for path fallback
+        final matchedWs = wsState.workspaces
+            .where((w) => w.id == session.workspaceId ||
+                w.paths.any((p2) => session.workspacePath.startsWith(p2)))
+            .firstOrNull;
+        nodes.add(AgentNodeData(
+          id:              agentNodeId,
+          session:         session,
+          workspaceId:     session.workspaceId ?? '',
+          workspacePaths:  matchedWs?.paths ?? const [],
+          workspaceBranch: matchedWs?.gitBranch,
+        ));
+
+        // Build repos/branches from worktreeContexts; fall back to workspace paths.
+        final wt = session.worktreeContexts?.isNotEmpty == true
+            ? session.worktreeContexts!
+            : (matchedWs != null && matchedWs.paths.isNotEmpty
+                ? {for (final rp in matchedWs.paths) rp: matchedWs.gitBranch ?? 'main'}
+                : {session.workspacePath: 'main'});
+        for (final e in wt.entries) {
+          final repoPath   = e.key;
+          final branchRef  = e.value;
+          final repoName   = p.basename(repoPath);
+          final repoNodeId = 'repo:orphan:$repoPath';
+          final brNodeId   = 'branch:orphan:$repoPath';
+          if (!nodes.any((n) => n.id == repoNodeId)) {
+            nodes.add(RepoNodeData(
+              id: repoNodeId, sessionId: session.id,
+              repoPath: repoPath, repoName: repoName,
+              branch: p.basename(branchRef),
+            ));
+          }
+          conns.add(MindMapConnection(
+            fromId: agentNodeId, toId: repoNodeId,
+            style: ConnectorStyle.solid, color: const Color(0x59C084FC),
+          ));
+          if (!nodes.any((n) => n.id == brNodeId)) {
+            nodes.add(BranchNodeData(
+              id: brNodeId, repoId: repoNodeId, repoName: repoName,
+              branch: p.basename(branchRef), commitHash: '',
+            ));
+          }
+          conns.add(MindMapConnection(
+            fromId: repoNodeId, toId: brNodeId,
+            style: ConnectorStyle.dashed, color: const Color(0x597C6BFF),
+          ));
+        }
+      }
+    }
+
+    // Changed files (from review state).
+    if (reviewState is ReviewLoaded && reviewState.changedFiles.isNotEmpty) {
+      final groupedByRepo = <String, List<dynamic>>{};
+      for (final f in reviewState.changedFiles) {
+        final repo = f.repoPath ?? 'unknown';
+        groupedByRepo.putIfAbsent(repo, () => []).add(f);
+      }
+      for (final entry in groupedByRepo.entries) {
+        final filesId = 'files:${entry.key}';
+        nodes.add(FilesNodeData(
+          id:           filesId,
+          sessionId:    '',
+          repoPath:     entry.key,
+          changedFiles: entry.value.cast(),
+        ));
+        // Connect from matching branch node if available.
+        final branchNode = nodes.whereType<BranchNodeData>()
+            .where((b) => b.repoName == p.basename(entry.key))
+            .firstOrNull;
+        if (branchNode != null) {
+          conns.add(MindMapConnection(
+            fromId: branchNode.id,
+            toId:   filesId,
+            style:  ConnectorStyle.dashed,
+            color:  const Color(0x406B7898),
+          ));
+        }
+      }
+    }
+
+    // File Tree / Diffs — one card per repo (RepoNode), connecting from repo.
+    final repoNodes = nodes.whereType<RepoNodeData>().toList();
+    for (final repo in repoNodes) {
+      final treeId = 'tree:${repo.repoPath}';
+      if (nodes.any((n) => n.id == treeId)) continue;
+      nodes.add(FileTreeNodeData(
+        id:          treeId,
+        workspaceId: '',
+        repoPath:    repo.repoPath,
+        repoName:    repo.repoName,
+      ));
+      conns.add(MindMapConnection(
+        fromId: repo.id,
+        toId:   treeId,
+        style:  ConnectorStyle.dashed,
+        color:  const Color(0x6034D399),
+      ));
+    }
+    // Also add one tree per standalone workspace path that has no sessions
+    // (and therefore no RepoNode).
+    for (final ws in wsState.workspaces) {
+      for (final path in ws.paths) {
+        final treeId = 'tree:$path';
+        if (nodes.any((n) => n.id == treeId)) continue;
+        nodes.add(FileTreeNodeData(
+          id:          treeId,
+          workspaceId: ws.id,
+          repoPath:    path,
+          repoName:    p.basename(path),
+        ));
+        conns.add(MindMapConnection(
+          fromId: 'ws:${ws.id}',
+          toId:   treeId,
+          style:  ConnectorStyle.dashed,
+          color:  const Color(0x5034D399),
+        ));
+      }
+    }
+
+    // File editor node (when a file is open).
+    if (editorState.isVisible && editorState.tabs.isNotEmpty) {
+      final idx       = editorState.activeIndex.clamp(0, editorState.tabs.length - 1);
+      final activeTab = editorState.tabs[idx];
+      const editorId  = 'editor:active';
+      nodes.add(EditorNodeData(
+        id:       editorId,
+        filePath: activeTab.filePath,
+        content:  activeTab.content ?? '',
+        language: _detectLanguage(activeTab.filePath),
+      ));
+    }
+
+    // Run sessions — connect from the matching session/agent card.
+    if (runState.sessions.isNotEmpty) {
+      for (final runSess in runState.sessions) {
+        final matchingWs = (wsState as WorkspaceLoaded? ?? wsState).workspaces
+            .where((ws) => ws.paths.any((p2) => runSess.workspacePath.startsWith(p2)))
+            .firstOrNull;
+        final runId = 'run:${runSess.id}';
+        nodes.add(RunNodeData(id: runId, session: runSess, workspaceId: matchingWs?.id ?? ''));
+        // Prefer connecting from the session/agent card in the matching ws.
+        final matchingAgent = nodes.whereType<AgentNodeData>()
+            .where((a) => a.workspaceId == (matchingWs?.id ?? ''))
+            .firstOrNull;
+        conns.add(MindMapConnection(
+          fromId: matchingAgent?.id ?? 'ws:${matchingWs?.id ?? ''}',
+          toId:   runId,
+          style:  runSess.status == RunStatus.running
+              ? ConnectorStyle.animated
+              : ConnectorStyle.solid,
+          color:  runSess.status == RunStatus.running
+              ? const Color(0xAA34D399)
+              : const Color(0x8060A5FA),
+        ));
+      }
+    }
+
+    return (nodes: nodes, conns: conns);
+  }
+
+  String _detectLanguage(String path) {
+    final ext = p.extension(path).toLowerCase();
+    return switch (ext) {
+      '.dart'   => 'Dart',
+      '.ts'     => 'TypeScript',
+      '.tsx'    => 'TSX',
+      '.js'     => 'JavaScript',
+      '.py'     => 'Python',
+      '.go'     => 'Go',
+      '.rs'     => 'Rust',
+      '.yaml' || '.yml' => 'YAML',
+      '.json'   => 'JSON',
+      '.sql'    => 'SQL',
+      '.md'     => 'Markdown',
+      _         => ext.isNotEmpty ? ext.replaceFirst('.', '').toUpperCase() : 'TEXT',
+    };
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return BlocBuilder<RunCubit, RunState>(
+      builder: (context, runState) {
+        return BlocBuilder<WorkspaceCubit, WorkspaceState>(
+          builder: (context, wsState) {
+            return BlocBuilder<TerminalCubit, TerminalState>(
+              builder: (context, termState) {
+                return BlocBuilder<ReviewCubit, ReviewState>(
+                  builder: (context, reviewState) {
+                    return BlocBuilder<FileEditorCubit, FileEditorState>(
+                      builder: (context, editorState) {
+                        final (:nodes, :conns) =
+                            _buildData(wsState, termState, reviewState, editorState, runState);
+
+                        // Update cubit with new nodes (triggers layout if needed).
+                        WidgetsBinding.instance.addPostFrameCallback((_) {
+                          if (!mounted) return;
+                          final mm = context.read<MindMapCubit>();
+                          mm.updateNodes(nodes, conns);
+                          // If editor just became visible, unhide it and scroll to it.
+                          if (editorState.isVisible && editorState.tabs.isNotEmpty) {
+                            mm.showNode('editor:active');
+                            _scrollToNode('editor:active', mm.state);
+                          }
+                        });
+
+                        return _MindMapCanvas(
+                          nodes:          nodes,
+                          conns:          conns,
+                          transformCtrl:  _transformCtrl,
+                          dashAnimation:  _dashAnim,
+                        );
+                      },
+                    );
+                  },
+                );
+              },
+            );
+          },
+        );
+      },
+    );
+  }
+}
+
+// ── Canvas ─────────────────────────────────────────────────────────────────
+
+class _MindMapCanvas extends StatefulWidget {
+  const _MindMapCanvas({
+    required this.nodes,
+    required this.conns,
+    required this.transformCtrl,
+    required this.dashAnimation,
+  });
+  final List<MindMapNodeData> nodes;
+  final List<MindMapConnection> conns;
+  final TransformationController transformCtrl;
+  final Animation<double> dashAnimation;
+
+  @override
+  State<_MindMapCanvas> createState() => _MindMapCanvasState();
+}
+
+class _MindMapCanvasState extends State<_MindMapCanvas> {
+  bool _nodeDragging = false;
+
+  // Large canvas with generous top/left padding so users can scroll in all
+  // directions. boundaryMargin(infinity) on InteractiveViewer makes it infinite.
+  static const _canvasW = 6000.0;
+  static const _canvasH = 4000.0;
+
+  // Column x positions mirrored from MindMapLayoutEngine, offset right for space.
+  static const _colX = [240.0, 480.0, 720.0, 940.0, 1140.0, 1500.0, 1760.0, 2240.0];
+
+  /// Returns a column-based fallback so nodes are never piled at (0,0).
+  Offset _fallbackPos(MindMapNodeData node) {
+    final col = node.columnIndex.clamp(0, _colX.length - 1);
+    // Start at y=300 so users have room to scroll upward.
+    return Offset(_colX[col], 300.0);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      color: const Color(0xFF0D0F14),
+      child: Stack(
+        children: [
+          // ── Canvas (pan + pinch zoom) ────────────────────────────────
+          InteractiveViewer(
+            transformationController: widget.transformCtrl,
+            // Infinite boundary — user can pan in any direction freely.
+            boundaryMargin: const EdgeInsets.all(double.infinity),
+            minScale: 0.1,
+            maxScale: 3.0,
+            panEnabled: !_nodeDragging,
+            scaleEnabled: true,
+            constrained: false,
+            child: SizedBox(
+              width:  _canvasW,
+              height: _canvasH,
+              child: BlocBuilder<MindMapCubit, MindMapState>(
+                builder: (context, mmState) {
+                  final defaultSizeMap = {
+                    for (final n in widget.nodes) n.id: n.defaultSize,
+                  };
+                  return Stack(
+                    clipBehavior: Clip.none,
+                    children: [
+                      // Dot-grid background.
+                      Positioned.fill(child: _DotGrid()),
+
+                      // Column labels.
+                      for (var i = 0; i < MindMapLayoutEngine.columnLabels.length; i++)
+                        Positioned(
+                          left: MindMapLayoutEngine.columnLabelX(i),
+                          top:  16,
+                          child: Text(
+                            MindMapLayoutEngine.columnLabels[i],
+                            style: const TextStyle(
+                              fontSize: 9,
+                              fontWeight: FontWeight.w700,
+                              letterSpacing: 0.1,
+                              color: Color(0xFF3D475E),
+                            ),
+                          ),
+                        ),
+
+                      // SVG connector layer (below nodes).
+                      Positioned.fill(
+                        child: MindMapConnectorLayer(
+                          connections:  widget.conns
+                              .where((c) {
+                                if (mmState.hidden.contains(c.fromId)) return false;
+                                if (mmState.hidden.contains(c.toId))   return false;
+                                final fromTag = widget.nodes
+                                    .where((n) => n.id == c.fromId)
+                                    .firstOrNull?.typeTag;
+                                final toTag = widget.nodes
+                                    .where((n) => n.id == c.toId)
+                                    .firstOrNull?.typeTag;
+                                if (fromTag != null && mmState.hiddenTypes.contains(fromTag)) return false;
+                                if (toTag   != null && mmState.hiddenTypes.contains(toTag))   return false;
+                                return true;
+                              })
+                              .toList(),
+                          positions:    mmState.positions,
+                          sizes:        mmState.sizes,
+                          defaultSizes: defaultSizeMap,
+                          dashAnimation: widget.dashAnimation,
+                        ),
+                      ),
+
+                      // Node cards (skip hidden and hidden-type).
+                      for (final node in widget.nodes)
+                        if (!mmState.hidden.contains(node.id) &&
+                            !mmState.hiddenTypes.contains(node.typeTag))
+                          MindMapNode(
+                            key:              ValueKey(node.id),
+                            id:               node.id,
+                            defaultSize:      node.defaultSize,
+                            minResizeSize:    NodeRegistry.minResizeSize(node),
+                            fallbackPosition: _fallbackPos(node),
+                            onClose:          () => context.read<MindMapCubit>().hideNode(node.id),
+                            child:            NodeRegistry.build(node),
+                          ),
+                    ],
+                  );
+                },
+              ),
+            ),
+          ),
+
+          // ── Toolbar overlay ───────────────────────────────────────────
+          Positioned(
+            top: 8, right: 8,
+            child: _CanvasToolbar(
+              transformCtrl: widget.transformCtrl,
+            ),
+          ),
+
+          // ── Group sidebar (left) ──────────────────────────────────────
+          Positioned(
+            top: 8, left: 8, bottom: 8,
+            child: _GroupSidebar(nodes: widget.nodes),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ── Dot-grid background ────────────────────────────────────────────────────
+
+class _DotGrid extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return CustomPaint(painter: _DotGridPainter());
+  }
+}
+
+class _DotGridPainter extends CustomPainter {
+  static final _paint = Paint()
+    ..color = const Color(0x8C3A4560)
+    ..style = PaintingStyle.fill;
+
+  static const _spacing = 28.0;
+  static const _dotR    = 0.9;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    for (double x = 14; x < size.width; x += _spacing) {
+      for (double y = 14; y < size.height; y += _spacing) {
+        canvas.drawCircle(Offset(x, y), _dotR, _paint);
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(_DotGridPainter old) => false;
+}
+
+// ── Toolbar ────────────────────────────────────────────────────────────────
+
+class _CanvasToolbar extends StatelessWidget {
+  const _CanvasToolbar({required this.transformCtrl});
+  final TransformationController transformCtrl;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        _ToolBtn(
+          icon: Icons.remove,
+          tooltip: 'Zoom out',
+          onTap: () => _zoom(context, 0.8),
+        ),
+        const SizedBox(width: 1),
+        _ToolBtn(
+          icon: Icons.filter_center_focus,
+          tooltip: 'Fit / reset',
+          onTap: () => transformCtrl.value = Matrix4.identity(),
+        ),
+        const SizedBox(width: 1),
+        _ToolBtn(
+          icon: Icons.add,
+          tooltip: 'Zoom in',
+          onTap: () => _zoom(context, 1.25),
+        ),
+        const SizedBox(width: 8),
+        _ToolBtn(
+          icon: Icons.refresh,
+          tooltip: 'Reset layout',
+          onTap: () => context.read<MindMapCubit>().resetLayout(),
+        ),
+        const SizedBox(width: 1),
+        BlocBuilder<MindMapCubit, MindMapState>(
+          buildWhen: (p, n) => p.hidden.length != n.hidden.length,
+          builder: (context, state) {
+            if (state.hidden.isEmpty) return const SizedBox.shrink();
+            return Row(
+              children: [
+                _ToolBtn(
+                  icon: Icons.visibility,
+                  tooltip: 'Show all (${state.hidden.length} hidden)',
+                  onTap: () => context.read<MindMapCubit>().showAllNodes(),
+                ),
+                const SizedBox(width: 1),
+              ],
+            );
+          },
+        ),
+        const SizedBox(width: 1),
+      ],
+    );
+  }
+
+  void _zoom(BuildContext context, double factor) {
+    final m = transformCtrl.value.clone();
+    m.scaleByDouble(factor, factor, 1.0, 1.0);
+    transformCtrl.value = m;
+  }
+}
+
+class _ToolBtn extends StatelessWidget {
+  const _ToolBtn({required this.icon, required this.tooltip, required this.onTap});
+  final IconData icon;
+  final String tooltip;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: tooltip,
+      child: GestureDetector(
+        onTap: onTap,
+        child: Container(
+          width: 30, height: 30,
+          decoration: BoxDecoration(
+            color: const Color(0xFF12151C),
+            border: Border.all(color: const Color(0xFF2A3040)),
+            borderRadius: BorderRadius.circular(6),
+          ),
+          child: Icon(icon, size: 15, color: const Color(0xFF6B7898)),
+        ),
+      ),
+    );
+  }
+}
+
+// ── Group sidebar ──────────────────────────────────────────────────────────
+
+class _GroupSidebar extends StatefulWidget {
+  const _GroupSidebar({required this.nodes});
+  final List<MindMapNodeData> nodes;
+
+  @override
+  State<_GroupSidebar> createState() => _GroupSidebarState();
+}
+
+class _GroupSidebarState extends State<_GroupSidebar> {
+  bool _collapsed = false;
+  final _expandedGroups = <String>{};
+
+  static const _groups = [
+    ('ws',      'Workspaces',       Icons.folder_copy_outlined),
+    ('agent',   'Sessions / Terminals', Icons.terminal),
+    ('repo',    'Repositories',     Icons.source),
+    ('branch',  'Branches',         Icons.alt_route),
+    ('files',   'Files Changed',    Icons.insert_drive_file_outlined),
+    ('tree',    'File Tree / Diffs', Icons.account_tree_outlined),
+    ('editor',  'Editor',           Icons.code),
+    ('run',     'Runs',             Icons.play_circle_outline),
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    // Count nodes per tag.
+    final counts = <String, int>{};
+    for (final n in widget.nodes) {
+      counts[n.typeTag] = (counts[n.typeTag] ?? 0) + 1;
+    }
+
+    return BlocBuilder<MindMapCubit, MindMapState>(
+      buildWhen: (p, n) =>
+          p.hiddenTypes != n.hiddenTypes ||
+          p.hidden      != n.hidden,
+      builder: (context, mm) {
+        if (_collapsed) {
+          return _SidebarToggle(
+            collapsed: true,
+            onTap: () => setState(() => _collapsed = false),
+          );
+        }
+        return Container(
+          width: 220,
+          decoration: BoxDecoration(
+            color: const Color(0xEE0F1218),
+            border: Border.all(color: const Color(0xFF1E2330)),
+            borderRadius: BorderRadius.circular(10),
+            boxShadow: const [BoxShadow(color: Color(0x80000000), blurRadius: 18)],
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              // Header
+              Padding(
+                padding: const EdgeInsets.fromLTRB(10, 8, 4, 8),
+                child: Row(
+                  children: [
+                    const Icon(Icons.filter_list, size: 14, color: Color(0xFF7C6BFF)),
+                    const SizedBox(width: 6),
+                    const Expanded(
+                      child: Text(
+                        'Show / Hide',
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                          color: Color(0xFFE8E8FF),
+                          letterSpacing: 0.3,
+                        ),
+                      ),
+                    ),
+                    if (mm.hidden.isNotEmpty || mm.hiddenTypes.isNotEmpty)
+                      InkWell(
+                        onTap: () => context.read<MindMapCubit>().showAllNodes(),
+                        child: const Padding(
+                          padding: EdgeInsets.all(4),
+                          child: Text(
+                            'Show all',
+                            style: TextStyle(fontSize: 9, color: Color(0xFF7C6BFF)),
+                          ),
+                        ),
+                      ),
+                    InkWell(
+                      onTap: () => setState(() => _collapsed = true),
+                      child: const Padding(
+                        padding: EdgeInsets.all(4),
+                        child: Icon(Icons.chevron_left, size: 14, color: Color(0xFF6B7898)),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const Divider(height: 1, color: Color(0xFF1E2330)),
+              // Quick-create actions row
+              Padding(
+                padding: const EdgeInsets.fromLTRB(8, 8, 8, 4),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: _SidebarAction(
+                        icon: Icons.create_new_folder_outlined,
+                        label: '+ Workspace',
+                        onTap: () => _createWorkspace(context),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              // Group list
+              Flexible(
+                child: ListView(
+                  padding: const EdgeInsets.symmetric(vertical: 4),
+                  children: [
+                    for (final g in _groups)
+                      _GroupRow(
+                        tag:      g.$1,
+                        label:    g.$2,
+                        icon:     g.$3,
+                        count:    counts[g.$1] ?? 0,
+                        hidden:   mm.hiddenTypes.contains(g.$1),
+                        expanded: _expandedGroups.contains(g.$1),
+                        onToggleHidden: () =>
+                            context.read<MindMapCubit>().toggleType(g.$1),
+                        onToggleExpand: () => setState(() {
+                          if (_expandedGroups.contains(g.$1)) {
+                            _expandedGroups.remove(g.$1);
+                          } else {
+                            _expandedGroups.add(g.$1);
+                          }
+                        }),
+                        items: widget.nodes.where((n) => n.typeTag == g.$1).toList(),
+                        individualHidden: mm.hidden,
+                      ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _SidebarToggle extends StatelessWidget {
+  const _SidebarToggle({required this.collapsed, required this.onTap});
+  final bool collapsed;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: 'Show sidebar',
+      child: GestureDetector(
+        onTap: onTap,
+        child: Container(
+          width: 28, height: 48,
+          decoration: BoxDecoration(
+            color: const Color(0xEE0F1218),
+            border: Border.all(color: const Color(0xFF1E2330)),
+            borderRadius: const BorderRadius.only(
+              topRight: Radius.circular(8),
+              bottomRight: Radius.circular(8),
+            ),
+          ),
+          child: const Icon(Icons.chevron_right, size: 16, color: Color(0xFF7C6BFF)),
+        ),
+      ),
+    );
+  }
+}
+
+class _GroupRow extends StatelessWidget {
+  const _GroupRow({
+    required this.tag,
+    required this.label,
+    required this.icon,
+    required this.count,
+    required this.hidden,
+    required this.expanded,
+    required this.onToggleHidden,
+    required this.onToggleExpand,
+    required this.items,
+    required this.individualHidden,
+  });
+  final String tag;
+  final String label;
+  final IconData icon;
+  final int count;
+  final bool hidden;
+  final bool expanded;
+  final VoidCallback onToggleHidden;
+  final VoidCallback onToggleExpand;
+  final List<MindMapNodeData> items;
+  final Set<String> individualHidden;
+
+  @override
+  Widget build(BuildContext context) {
+    final faded = hidden || count == 0;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        InkWell(
+          onTap: count == 0 ? null : onToggleExpand,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+            child: Row(
+              children: [
+                GestureDetector(
+                  onTap: count == 0 ? null : onToggleHidden,
+                  child: Padding(
+                    padding: const EdgeInsets.all(2),
+                    child: Icon(
+                      hidden ? Icons.visibility_off : Icons.visibility,
+                      size: 13,
+                      color: hidden ? const Color(0xFF4A5680) : const Color(0xFF7C6BFF),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 6),
+                Icon(icon, size: 12, color: faded ? const Color(0xFF4A5680) : const Color(0xFF9AA3BF)),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    label,
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                      color: faded ? const Color(0xFF4A5680) : const Color(0xFFCECEEE),
+                    ),
+                  ),
+                ),
+                Text(
+                  count.toString(),
+                  style: TextStyle(
+                    fontSize: 10,
+                    color: faded ? const Color(0xFF3D475E) : const Color(0xFF6B7898),
+                  ),
+                ),
+                if (count > 0) ...[
+                  const SizedBox(width: 4),
+                  Icon(
+                    expanded ? Icons.expand_less : Icons.expand_more,
+                    size: 13,
+                    color: const Color(0xFF6B7898),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ),
+        if (expanded && count > 0)
+          for (final n in items)
+            _IndividualRow(
+              node: n,
+              hidden: individualHidden.contains(n.id),
+            ),
+      ],
+    );
+  }
+}
+
+class _IndividualRow extends StatelessWidget {
+  const _IndividualRow({required this.node, required this.hidden});
+  final MindMapNodeData node;
+  final bool hidden;
+
+  String _label() {
+    final data = node;
+    if (data is WorkspaceNodeData) return data.workspace.name;
+    if (data is AgentNodeData)     return data.session.displayName;
+    if (data is RepoNodeData)      return data.repoName;
+    if (data is BranchNodeData)    return data.branch;
+    if (data is FilesNodeData)     return p.basename(data.repoPath);
+    if (data is FileTreeNodeData)  return 'Diffs';
+    if (data is EditorNodeData)    return p.basename(data.filePath);
+    if (data is RunNodeData)       return data.session.config.name;
+    return node.id;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: () {
+        final cubit = context.read<MindMapCubit>();
+        if (hidden) {
+          cubit.showNode(node.id);
+        } else {
+          cubit.hideNode(node.id);
+        }
+      },
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(32, 3, 8, 3),
+        child: Row(
+          children: [
+            Icon(
+              hidden ? Icons.visibility_off : Icons.visibility,
+              size: 11,
+              color: hidden ? const Color(0xFF4A5680) : const Color(0x997C6BFF),
+            ),
+            const SizedBox(width: 6),
+            Expanded(
+              child: Text(
+                _label(),
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 10,
+                  color: hidden ? const Color(0xFF4A5680) : const Color(0xFFB0B8D0),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ── Sidebar actions ────────────────────────────────────────────────────────
+
+Future<void> _createWorkspace(BuildContext context) async {
+  final controller = TextEditingController();
+  final name = await showDialog<String>(
+    context: context,
+    builder: (ctx) => AlertDialog(
+      backgroundColor: const Color(0xFF12151C),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(10),
+        side: const BorderSide(color: Color(0xFF2A3040)),
+      ),
+      title: const Text('New Workspace',
+          style: TextStyle(color: Color(0xFFE8E8FF), fontSize: 14)),
+      content: TextField(
+        controller: controller,
+        autofocus: true,
+        style: const TextStyle(color: Color(0xFFE8E8FF)),
+        decoration: const InputDecoration(
+          hintText: 'Workspace name',
+          hintStyle: TextStyle(color: Color(0xFF6B7898)),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(ctx),
+          child: const Text('Cancel', style: TextStyle(color: Color(0xFF6B7898))),
+        ),
+        TextButton(
+          onPressed: () => Navigator.pop(ctx, controller.text.trim()),
+          child: const Text('Pick folder →', style: TextStyle(color: Color(0xFF7C6BFF))),
+        ),
+      ],
+    ),
+  );
+  if (name == null || name.isEmpty || !context.mounted) return;
+  final folder = await FilePicker.platform.getDirectoryPath(
+    dialogTitle: 'Pick a folder for "$name"',
+  );
+  if (folder == null || !context.mounted) return;
+  await context.read<WorkspaceCubit>().addWorkspace(folder, customName: name);
+}
+
+class _SidebarAction extends StatefulWidget {
+  const _SidebarAction({required this.icon, required this.label, required this.onTap});
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+
+  @override
+  State<_SidebarAction> createState() => _SidebarActionState();
+}
+
+class _SidebarActionState extends State<_SidebarAction> {
+  bool _hovered = false;
+  @override
+  Widget build(BuildContext context) {
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      onEnter: (_) => setState(() => _hovered = true),
+      onExit:  (_) => setState(() => _hovered = false),
+      child: GestureDetector(
+        onTap: widget.onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 120),
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+          decoration: BoxDecoration(
+            color: _hovered ? const Color(0xFF2A1E66) : const Color(0xFF1A1E2A),
+            border: Border.all(color: _hovered ? const Color(0xFF7C6BFF) : const Color(0xFF2A3040)),
+            borderRadius: BorderRadius.circular(6),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(widget.icon, size: 12, color: _hovered ? const Color(0xFFC084FC) : const Color(0xFF9AA3BF)),
+              const SizedBox(width: 6),
+              Text(
+                widget.label,
+                style: TextStyle(
+                  fontSize: 10,
+                  fontWeight: FontWeight.w600,
+                  color: _hovered ? const Color(0xFFE8E8FF) : const Color(0xFF9AA3BF),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
