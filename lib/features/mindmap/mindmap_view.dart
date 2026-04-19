@@ -48,6 +48,8 @@ class _MindMapViewState extends State<MindMapView>
   /// Tracks which file path was last animated to — avoids re-animating on
   /// content-only updates when the same file is still active.
   String? _lastFocusedFilePath;
+  /// Set to true after the first successful pan-to-content on open.
+  bool _initialPanDone = false;
 
   @override
   void initState() {
@@ -125,6 +127,52 @@ class _MindMapViewState extends State<MindMapView>
   }
 
   /// Smoothly reset the view to [Matrix4.identity].
+  /// Pan (and optionally scale) so all nodes are visible on first open.
+  void _fitAllNodes(Map<String, Offset> positions, Map<String, Size> sizes) {
+    if (positions.isEmpty) return;
+    final renderBox = context.findRenderObject() as RenderBox?;
+    if (renderBox == null) return;
+    final screen = renderBox.size;
+
+    double minX = double.infinity, minY = double.infinity;
+    double maxX = -double.infinity, maxY = -double.infinity;
+    for (final e in positions.entries) {
+      final pos = e.value;
+      final sz  = sizes[e.key] ?? const Size(200, 150);
+      if (pos.dx < minX) minX = pos.dx;
+      if (pos.dy < minY) minY = pos.dy;
+      if (pos.dx + sz.width  > maxX) maxX = pos.dx + sz.width;
+      if (pos.dy + sz.height > maxY) maxY = pos.dy + sz.height;
+    }
+
+    const padding = 80.0;
+    final spanW = (maxX - minX) + 2 * padding;
+    final spanH = (maxY - minY) + 2 * padding;
+
+    // Choose a scale that fits everything; cap at 1.0 so we don't zoom in.
+    final scale = (screen.width / spanW).clamp(0.1, 1.0) <
+            (screen.height / spanH).clamp(0.1, 1.0)
+        ? (screen.width / spanW).clamp(0.1, 1.0)
+        : (screen.height / spanH).clamp(0.1, 1.0);
+
+    final centerX = (minX + maxX) / 2;
+    final centerY = (minY + maxY) / 2;
+    final tx = centerX - screen.width  / (2 * scale);
+    final ty = centerY - screen.height / (2 * scale);
+    final targetMatrix = Matrix4.identity()
+      ..scale(scale)
+      ..translate(-tx, -ty);
+
+    _panCtrl.stop();
+    _panAnim?.removeListener(_applyPanAnim);
+    _panAnim = Matrix4Tween(
+      begin: _transformCtrl.value.clone(),
+      end:   targetMatrix,
+    ).animate(CurvedAnimation(parent: _panCtrl, curve: Curves.easeInOutCubic))
+      ..addListener(_applyPanAnim);
+    _panCtrl.forward(from: 0.0);
+  }
+
   void _animateToIdentity() {
     _panCtrl.stop();
     _panAnim?.removeListener(_applyPanAnim);
@@ -529,6 +577,11 @@ class _MindMapViewState extends State<MindMapView>
                           if (!mounted) return;
                           final mm = context.read<MindMapCubit>();
                           mm.updateNodes(nodes, conns);
+                          // On first open, fit all nodes into view.
+                          if (!_initialPanDone && mm.state.positions.isNotEmpty) {
+                            _initialPanDone = true;
+                            _fitAllNodes(mm.state.positions, mm.state.sizes);
+                          }
                           // Animate to editor card only when the active file changes
                           // (not on every content update for the same file).
                           if (editorState.isVisible && editorState.tabs.isNotEmpty) {
