@@ -11,7 +11,11 @@ import '../model/sync_message.dart';
 /// Uses raw [ServerSocket] — NOT [HttpServer] — to avoid a macOS/dart bug
 /// where dart:_http calls setOption(TCP_NODELAY) on accepted sockets and
 /// gets errno=22 (EINVAL) for connections coming in on the LAN interface.
-/// Both the WS upgrade and HTTP file serving are implemented manually.
+///
+/// WebSocket frames are parsed manually so the socket's stream subscription
+/// is never cancelled (cancelling it after reading headers permanently moves
+/// the stream to _STATE_CANCELED, preventing WebSocket.fromUpgradedSocket
+/// from re-subscribing — "Bad state: Stream has already been listened to").
 class CollaborationServer {
   CollaborationServer({
     required this.onClientMessage,
@@ -25,7 +29,7 @@ class CollaborationServer {
 
   ServerSocket? _wsServerSocket;
   ServerSocket? _staticServerSocket;
-  final Map<String, WebSocket> _clients = {};
+  final Map<String, _WsClient> _clients = {};
   String _resolvedIp = '127.0.0.1';
 
   bool get isRunning   => _wsServerSocket != null;
@@ -35,7 +39,7 @@ class CollaborationServer {
   Future<String> start() async {
     _wsServerSocket = await ServerSocket.bind(InternetAddress.anyIPv4, port);
     _wsServerSocket!.listen(
-      (s) => _handleWsSocket(s).catchError((_) { _destroySocket(s); }),
+      (s) { try { _handleWsSocket(s); } catch (_) { _destroySocket(s); } },
       onError: (_) {},
     );
     _resolvedIp = await _localIp();
@@ -50,20 +54,20 @@ class CollaborationServer {
     return 'http://$_resolvedIp:$httpPort';
   }
 
-  /// URL to open in a browser on THIS machine (localhost avoids macOS self-connect bug).
+  /// URL to open in a browser on THIS machine (avoids macOS self-connect bug).
   String get localUrl {
     if (_staticServerSocket == null) return '';
     return 'http://localhost:$httpPort';
   }
 
   Future<void> stop() async {
-    for (final ws in _clients.values) {
-      try { await ws.close(); } catch (_) {}
+    for (final client in _clients.values) {
+      try { client.closeNow(); } catch (_) {}
     }
     _clients.clear();
     await _wsServerSocket?.close();
     await _staticServerSocket?.close();
-    _wsServerSocket   = null;
+    _wsServerSocket    = null;
     _staticServerSocket = null;
   }
 
@@ -71,68 +75,121 @@ class CollaborationServer {
     final encoded = msg.encode();
     for (final entry in _clients.entries) {
       if (entry.key == exclude) continue;
-      try { entry.value.add(encoded); } catch (_) {}
+      try { entry.value.send(encoded); } catch (_) {}
     }
   }
 
   void sendTo(String clientId, SyncMessage msg) {
-    try { _clients[clientId]?.add(msg.encode()); } catch (_) {}
+    try { _clients[clientId]?.send(msg.encode()); } catch (_) {}
   }
 
-  // ── WebSocket server (manual HTTP upgrade) ─────────────────────────────────
+  // ── WebSocket server (single subscription, manual frame parsing) ───────────
 
-  Future<void> _handleWsSocket(Socket socket) async {
-    final headers = await _readHeaders(socket);
-    if (headers == null) { socket.destroy(); return; }
+  /// Sets up a single [socket.listen] that handles both:
+  ///  1. HTTP header phase  → parses headers, sends 101 upgrade
+  ///  2. WebSocket phase    → decodes frames, dispatches messages
+  ///
+  /// We never cancel the stream subscription so the stream never enters
+  /// _STATE_CANCELED (which would block any future listen call).
+  void _handleWsSocket(Socket socket) {
+    final buf = <int>[];       // accumulates header bytes
+    bool upgraded = false;
+    String? clientId;
+    _WsClient? client;
 
-    final isUpgrade = (headers['upgrade'] ?? '').toLowerCase() == 'websocket';
-    if (!isUpgrade) {
-      // Health-check ping.
-      _writeRaw(socket,
-        'HTTP/1.1 200 OK\r\n'
-        'Access-Control-Allow-Origin: *\r\n'
-        'Content-Type: text/plain\r\n'
-        'Content-Length: 27\r\n'
-        'Connection: close\r\n'
-        '\r\n'
-        'YoLoIT collaboration server',
-      );
-      await socket.close();
-      return;
-    }
+    socket.listen(
+      (chunk) {
+        if (!upgraded) {
+          // ── Header phase ──────────────────────────────────────────────────
+          buf.addAll(chunk);
 
-    final key = headers['sec-websocket-key'];
-    if (key == null) { socket.destroy(); return; }
+          // Find \r\n\r\n
+          int? endIdx;
+          for (int i = 0; i <= buf.length - 4; i++) {
+            if (buf[i] == 13 && buf[i + 1] == 10 &&
+                buf[i + 2] == 13 && buf[i + 3] == 10) {
+              endIdx = i + 4;
+              break;
+            }
+          }
+          if (endIdx == null) {
+            if (buf.length > 65536) socket.destroy();
+            return; // need more data
+          }
 
-    // Compute Sec-WebSocket-Accept
-    final accept = base64.encode(
-      sha1.convert(utf8.encode('${key}258EAFA5-E914-47DA-95CA-C5AB0DC85B11'))
-          .bytes,
-    );
-    _writeRaw(socket,
-      'HTTP/1.1 101 Switching Protocols\r\n'
-      'Upgrade: websocket\r\n'
-      'Connection: Upgrade\r\n'
-      'Sec-WebSocket-Accept: $accept\r\n'
-      '\r\n',
-    );
+          final headers  = _parseHeaders(buf.sublist(0, endIdx));
+          final leftover = buf.sublist(endIdx);
 
-    final ws = WebSocket.fromUpgradedSocket(socket, serverSide: true);
-    final clientId = 'c_${DateTime.now().millisecondsSinceEpoch}';
-    _clients[clientId] = ws;
+          final isUpgrade =
+              (headers['upgrade'] ?? '').toLowerCase() == 'websocket';
 
-    ws.listen(
-      (raw) {
-        final msg = SyncMessage.decode(raw);
-        if (msg == null) return;
-        onClientMessage(clientId, msg);
-        if (msg.type.startsWith('delta.')) broadcastRaw(msg, exclude: clientId);
+          if (!isUpgrade) {
+            // Health-check ping
+            _writeRaw(socket,
+              'HTTP/1.1 200 OK\r\n'
+              'Access-Control-Allow-Origin: *\r\n'
+              'Content-Type: text/plain\r\n'
+              'Content-Length: 27\r\n'
+              'Connection: close\r\n'
+              '\r\n'
+              'YoLoIT collaboration server',
+            );
+            socket.close();
+            return;
+          }
+
+          final key = headers['sec-websocket-key'];
+          if (key == null) { socket.destroy(); return; }
+
+          // Compute Sec-WebSocket-Accept
+          final accept = base64.encode(
+            sha1.convert(
+              utf8.encode('${key}258EAFA5-E914-47DA-95CA-C5AB0DC85B11'),
+            ).bytes,
+          );
+          _writeRaw(socket,
+            'HTTP/1.1 101 Switching Protocols\r\n'
+            'Upgrade: websocket\r\n'
+            'Connection: Upgrade\r\n'
+            'Sec-WebSocket-Accept: $accept\r\n'
+            '\r\n',
+          );
+
+          upgraded = true;
+          clientId = 'c_${DateTime.now().millisecondsSinceEpoch}';
+          client   = _WsClient(socket);
+          _clients[clientId!] = client!;
+
+          if (leftover.isNotEmpty) {
+            _processWsChunk(client!, clientId!, leftover);
+          }
+          broadcastRaw(SyncMessage.connected(clientId!, 'Remote'));
+
+        } else if (client != null) {
+          // ── WebSocket frame phase ─────────────────────────────────────────
+          _processWsChunk(client!, clientId!, chunk);
+        }
       },
-      onDone:        () => _onDisconnect(clientId),
-      onError:       (_) => _onDisconnect(clientId),
+      onDone:  () { if (clientId != null) _onDisconnect(clientId!); },
+      onError: (_) {
+        if (clientId != null) _onDisconnect(clientId!);
+        _destroySocket(socket);
+      },
       cancelOnError: true,
     );
-    broadcastRaw(SyncMessage.connected(clientId, 'Remote'));
+  }
+
+  void _processWsChunk(_WsClient client, String clientId, List<int> chunk) {
+    for (final text in client.processChunk(chunk)) {
+      if (text.isEmpty) {
+        if (client.isClosed) { _onDisconnect(clientId); return; }
+        continue;
+      }
+      final msg = SyncMessage.decode(text);
+      if (msg == null) continue;
+      onClientMessage(clientId, msg);
+      if (msg.type.startsWith('delta.')) broadcastRaw(msg, exclude: clientId);
+    }
   }
 
   void _onDisconnect(String clientId) {
@@ -146,10 +203,11 @@ class CollaborationServer {
     final webDir = await _findWebClientDir();
     if (webDir == null) return;
     try {
-      _staticServerSocket = await ServerSocket.bind(
-          InternetAddress.anyIPv4, httpPort);
+      _staticServerSocket =
+          await ServerSocket.bind(InternetAddress.anyIPv4, httpPort);
       _staticServerSocket!.listen(
-        (s) => _serveStaticSocket(s, webDir).catchError((_) { _destroySocket(s); }),
+        (s) =>
+            _serveStaticSocket(s, webDir).catchError((_) { _destroySocket(s); }),
         onError: (_) {},
       );
     } catch (_) {
@@ -157,6 +215,8 @@ class CollaborationServer {
     }
   }
 
+  /// Static HTTP serving still uses _readHeaders (await for) because it only
+  /// reads the request then writes the response — no re-subscription needed.
   static Future<void> _serveStaticSocket(Socket socket, String webDir) async {
     final headers = await _readHeaders(socket);
     if (headers == null) { socket.destroy(); return; }
@@ -184,8 +244,8 @@ class CollaborationServer {
     var file = File('$webDir$safePath');
     if (!await file.exists()) file = File('$webDir/index.html');
 
-    final bytes    = await file.readAsBytes();
-    final mimeStr  = _mimeString(safePath);
+    final bytes   = await file.readAsBytes();
+    final mimeStr = _mimeString(safePath);
 
     _writeRaw(socket,
       'HTTP/1.1 200 OK\r\n'
@@ -203,50 +263,46 @@ class CollaborationServer {
 
   // ── Helpers ────────────────────────────────────────────────────────────────
 
-  /// Reads HTTP request headers from [socket].
-  /// Returns a map with lowercased header names + '_method' and '_path' keys.
-  /// Returns null if the socket closes or sends malformed data.
-  static Future<Map<String, String>?> _readHeaders(Socket socket) async {
-    final buf = <int>[];
-    final end = [13, 10, 13, 10]; // \r\n\r\n
-    try {
-      await for (final chunk in socket) {
-        buf.addAll(chunk);
-        if (buf.length >= 4) {
-          final tail = buf.sublist(buf.length - 4);
-          if (_listEquals(tail, end)) break;
-        }
-        if (buf.length > 65536) return null; // too large — reject
-      }
-    } catch (_) {
-      return null;
-    }
-
-    final text  = utf8.decode(buf, allowMalformed: true);
+  /// Parses raw header bytes into a map (lowercase keys + '_method'/'_path').
+  static Map<String, String> _parseHeaders(List<int> rawBytes) {
+    final text  = utf8.decode(rawBytes, allowMalformed: true);
     final lines = text.split('\r\n');
-    if (lines.isEmpty) return null;
-
     final result = <String, String>{};
-    final requestParts = lines[0].split(' ');
-    result['_method'] = requestParts.isNotEmpty ? requestParts[0] : 'GET';
-    result['_path']   = requestParts.length > 1  ? requestParts[1] : '/';
+    if (lines.isEmpty) return result;
+
+    final parts = lines[0].split(' ');
+    result['_method'] = parts.isNotEmpty ? parts[0] : 'GET';
+    result['_path']   = parts.length > 1  ? parts[1] : '/';
 
     for (int i = 1; i < lines.length; i++) {
       final colon = lines[i].indexOf(':');
       if (colon < 0) continue;
-      final name  = lines[i].substring(0, colon).trim().toLowerCase();
-      final value = lines[i].substring(colon + 1).trim();
-      result[name] = value;
+      result[lines[i].substring(0, colon).trim().toLowerCase()] =
+          lines[i].substring(colon + 1).trim();
     }
     return result;
   }
 
-  static bool _listEquals(List<int> a, List<int> b) {
-    if (a.length != b.length) return false;
-    for (int i = 0; i < a.length; i++) {
-      if (a[i] != b[i]) return false;
+  /// Reads HTTP request headers from [socket] using a single await-for loop.
+  /// Safe to use when you won't re-subscribe (e.g. static HTTP handler).
+  static Future<Map<String, String>?> _readHeaders(Socket socket) async {
+    final buf = <int>[];
+    try {
+      await for (final chunk in socket) {
+        buf.addAll(chunk);
+        // Search entire buffer for \r\n\r\n (handles split-chunk delivery)
+        for (int i = 0; i <= buf.length - 4; i++) {
+          if (buf[i] == 13 && buf[i + 1] == 10 &&
+              buf[i + 2] == 13 && buf[i + 3] == 10) {
+            return _parseHeaders(buf.sublist(0, i + 4));
+          }
+        }
+        if (buf.length > 65536) return null;
+      }
+    } catch (_) {
+      return null;
     }
-    return true;
+    return null;
   }
 
   static void _writeRaw(Socket socket, String data) {
@@ -342,5 +398,119 @@ class CollaborationServer {
       }
     }
     return '127.0.0.1';
+  }
+}
+
+// ── Manual WebSocket client (no dart:io WebSocket, avoids stream re-sub bug) ──
+
+class _WsClient {
+  _WsClient(this._socket);
+
+  final Socket _socket;
+  final List<int> _rxBuf = [];
+  bool _closed = false;
+
+  bool get isClosed => _closed;
+
+  /// Send a text message as a WebSocket text frame (server→client, unmasked).
+  void send(String text) {
+    if (_closed) return;
+    try { _socket.add(_encodeTextFrame(text)); } catch (_) {}
+  }
+
+  /// Send a close frame and destroy the underlying socket.
+  void closeNow() {
+    if (_closed) return;
+    _closed = true;
+    try {
+      _socket.add(const [0x88, 0x00]); // close frame, no payload
+      _socket.destroy();
+    } catch (_) {}
+  }
+
+  /// Accumulate [chunk] and return all fully received text messages.
+  List<String> processChunk(List<int> chunk) {
+    _rxBuf.addAll(chunk);
+    final messages = <String>[];
+    while (true) {
+      final result = _tryExtractFrame();
+      if (result == null) break;
+      messages.add(result);
+    }
+    return messages;
+  }
+
+  /// Tries to decode one complete WebSocket frame from [_rxBuf].
+  /// Returns the decoded text ('' for control frames), or null if incomplete.
+  String? _tryExtractFrame() {
+    if (_rxBuf.length < 2) return null;
+
+    final b0     = _rxBuf[0];
+    final b1     = _rxBuf[1];
+    final opcode = b0 & 0x0F;
+    final masked = (b1 & 0x80) != 0;
+    int payloadLen = b1 & 0x7F;
+    int offset = 2;
+
+    if (payloadLen == 126) {
+      if (_rxBuf.length < 4) return null;
+      payloadLen = (_rxBuf[2] << 8) | _rxBuf[3];
+      offset = 4;
+    } else if (payloadLen == 127) {
+      if (_rxBuf.length < 10) return null;
+      payloadLen = 0;
+      for (int i = 0; i < 8; i++) {
+        payloadLen = (payloadLen << 8) | _rxBuf[2 + i];
+      }
+      offset = 10;
+    }
+
+    final maskLen  = masked ? 4 : 0;
+    final totalLen = offset + maskLen + payloadLen;
+    if (_rxBuf.length < totalLen) return null;
+
+    final payload = List<int>.from(_rxBuf.sublist(offset + maskLen, totalLen));
+    if (masked) {
+      final mask = _rxBuf.sublist(offset, offset + 4);
+      for (int i = 0; i < payload.length; i++) { payload[i] ^= mask[i % 4]; }
+    }
+
+    _rxBuf.removeRange(0, totalLen);
+
+    switch (opcode) {
+      case 0x8: // Close
+        _closed = true;
+        try { _socket.add(const [0x88, 0x00]); _socket.close(); } catch (_) {}
+        return '';
+      case 0x9: // Ping → Pong
+        try { _socket.add(const [0x8A, 0x00]); } catch (_) {}
+        return '';
+      case 0xA: // Pong
+        return '';
+      case 0x1: // Text
+      case 0x2: // Binary (treated as UTF-8 text)
+        return utf8.decode(payload, allowMalformed: true);
+      default:
+        return '';
+    }
+  }
+
+  static List<int> _encodeTextFrame(String text) {
+    final payload = utf8.encode(text);
+    final frame   = <int>[0x81]; // FIN=1, opcode=1 (text)
+    if (payload.length < 126) {
+      frame.add(payload.length);
+    } else if (payload.length < 65536) {
+      frame.add(126);
+      frame.add((payload.length >> 8) & 0xFF);
+      frame.add(payload.length & 0xFF);
+    } else {
+      frame.add(127);
+      for (int i = 7; i >= 0; i--) {
+        frame.add((payload.length >> (i * 8)) & 0xFF);
+      }
+    }
+    frame.addAll(payload);
+    return frame;
   }
 }
