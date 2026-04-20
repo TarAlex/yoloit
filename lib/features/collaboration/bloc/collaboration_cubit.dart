@@ -55,22 +55,18 @@ class CollaborationCubit extends Cubit<CollaborationState> {
   // ── Host ─────────────────────────────────────────────────────────────────
 
   Future<void> startHosting({int port = 40401}) async {
-    if (!state.isIdle) return;
+    // Stop any existing server first to avoid "Address already in use".
+    if (_server != null) {
+      await stopHosting();
+    }
     emit(state.copyWith(error: ''));
     try {
       _server = CollaborationServer(
         port:            port,
         onClientMessage: _onClientMessage,
       );
-      // Retry once after a short delay if the port is still held by a dying process.
-      try {
-        final address = await _server!.start();
-        _finishHosting(address);
-      } catch (_) {
-        await Future<void>.delayed(const Duration(milliseconds: 800));
-        final address = await _server!.start();
-        _finishHosting(address);
-      }
+      final address = await _server!.start();
+      _finishHosting(address);
     } catch (e) {
       _server = null;
       emit(state.copyWith(error: 'Failed to start server: $e'));
