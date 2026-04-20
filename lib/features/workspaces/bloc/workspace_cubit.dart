@@ -47,7 +47,7 @@ class WorkspaceCubit extends Cubit<WorkspaceState> {
       final savedId = snap.activeWorkspaceId;
       final activeId = savedId != null && workspaces.any((w) => w.id == savedId)
           ? savedId
-          : (workspaces.length == 1 ? workspaces.first.id : null);
+          : (workspaces.isNotEmpty ? workspaces.first.id : null);
       emit(WorkspaceLoaded(workspaces: workspaces, activeWorkspaceId: activeId));
       // Refresh git info for all workspaces
       for (final ws in workspaces) {
