@@ -626,14 +626,19 @@ class _MindMapCanvasState extends State<_MindMapCanvas> {
                 bottom: 8,
                 child: _GroupSidebar(
                   onFocusNode: (nodeId) {
-                    final mm = context.read<MindMapCubit>().state;
+                    final cubit = context.read<MindMapCubit>();
+                    final mm = cubit.state;
                     final pos = mm.positions[nodeId];
                     if (pos == null) return;
                     // Reveal the node if it's hidden.
                     if (mm.hidden.contains(nodeId)) {
-                      context.read<MindMapCubit>().showNode(nodeId);
+                      cubit.showNode(nodeId);
                     }
-                    widget.onPanToOffset(pos);
+                    // Pass the node CENTER so _animateToCenterOffset works correctly.
+                    final size = mm.sizes[nodeId] ?? const Size(200, 120);
+                    widget.onPanToOffset(
+                      pos + Offset(size.width / 2, size.height / 2),
+                    );
                   },
                 ),
               ),
