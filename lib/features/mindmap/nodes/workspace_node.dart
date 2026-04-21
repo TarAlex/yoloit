@@ -4,9 +4,10 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:yoloit/features/mindmap/model/mindmap_node_model.dart';
 import 'package:yoloit/features/mindmap/nodes/presentation/card_props.dart';
 import 'package:yoloit/features/mindmap/nodes/presentation/workspace_card.dart';
-import 'package:yoloit/features/terminal/bloc/terminal_cubit.dart';
-import 'package:yoloit/features/terminal/models/agent_type.dart';
 import 'package:yoloit/features/workspaces/bloc/workspace_cubit.dart';
+import 'package:yoloit/features/workspaces/data/worktree_service.dart';
+import 'package:yoloit/features/workspaces/models/worktree_model.dart';
+import 'package:yoloit/features/workspaces/ui/new_agent_session_dialog.dart';
 
 class WorkspaceNode extends StatelessWidget {
   const WorkspaceNode({super.key, required this.data});
@@ -28,31 +29,23 @@ class WorkspaceNode extends StatelessWidget {
         if (dir == null || !context.mounted) return;
         await context.read<WorkspaceCubit>().addPathToWorkspace(ws.id, dir);
       },
-      onCreateSession: () => _createSession(context, ws.paths.isNotEmpty ? ws.paths.first : null, ws.id),
+      onCreateSession: () => _openSessionDialog(context),
     );
   }
 
-  Future<void> _createSession(BuildContext context, String? path, String wsId) async {
-    if (path == null) return;
-    final type = await showDialog<AgentType>(
-      context: context,
-      builder: (ctx) => SimpleDialog(
-        backgroundColor: const Color(0xFF12151C),
-        title: const Text('New Session', style: TextStyle(color: Color(0xFFE8E8FF), fontSize: 14)),
-        children: [
-          for (final t in AgentType.values)
-            SimpleDialogOption(
-              onPressed: () => Navigator.pop(ctx, t),
-              child: Text(t.displayName, style: const TextStyle(color: Color(0xFFCECEEE))),
-            ),
-        ],
-      ),
-    );
-    if (type == null || !context.mounted) return;
-    await context.read<TerminalCubit>().spawnSession(
-      type:          type,
-      workspacePath: path,
-      workspaceId:   wsId,
+  Future<void> _openSessionDialog(BuildContext context) async {
+    final ws = data.workspace;
+    // Load worktrees for every repo path — same flow as the terminal panel.
+    final worktrees = <String, List<WorktreeEntry>>{};
+    for (final repoPath in ws.paths) {
+      worktrees[repoPath] =
+          await WorktreeService.instance.listWorktrees(repoPath);
+    }
+    if (!context.mounted) return;
+    showNewAgentSessionDialog(
+      context,
+      workspace: ws,
+      worktrees: worktrees,
     );
   }
 }
