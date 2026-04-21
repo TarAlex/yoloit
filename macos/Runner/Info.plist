@@ -30,5 +30,11 @@
 	<string>MainMenu</string>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>YoLoIT needs local network access to serve the browser-based thin client on your LAN.</string>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_yoloit._tcp</string>
+	</array>
 </dict>
 </plist>
