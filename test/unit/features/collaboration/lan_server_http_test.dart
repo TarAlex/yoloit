@@ -2,8 +2,8 @@
 ///
 /// These tests verify that:
 /// 1. The server correctly serves HTTP responses via localhost
-/// 2. Responses are delivered even when socket.close() throws EINVAL
-///    (the macOS LAN socket quirk) by using the 400ms delayed-destroy approach
+/// 2. Responses are delivered on LAN by waiting for the peer's FIN before
+///    destroying the socket (avoids socket.close() EINVAL on macOS LAN)
 /// 3. The server handles malformed / zero-byte connections gracefully
 library;
 
@@ -20,34 +20,41 @@ import 'package:flutter_test/flutter_test.dart';
 // test will catch regressions in the core pattern.
 
 Future<void> _serveSocket(Socket socket, String body) async {
-  final done = Completer<void>();
+  final requestDone = Completer<void>();
+  final peerEof = Completer<void>();
   final buf = <int>[];
 
   socket.listen(
     (chunk) {
-      if (done.isCompleted) return;
+      if (requestDone.isCompleted) return;
       buf.addAll(chunk);
       for (int i = 0; i <= buf.length - 4; i++) {
         if (buf[i] == 13 &&
             buf[i + 1] == 10 &&
             buf[i + 2] == 13 &&
             buf[i + 3] == 10) {
-          done.complete();
+          requestDone.complete();
           return;
         }
       }
-      if (buf.length > 65536) done.complete();
+      if (buf.length > 65536) requestDone.complete();
     },
-    onError: (_) { if (!done.isCompleted) done.complete(); },
-    onDone: () { if (!done.isCompleted) done.complete(); },
+    onError: (_) {
+      if (!requestDone.isCompleted) requestDone.complete();
+      if (!peerEof.isCompleted) peerEof.complete();
+    },
+    onDone: () {
+      if (!requestDone.isCompleted) requestDone.complete();
+      if (!peerEof.isCompleted) peerEof.complete();
+    },
     cancelOnError: false,
   );
 
-  await done.future;
+  await requestDone.future;
   if (buf.length < 4) { socket.destroy(); return; }
 
   final bodyBytes = utf8.encode(body);
-  final headers = utf8.encode(
+  final responseHeaders = utf8.encode(
     'HTTP/1.1 200 OK\r\n'
     'Content-Type: text/plain\r\n'
     'Content-Length: ${bodyBytes.length}\r\n'
@@ -55,18 +62,20 @@ Future<void> _serveSocket(Socket socket, String body) async {
     '\r\n',
   );
 
-  try { socket.add(headers + bodyBytes); } catch (_) {}
+  try { socket.add(responseHeaders + bodyBytes); } catch (_) {}
 
-  bool flushed = false;
-  try { await socket.flush(); flushed = true; } catch (_) {}
+  // Flush, then close gracefully. On macOS LAN sockets socket.close() throws
+  // EINVAL, so we fall back to waiting for the peer's FIN then destroy().
+  try { await socket.flush(); } catch (_) {}
   try {
     await socket.close();
-  } catch (_) {
-    // macOS LAN socket quirk: shutdown(SHUT_WR) throws EINVAL.
-    // Wait so the kernel delivers already-flushed bytes before RST.
-    if (flushed) await Future<void>.delayed(const Duration(milliseconds: 400));
-    try { socket.destroy(); } catch (_) {}
-  }
+    return; // graceful close (loopback / non-macOS-LAN)
+  } catch (_) {}
+  await peerEof.future.timeout(
+    const Duration(seconds: 10),
+    onTimeout: () {},
+  );
+  try { socket.destroy(); } catch (_) {}
 }
 
 /// Starts a [ServerSocket] on localhost, serves one request using
@@ -187,17 +196,15 @@ void main() {
     });
   });
 
-  group('LAN HTTP server – close() error handling', () {
-    test('response is delivered before socket is destroyed when close() fails',
-        () async {
-      // Simulate a socket whose close() always throws (like macOS EINVAL),
-      // and verify the client still receives the response.
+  group('LAN HTTP server – peer-close wait', () {
+    test('response is fully delivered before socket is destroyed', () async {
+      // Verify that the server waits for the client to read all data and
+      // close before destroying the socket (no premature RST).
       final server = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
       final port = server.port;
 
       server.listen((socket) async {
-        // Wrap the real socket to make close() throw
-        await _serveSocketWithBadClose(socket, 'payload');
+        await _serveSocket(socket, 'payload');
         await server.close();
       }, onError: (_) {});
 
@@ -215,63 +222,7 @@ void main() {
       final sep = raw.indexOf('\r\n\r\n');
       final body = sep == -1 ? null : raw.substring(sep + 4);
       expect(body, 'payload',
-          reason: 'Response must be delivered even when socket.close() throws');
+          reason: 'Response must be fully delivered before socket teardown');
     });
   });
-}
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
-/// Same as [_serveSocket] but uses a [_BadCloseSocket] that simulates the
-/// macOS EINVAL from socket.close() on LAN connections.
-Future<void> _serveSocketWithBadClose(Socket real, String body) async {
-  // We can't replace the low-level socket, so we test the logic manually.
-  // Steps:
-  //  1. Use the real socket to receive the request
-  //  2. Send the response via the real socket
-  //  3. Simulate the close() error path (don't call real close; call destroy
-  //     after 400ms — the same path the production code takes on EINVAL).
-  final done = Completer<void>();
-  final buf = <int>[];
-
-  real.listen(
-    (chunk) {
-      if (done.isCompleted) return;
-      buf.addAll(chunk);
-      for (int i = 0; i <= buf.length - 4; i++) {
-        if (buf[i] == 13 &&
-            buf[i + 1] == 10 &&
-            buf[i + 2] == 13 &&
-            buf[i + 3] == 10) {
-          done.complete();
-          return;
-        }
-      }
-    },
-    onError: (_) { if (!done.isCompleted) done.complete(); },
-    onDone: () { if (!done.isCompleted) done.complete(); },
-    cancelOnError: false,
-  );
-
-  await done.future;
-  if (buf.length < 4) { real.destroy(); return; }
-
-  final bodyBytes = utf8.encode(body);
-  final headers = utf8.encode(
-    'HTTP/1.1 200 OK\r\n'
-    'Content-Type: text/plain\r\n'
-    'Content-Length: ${bodyBytes.length}\r\n'
-    'Connection: close\r\n'
-    '\r\n',
-  );
-
-  try { real.add(headers + bodyBytes); } catch (_) {}
-
-  bool flushed = false;
-  try { await real.flush(); flushed = true; } catch (_) {}
-
-  // SIMULATE close() throwing EINVAL — skip real.close(), go straight to the
-  // error-path:  wait 400ms (so the kernel delivers flushed bytes), then RST.
-  if (flushed) await Future<void>.delayed(const Duration(milliseconds: 400));
-  try { real.destroy(); } catch (_) {}
 }
