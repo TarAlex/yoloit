@@ -2,17 +2,19 @@ import 'dart:math' as math;
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector3;
 
+import 'package:yoloit/features/collaboration/bloc/collaboration_cubit.dart';
 import 'package:yoloit/features/mindmap/bloc/mindmap_cubit.dart';
 import 'package:yoloit/features/mindmap/bloc/mindmap_state.dart';
-import 'package:yoloit/features/collaboration/bloc/collaboration_cubit.dart';
+import 'package:yoloit/features/mindmap/nodes/presentation/card_factory.dart';
+import 'package:yoloit/features/mindmap/sidebar/show_hide_sidebar.dart';
 
-/// Lightweight mindmap canvas for web/remote guests.
-/// Renders every node as a coloured card using [CustomPainter] — no native
-/// widgets (no terminal, file editor, etc.).  Supports pan/zoom and
-/// drag-to-move; move deltas are sent back to the host via WebSocket.
+/// Full-featured mindmap canvas for web/remote guests.
+/// Mirrors the macOS MindMapView: toolbar, minimap, sidebar, drag handles,
+/// resize handles on every card.
 class WebMindMapCanvas extends StatefulWidget {
   const WebMindMapCanvas({super.key});
 
@@ -21,11 +23,18 @@ class WebMindMapCanvas extends StatefulWidget {
 }
 
 class _WebMindMapCanvasState extends State<WebMindMapCanvas> {
-  final _transform = TransformationController();
-  String? _draggingId;
-  Offset _dragStartCanvas = Offset.zero;
-  Offset _nodeOrigin      = Offset.zero;
-  bool _hasCentered       = false;
+  final _transform = TransformationController(
+    Matrix4.identity()..scale(0.1, 0.1, 1.0),
+  );
+  bool _hasCentered = false;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _centerOnContent(context.read<MindMapCubit>().state);
+    });
+  }
 
   @override
   void dispose() {
@@ -33,56 +42,118 @@ class _WebMindMapCanvasState extends State<WebMindMapCanvas> {
     super.dispose();
   }
 
-  /// Auto-pan to center on content bounding box when first snapshot arrives.
   void _centerOnContent(MindMapState state) {
     if (_hasCentered || state.positions.isEmpty || !mounted) return;
     _hasCentered = true;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      final size = MediaQuery.of(context).size;
+      final viewSize = MediaQuery.of(context).size;
       double minX = double.infinity, minY = double.infinity;
       double maxX = double.negativeInfinity, maxY = double.negativeInfinity;
       for (final e in state.positions.entries) {
+        if (state.hidden.contains(e.key)) continue;
         final sz = state.sizes[e.key] ?? const Size(220, 120);
         minX = math.min(minX, e.value.dx);
         minY = math.min(minY, e.value.dy);
         maxX = math.max(maxX, e.value.dx + sz.width);
         maxY = math.max(maxY, e.value.dy + sz.height);
       }
+      if (minX == double.infinity) return;
       final centerX = (minX + maxX) / 2;
       final centerY = (minY + maxY) / 2;
       const padding = 80.0;
-      final scaleX = (size.width  - padding * 2) / (maxX - minX);
-      final scaleY = (size.height - padding * 2) / (maxY - minY);
-      final scale  = math.min(scaleX, scaleY).clamp(0.05, 0.8);
-      // screen_point = scale * canvas_point + (tx, ty)
-      // centre on screen: scale * centerX + tx = size.width/2
-      final tx = size.width  / 2 - scale * centerX;
-      final ty = size.height / 2 - scale * centerY;
+      final scaleX = (viewSize.width - padding * 2) / (maxX - minX);
+      final scaleY = (viewSize.height - padding * 2) / (maxY - minY);
+      final scale = math.min(scaleX, scaleY).clamp(0.05, 0.8);
+      final tx = viewSize.width / 2 - scale * centerX;
+      final ty = viewSize.height / 2 - scale * centerY;
       final m = Matrix4.identity()..scale(scale, scale, 1.0);
       m.setTranslationRaw(tx, ty, 0.0);
       setState(() => _transform.value = m);
     });
   }
 
-  /// Convert screen-space point to canvas-space.
+  void _panToOffset(Offset canvasCenter) {
+    if (!mounted) return;
+    final viewSize = MediaQuery.of(context).size;
+    final scale = _transform.value.getMaxScaleOnAxis();
+    final tx = viewSize.width / 2 - scale * canvasCenter.dx;
+    final ty = viewSize.height / 2 - scale * canvasCenter.dy;
+    final m = Matrix4.identity()..scale(scale, scale, 1.0);
+    m.setTranslationRaw(tx, ty, 0.0);
+    setState(() => _transform.value = m);
+  }
+
+  void _zoom(double factor) {
+    final viewSize = MediaQuery.of(context).size;
+    final focalCanvas = _toCanvas(
+      Offset(viewSize.width / 2, viewSize.height / 2),
+    );
+    final m = _transform.value.clone()
+      ..translate(Vector3(focalCanvas.dx, focalCanvas.dy, 0))
+      ..scale(factor)
+      ..translate(Vector3(-focalCanvas.dx, -focalCanvas.dy, 0));
+    setState(() => _transform.value = m);
+  }
+
   Offset _toCanvas(Offset screen) {
     final m = Matrix4.inverted(_transform.value);
     final v = m.transform3(Vector3(screen.dx, screen.dy, 0));
     return Offset(v.x, v.y);
   }
 
-  String? _hitTest(Offset canvasPos, MindMapState state) {
-    for (final e in state.positions.entries) {
-      if (state.hidden.contains(e.key)) continue;
-      final sz = state.sizes[e.key] ?? const Size(220, 120);
-      if (Rect.fromLTWH(e.value.dx, e.value.dy, sz.width, sz.height)
-          .contains(canvasPos)) {
-        return e.key;
+  CardEventCallbacks _makeCallbacks(BuildContext ctx) => CardEventCallbacks(
+    onTerminalInput: (nodeId, data) =>
+        ctx.read<CollaborationCubit>().sendTerminalInput(nodeId, data),
+    onRunStart: (nodeId) => ctx.read<CollaborationCubit>().sendGuestEvent(
+      'run_start',
+      {'id': nodeId},
+    ),
+    onRunStop: (nodeId) => ctx.read<CollaborationCubit>().sendGuestEvent(
+      'run_stop',
+      {'id': nodeId},
+    ),
+    onRunRestart: (nodeId) => ctx.read<CollaborationCubit>().sendGuestEvent(
+      'run_restart',
+      {'id': nodeId},
+    ),
+    onAddFolder: (nodeId) async {
+      final path = await _RemoteWorkspaceDialog.showAddFolder(ctx);
+      if (path != null) {
+        ctx.read<CollaborationCubit>().sendGuestEvent(
+          'ws_add_folder',
+          {'id': nodeId, 'path': path},
+        );
       }
-    }
-    return null;
-  }
+    },
+    onCreateSession: (nodeId) => ctx.read<CollaborationCubit>().sendGuestEvent(
+      'ws_create_session',
+      {'id': nodeId},
+    ),
+    onFileSelect: (nodeId, path) => ctx
+        .read<CollaborationCubit>()
+        .sendGuestEvent('file_select', {'id': nodeId, 'path': path}),
+    onTreeToggle: (nodeId, path) => ctx
+        .read<CollaborationCubit>()
+        .sendGuestEvent('tree_toggle', {'id': nodeId, 'path': path}),
+    onTreeSelect: (nodeId, path) => ctx
+        .read<CollaborationCubit>()
+        .sendGuestEvent('tree_select', {'id': nodeId, 'path': path}),
+    onEditorSwitchTab: (nodeId, idx) => ctx
+        .read<CollaborationCubit>()
+        .sendGuestEvent('editor_switch_tab', {'id': nodeId, 'tabIndex': idx}),
+    onEditorSave: (nodeId) => ctx.read<CollaborationCubit>().sendGuestEvent(
+      'editor_save',
+      {'id': nodeId},
+    ),
+    onEditorContentUpdate: (nodeId, content) => ctx
+        .read<CollaborationCubit>()
+        .sendGuestEvent('editor_content_update', {'id': nodeId, 'content': content}),
+    onSessionStart: (nodeId) => ctx.read<CollaborationCubit>().sendGuestEvent(
+      'session_start',
+      {'id': nodeId},
+    ),
+  );
 
   @override
   Widget build(BuildContext context) {
@@ -90,189 +161,1205 @@ class _WebMindMapCanvasState extends State<WebMindMapCanvas> {
       listener: (_, state) => _centerOnContent(state),
       child: BlocBuilder<MindMapCubit, MindMapState>(
         builder: (ctx, state) {
-          return Stack(children: [
-          // ── Dot-grid background ──────────────────────────────────────
-          Positioned.fill(
-            child: ListenableBuilder(
-              listenable: _transform,
-              builder: (_, __) => CustomPaint(
-                painter: _GridPainter(
-                  offset: Offset(
-                    _transform.value.getTranslation().x,
-                    _transform.value.getTranslation().y,
+          final callbacks = _makeCallbacks(ctx);
+          return LayoutBuilder(
+            builder: (ctx, constraints) {
+              final viewportSize = Size(
+                constraints.maxWidth,
+                constraints.maxHeight,
+              );
+              return Stack(
+                children: [
+                  // ── Dot-grid background ──────────────────────────────────
+                  Positioned.fill(
+                    child: ListenableBuilder(
+                      listenable: _transform,
+                      builder: (_, __) => CustomPaint(
+                        painter: _GridPainter(
+                          offset: Offset(
+                            _transform.value.getTranslation().x,
+                            _transform.value.getTranslation().y,
+                          ),
+                          scale: _transform.value.getMaxScaleOnAxis(),
+                        ),
+                      ),
+                    ),
                   ),
-                  scale: _transform.value.getMaxScaleOnAxis(),
-                ),
-              ),
-            ),
-          ),
 
-          // ── Scroll-to-zoom listener ──────────────────────────────────
-          Listener(
-            behavior: HitTestBehavior.translucent,
-            onPointerSignal: (ev) {
-              if (ev is PointerScrollEvent) {
-                final factor = ev.scrollDelta.dy < 0 ? 1.1 : 0.9;
-                final focalCanvas = _toCanvas(ev.localPosition);
-                final m = _transform.value.clone()
-                  ..translate(Vector3(focalCanvas.dx, focalCanvas.dy, 0))
-                  ..scale(factor)
-                  ..translate(Vector3(-focalCanvas.dx, -focalCanvas.dy, 0));
-                setState(() => _transform.value = m);
-              }
+                  // ── Scroll-to-zoom ──────────────────────────────────────
+                  Listener(
+                    behavior: HitTestBehavior.translucent,
+                    onPointerSignal: (ev) {
+                      if (ev is PointerScrollEvent) {
+                        // On macOS trackpad: two-finger swipe → pan,
+                        // pinch → browser sends Ctrl+scroll → zoom.
+                        // Mouse wheel → always zoom.
+                        final isZoom =
+                            ev.kind == PointerDeviceKind.mouse ||
+                            HardwareKeyboard.instance.isControlPressed;
+                        if (isZoom) {
+                          final factor = ev.scrollDelta.dy < 0 ? 1.1 : 0.9;
+                          final focalCanvas = _toCanvas(ev.localPosition);
+                          final m = _transform.value.clone()
+                            ..translate(
+                              Vector3(focalCanvas.dx, focalCanvas.dy, 0),
+                            )
+                            ..scale(factor)
+                            ..translate(
+                              Vector3(-focalCanvas.dx, -focalCanvas.dy, 0),
+                            );
+                          setState(() => _transform.value = m);
+                        } else {
+                          // Pan canvas with two-finger swipe.
+                          final m = _transform.value.clone()
+                            ..translate(
+                              Vector3(-ev.scrollDelta.dx, -ev.scrollDelta.dy, 0),
+                            );
+                          setState(() => _transform.value = m);
+                        }
+                      }
+                    },
+                    child: InteractiveViewer(
+                      transformationController: _transform,
+                      boundaryMargin: const EdgeInsets.all(double.infinity),
+                      constrained: false,
+                      minScale: 0.04,
+                      maxScale: 3.0,
+                      child: SizedBox(
+                        width: 10000,
+                        height: 10000,
+                        child: Stack(
+                          children: [
+                            // Connectors
+                            Positioned.fill(
+                              child: CustomPaint(
+                                painter: _ConnectorsPainter(state),
+                              ),
+                            ),
+                            // Node cards with drag + resize handles
+                            for (final e in state.positions.entries)
+                              if (!state.hidden.contains(e.key))
+                                _WebNode(
+                                  nodeId: e.key,
+                                  position: e.value,
+                                  size:
+                                      state.sizes[e.key] ??
+                                      const Size(220, 160),
+                                  content: state.nodeContent[e.key] ?? const {},
+                                  callbacks: callbacks,
+                                  onClose: () =>
+                                      ctx.read<MindMapCubit>().hideNode(e.key),
+                                ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+
+                  // ── Toolbar (top-right) ───────────────────────────────────
+                  Positioned(
+                    top: 8,
+                    right: 8,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        _WebToolbar(
+                          onZoomIn: () => _zoom(1.25),
+                          onZoomOut: () => _zoom(0.8),
+                          onFit: () {
+                            _hasCentered = false;
+                            _centerOnContent(state);
+                          },
+                          onResetLayout: () =>
+                              ctx.read<MindMapCubit>().resetLayout(),
+                          hiddenCount: state.hidden.length,
+                          onShowAll: () =>
+                              ctx.read<MindMapCubit>().showAllNodes(),
+                          savedViews: state.savedViews,
+                          activeViewName: state.activeViewName,
+                          onViewSelect: (name) =>
+                              ctx.read<MindMapCubit>().loadView(name),
+                          onViewSave: () =>
+                              ctx.read<MindMapCubit>().saveView(
+                                'View ${state.savedViews.length + 1}',
+                              ),
+                        ),
+                        const SizedBox(height: 8),
+                        // Minimap
+                        _WebMiniMap(
+                          positions: state.positions,
+                          sizes: state.sizes,
+                          hidden: state.hidden,
+                          nodeContent: state.nodeContent,
+                          transformCtrl: _transform,
+                          viewportSize: viewportSize,
+                          onPanTo: _panToOffset,
+                        ),
+                      ],
+                    ),
+                  ),
+
+                  // ── Sidebar (left) ──────────────────────────────────────
+                  Positioned(
+                    top: 8,
+                    left: 8,
+                    bottom: 8,
+                    child: _WebSidebar(
+                      state: state,
+                      onFocusNode: (nodeId) {
+                        final pos = state.positions[nodeId];
+                        if (pos == null) return;
+                        if (state.hidden.contains(nodeId)) {
+                          ctx.read<MindMapCubit>().showNode(nodeId);
+                        }
+                        _panToOffset(pos);
+                      },
+                      onToggleHide: (nodeId) {
+                        if (state.hidden.contains(nodeId)) {
+                          ctx.read<MindMapCubit>().showNode(nodeId);
+                        } else {
+                          ctx.read<MindMapCubit>().hideNode(nodeId);
+                        }
+                      },
+                    ),
+                  ),
+                ],
+              );
             },
-            // ── Drag handler for node moves ──────────────────────────
-            child: GestureDetector(
-              onPanStart: (d) {
-                final cp = _toCanvas(d.localPosition);
-                final hit = _hitTest(cp, state);
-                if (hit != null) {
-                  setState(() {
-                    _draggingId     = hit;
-                    _dragStartCanvas = cp;
-                    _nodeOrigin     = state.positions[hit] ?? Offset.zero;
-                  });
-                }
-              },
-              onPanUpdate: (d) {
-                if (_draggingId == null) return;
-                final cp  = _toCanvas(d.localPosition);
-                final pos = _nodeOrigin + (cp - _dragStartCanvas);
-                ctx.read<MindMapCubit>().moveNode(_draggingId!, pos);
-                ctx.read<CollaborationCubit>().sendGuestMove(_draggingId!, pos);
-              },
-              onPanEnd: (_) => setState(() => _draggingId = null),
-
-              child: InteractiveViewer(
-                transformationController: _transform,
-                boundaryMargin: const EdgeInsets.all(double.infinity),
-                minScale: 0.04,
-                maxScale: 3.0,
-                panEnabled: _draggingId == null,
-                child: SizedBox(
-                  width:  10000,
-                  height: 10000,
-                  child: CustomPaint(
-                    painter: _NodesPainter(state, _draggingId),
-                  ),
-                ),
-              ),
-            ),
-          ),
-        ]);
-      },
+          );
+        },
       ),
     );
   }
 }
 
-// ── Nodes painter ──────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════
+// ── Web Node (drag handle + resize handles + card content) ────────────────
+// ═══════════════════════════════════════════════════════════════════════════
 
-class _NodesPainter extends CustomPainter {
-  _NodesPainter(this.state, this.draggingId);
-  final MindMapState state;
-  final String? draggingId;
+class _WebNode extends StatefulWidget {
+  const _WebNode({
+    required this.nodeId,
+    required this.position,
+    required this.size,
+    required this.content,
+    required this.callbacks,
+    this.onClose,
+  });
+  final String nodeId;
+  final Offset position;
+  final Size size;
+  final Map<String, dynamic> content;
+  final CardEventCallbacks callbacks;
+  final VoidCallback? onClose;
+
+  @override
+  State<_WebNode> createState() => _WebNodeState();
+}
+
+class _WebNodeState extends State<_WebNode> {
+  bool _hovered = false;
+  /// Non-null while the node is being dragged locally. We use this instead of
+  /// `widget.position` so that incoming host position echoes don't cause jitter.
+  Offset? _dragPos;
+
+  static const _handleH = 20.0;
+  static const _minW = 140.0;
+  static const _minH = 80.0;
+
+  @override
+  Widget build(BuildContext context) {
+    final cubit = context.read<MindMapCubit>();
+    final collab = context.read<CollaborationCubit>();
+    final pos = _dragPos ?? widget.position;
+
+    return Positioned(
+      left: pos.dx,
+      top: pos.dy,
+      child: MouseRegion(
+        onEnter: (_) => setState(() => _hovered = true),
+        onExit: (_) => setState(() => _hovered = false),
+        child: Stack(
+          clipBehavior: Clip.none,
+          children: [
+            // ── Main card ─────────────────────────────────────────────
+            SizedBox(
+              width: widget.size.width,
+              height: widget.size.height,
+              child: Column(
+                children: [
+                  // Drag handle strip
+                  GestureDetector(
+                    onPanStart: (_) {
+                      setState(() => _dragPos = widget.position);
+                    },
+                    onPanUpdate: (d) {
+                      setState(() => _dragPos = (_dragPos ?? widget.position) + d.delta);
+                    },
+                    onPanEnd: (_) {
+                      final finalPos = _dragPos;
+                      setState(() => _dragPos = null);
+                      if (finalPos != null) {
+                        cubit.applyRemoteMove(widget.nodeId, finalPos);
+                        collab.sendGuestMove(widget.nodeId, finalPos);
+                      }
+                    },
+                    child: _DragHandle(hovered: _hovered),
+                  ),
+                  // Card content
+                  Expanded(
+                    child: buildCardFromContent(
+                      widget.nodeId,
+                      widget.content,
+                      widget.callbacks,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
+            // ── Resize: right edge ──────────────────────────────────
+            Positioned(
+              right: -6,
+              top: _handleH,
+              bottom: 12,
+              width: 12,
+              child: _ResizeEdge(
+                axis: Axis.vertical,
+                visible: _hovered,
+                onDrag: (d) {
+                  cubit.resizeNode(
+                    widget.nodeId,
+                    Offset(d.delta.dx, 0),
+                    const Size(_minW, _minH),
+                  );
+                  final sz = cubit.state.sizes[widget.nodeId];
+                  if (sz != null) collab.sendGuestResize(widget.nodeId, sz);
+                },
+              ),
+            ),
+            // Left edge
+            Positioned(
+              left: -6,
+              top: _handleH,
+              bottom: 12,
+              width: 12,
+              child: _ResizeEdge(
+                axis: Axis.vertical,
+                visible: _hovered,
+                onDrag: (d) {
+                  cubit.resizeFromLeft(
+                    widget.nodeId,
+                    d.delta.dx,
+                    const Size(_minW, _minH),
+                  );
+                  final sz = cubit.state.sizes[widget.nodeId];
+                  if (sz != null) collab.sendGuestResize(widget.nodeId, sz);
+                },
+              ),
+            ),
+            // Bottom edge
+            Positioned(
+              bottom: -6,
+              left: 12,
+              right: 12,
+              height: 12,
+              child: _ResizeEdge(
+                axis: Axis.horizontal,
+                visible: _hovered,
+                onDrag: (d) {
+                  cubit.resizeNode(
+                    widget.nodeId,
+                    Offset(0, d.delta.dy),
+                    const Size(_minW, _minH),
+                  );
+                  final sz = cubit.state.sizes[widget.nodeId];
+                  if (sz != null) collab.sendGuestResize(widget.nodeId, sz);
+                },
+              ),
+            ),
+            // Bottom-right corner
+            Positioned(
+              right: 0,
+              bottom: 0,
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onPanUpdate: (d) {
+                  cubit.resizeNode(
+                    widget.nodeId,
+                    d.delta,
+                    const Size(_minW, _minH),
+                  );
+                  final sz = cubit.state.sizes[widget.nodeId];
+                  if (sz != null) collab.sendGuestResize(widget.nodeId, sz);
+                },
+                child: MouseRegion(
+                  cursor: SystemMouseCursors.resizeUpLeftDownRight,
+                  child: SizedBox(
+                    width: 22,
+                    height: 22,
+                    child: CustomPaint(
+                      painter: _LCornerPainter(hovered: _hovered),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            // Bottom-left corner
+            Positioned(
+              left: 0,
+              bottom: 0,
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onPanUpdate: (d) {
+                  cubit.resizeFromLeft(
+                    widget.nodeId,
+                    d.delta.dx,
+                    const Size(_minW, _minH),
+                  );
+                  cubit.resizeNode(
+                    widget.nodeId,
+                    Offset(0, d.delta.dy),
+                    const Size(_minW, _minH),
+                  );
+                  final sz = cubit.state.sizes[widget.nodeId];
+                  if (sz != null) collab.sendGuestResize(widget.nodeId, sz);
+                },
+                child: MouseRegion(
+                  cursor: SystemMouseCursors.resizeUpRightDownLeft,
+                  child: SizedBox(
+                    width: 22,
+                    height: 22,
+                    child: CustomPaint(
+                      painter: _LCornerPainter(hovered: _hovered, flipX: true),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+
+            // ── Close button ────────────────────────────────────────
+            if (_hovered && widget.onClose != null)
+              Positioned(
+                top: 1,
+                right: 2,
+                child: GestureDetector(
+                  onTap: widget.onClose,
+                  child: Container(
+                    width: 18,
+                    height: 18,
+                    decoration: BoxDecoration(
+                      color: const Color(0xAAFF4F6A),
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(
+                      Icons.close,
+                      size: 10,
+                      color: Colors.white,
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ── Drag Handle ────────────────────────────────────────────────────────────
+
+class _DragHandle extends StatelessWidget {
+  const _DragHandle({required this.hovered});
+  final bool hovered;
+
+  @override
+  Widget build(BuildContext context) {
+    return MouseRegion(
+      cursor: SystemMouseCursors.grab,
+      child: Container(
+        height: 20,
+        decoration: BoxDecoration(
+          color: hovered ? const Color(0x30FFFFFF) : const Color(0x14FFFFFF),
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(10)),
+        ),
+        child: Center(
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: List.generate(
+              6,
+              (_) => Container(
+                width: 3,
+                height: 3,
+                margin: const EdgeInsets.symmetric(horizontal: 2),
+                decoration: BoxDecoration(
+                  color: hovered
+                      ? const Color(0x80FFFFFF)
+                      : const Color(0x40FFFFFF),
+                  shape: BoxShape.circle,
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ── Resize Edge ────────────────────────────────────────────────────────────
+
+class _ResizeEdge extends StatelessWidget {
+  const _ResizeEdge({
+    required this.axis,
+    required this.visible,
+    required this.onDrag,
+  });
+  final Axis axis;
+  final bool visible;
+  final void Function(DragUpdateDetails) onDrag;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onPanUpdate: onDrag,
+      child: MouseRegion(
+        cursor: axis == Axis.vertical
+            ? SystemMouseCursors.resizeLeftRight
+            : SystemMouseCursors.resizeUpDown,
+        child: AnimatedOpacity(
+          opacity: visible ? 1.0 : 0.0,
+          duration: const Duration(milliseconds: 150),
+          child: Center(
+            child: Container(
+              width: axis == Axis.vertical ? 3 : double.infinity,
+              height: axis == Axis.vertical ? double.infinity : 3,
+              decoration: BoxDecoration(
+                color: const Color(0x6060A5FA),
+                borderRadius: BorderRadius.circular(1.5),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ── L-Corner painter ───────────────────────────────────────────────────────
+
+class _LCornerPainter extends CustomPainter {
+  const _LCornerPainter({required this.hovered, this.flipX = false});
+  final bool hovered;
+  final bool flipX;
 
   @override
   void paint(Canvas canvas, Size size) {
-    // Draw connectors first (behind nodes)
-    _drawConnectors(canvas);
+    final paint = Paint()
+      ..color = hovered ? const Color(0xCC60A5FA) : const Color(0x4060A5FA)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2.0
+      ..strokeCap = StrokeCap.round;
 
-    // Iterate positions (works even when state.nodes is empty, e.g. on guest)
-    for (final entry in state.positions.entries) {
-      final id = entry.key;
-      if (state.hidden.contains(id)) continue;
-      final pos = entry.value;
-      final sz  = state.sizes[id] ?? const Size(220, 120);
-      _drawNode(canvas, id, pos, sz);
+    const len = 10.0;
+    const m = 3.0;
+    if (flipX) {
+      canvas.drawLine(
+        Offset(m, size.height - m),
+        Offset(m + len, size.height - m),
+        paint,
+      );
+      canvas.drawLine(
+        Offset(m, size.height - m),
+        Offset(m, size.height - m - len),
+        paint,
+      );
+    } else {
+      canvas.drawLine(
+        Offset(size.width - m, size.height - m),
+        Offset(size.width - m - len, size.height - m),
+        paint,
+      );
+      canvas.drawLine(
+        Offset(size.width - m, size.height - m),
+        Offset(size.width - m, size.height - m - len),
+        paint,
+      );
     }
   }
 
-  void _drawNode(Canvas canvas, String id, Offset pos, Size sz) {
-    final color  = _colorFor(id);
-    final isDragging = id == draggingId;
-    final rect = RRect.fromRectAndRadius(
-      Rect.fromLTWH(pos.dx, pos.dy, sz.width, sz.height),
-      const Radius.circular(10),
-    );
+  @override
+  bool shouldRepaint(_LCornerPainter old) => old.hovered != hovered;
+}
 
-    // Shadow when dragging
-    if (isDragging) {
+// ═══════════════════════════════════════════════════════════════════════════
+// ── Toolbar ───────────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════
+
+class _WebToolbar extends StatelessWidget {
+  const _WebToolbar({
+    required this.onZoomIn,
+    required this.onZoomOut,
+    required this.onFit,
+    required this.onResetLayout,
+    required this.hiddenCount,
+    required this.onShowAll,
+    required this.savedViews,
+    required this.activeViewName,
+    required this.onViewSelect,
+    required this.onViewSave,
+  });
+  final VoidCallback onZoomIn;
+  final VoidCallback onZoomOut;
+  final VoidCallback onFit;
+  final VoidCallback onResetLayout;
+  final int hiddenCount;
+  final VoidCallback onShowAll;
+  final Map<String, MindMapViewSnapshot> savedViews;
+  final String? activeViewName;
+  final void Function(String name) onViewSelect;
+  final VoidCallback onViewSave;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+      decoration: BoxDecoration(
+        color: const Color(0xEE0F1218),
+        border: Border.all(color: const Color(0xFF1E2330)),
+        borderRadius: BorderRadius.circular(8),
+        boxShadow: const [BoxShadow(color: Color(0x66000000), blurRadius: 10)],
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _ToolBtn(icon: Icons.remove, tooltip: 'Zoom out', onTap: onZoomOut),
+          _ToolBtn(
+            icon: Icons.filter_center_focus,
+            tooltip: 'Fit all',
+            onTap: onFit,
+          ),
+          _ToolBtn(icon: Icons.add, tooltip: 'Zoom in', onTap: onZoomIn),
+          const SizedBox(width: 4),
+          _ToolBtn(
+            icon: Icons.refresh,
+            tooltip: 'Reset layout',
+            onTap: onResetLayout,
+          ),
+          if (hiddenCount > 0)
+            _ToolBtn(
+              icon: Icons.visibility,
+              tooltip: 'Show all ($hiddenCount hidden)',
+              onTap: onShowAll,
+            ),
+          const SizedBox(width: 4),
+          _ViewsDropdown(
+            savedViews: savedViews,
+            activeViewName: activeViewName,
+            onViewSelect: onViewSelect,
+            onViewSave: onViewSave,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ToolBtn extends StatelessWidget {
+  const _ToolBtn({
+    required this.icon,
+    required this.tooltip,
+    required this.onTap,
+  });
+  final IconData icon;
+  final String tooltip;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: tooltip,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(6),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.all(6),
+          child: Icon(icon, size: 16, color: const Color(0xFFCBD5E1)),
+        ),
+      ),
+    );
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ── Minimap ───────────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════
+
+class _ViewsDropdown extends StatefulWidget {
+  const _ViewsDropdown({
+    required this.savedViews,
+    required this.activeViewName,
+    required this.onViewSelect,
+    required this.onViewSave,
+  });
+  final Map<String, MindMapViewSnapshot> savedViews;
+  final String? activeViewName;
+  final void Function(String name) onViewSelect;
+  final VoidCallback onViewSave;
+
+  @override
+  State<_ViewsDropdown> createState() => _ViewsDropdownState();
+}
+
+class _ViewsDropdownState extends State<_ViewsDropdown> {
+  bool _open = false;
+  final _layerLink = LayerLink();
+  OverlayEntry? _overlay;
+
+  void _toggle() {
+    if (_open) {
+      _close();
+    } else {
+      _openDropdown();
+    }
+  }
+
+  void _close() {
+    _overlay?.remove();
+    _overlay = null;
+    setState(() => _open = false);
+  }
+
+  void _openDropdown() {
+    setState(() => _open = true);
+    _overlay = OverlayEntry(
+      builder: (_) => GestureDetector(
+        behavior: HitTestBehavior.translucent,
+        onTap: _close,
+        child: Stack(
+          children: [
+            Positioned.fill(child: Container(color: Colors.transparent)),
+            CompositedTransformFollower(
+              link: _layerLink,
+              targetAnchor: Alignment.bottomRight,
+              followerAnchor: Alignment.topRight,
+              offset: const Offset(0, 4),
+              child: Material(
+                color: Colors.transparent,
+                child: Container(
+                  width: 180,
+                  constraints: const BoxConstraints(maxHeight: 260),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF0F1218),
+                    border: Border.all(color: const Color(0xFF1E2330)),
+                    borderRadius: BorderRadius.circular(8),
+                    boxShadow: const [BoxShadow(color: Color(0x88000000), blurRadius: 16)],
+                  ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      // Save current view row
+                      InkWell(
+                        onTap: () {
+                          widget.onViewSave();
+                          _close();
+                        },
+                        child: const Padding(
+                          padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                          child: Row(
+                            children: [
+                              Icon(Icons.add, size: 13, color: Color(0xFF60A5FA)),
+                              SizedBox(width: 6),
+                              Text(
+                                'Save current view',
+                                style: TextStyle(
+                                  fontSize: 10.5,
+                                  color: Color(0xFF60A5FA),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                      if (widget.savedViews.isNotEmpty)
+                        const Divider(height: 1, color: Color(0xFF1E2330)),
+                      for (final name in widget.savedViews.keys)
+                        InkWell(
+                          onTap: () {
+                            widget.onViewSelect(name);
+                            _close();
+                          },
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 7,
+                            ),
+                            child: Row(
+                              children: [
+                                Icon(
+                                  Icons.bookmark,
+                                  size: 11,
+                                  color: widget.activeViewName == name
+                                      ? const Color(0xFF60A5FA)
+                                      : const Color(0xFF4A5568),
+                                ),
+                                const SizedBox(width: 6),
+                                Expanded(
+                                  child: Text(
+                                    name,
+                                    style: TextStyle(
+                                      fontSize: 10.5,
+                                      color: widget.activeViewName == name
+                                          ? const Color(0xFFE8E8FF)
+                                          : const Color(0xFFCBD5E1),
+                                    ),
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      if (widget.savedViews.isEmpty)
+                        const Padding(
+                          padding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                          child: Text(
+                            'No saved views yet',
+                            style: TextStyle(fontSize: 10, color: Color(0xFF4A5568)),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+    Overlay.of(context).insert(_overlay!);
+  }
+
+  @override
+  void dispose() {
+    _close();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return CompositedTransformTarget(
+      link: _layerLink,
+      child: Tooltip(
+        message: 'Views',
+        child: InkWell(
+          borderRadius: BorderRadius.circular(6),
+          onTap: _toggle,
+          child: Padding(
+            padding: const EdgeInsets.all(6),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  Icons.bookmark_border,
+                  size: 16,
+                  color: _open
+                      ? const Color(0xFF60A5FA)
+                      : const Color(0xFFCBD5E1),
+                ),
+                if (widget.savedViews.isNotEmpty) ...[
+                  const SizedBox(width: 2),
+                  Text(
+                    '${widget.savedViews.length}',
+                    style: const TextStyle(
+                      fontSize: 9,
+                      color: Color(0xFF60A5FA),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _WebMiniMap extends StatelessWidget {
+  const _WebMiniMap({
+    required this.positions,
+    required this.sizes,
+    required this.hidden,
+    required this.nodeContent,
+    required this.transformCtrl,
+    required this.viewportSize,
+    required this.onPanTo,
+  });
+
+  final Map<String, Offset> positions;
+  final Map<String, Size> sizes;
+  final Set<String> hidden;
+  final Map<String, Map<String, dynamic>> nodeContent;
+  final TransformationController transformCtrl;
+  final Size viewportSize;
+  final void Function(Offset canvasCenter) onPanTo;
+
+  static const double _mapW = 210.0;
+  static const double _mapH = 130.0;
+  static const double _padding = 240.0;
+
+  Rect _canvasBounds() {
+    final visible = positions.entries.where((e) => !hidden.contains(e.key));
+    if (visible.isEmpty) {
+      return const Rect.fromLTWH(1800, 1800, 3500, 2000);
+    }
+    double minX = double.infinity, minY = double.infinity;
+    double maxX = -double.infinity, maxY = -double.infinity;
+    for (final e in visible) {
+      final sz = sizes[e.key] ?? const Size(200, 150);
+      minX = math.min(minX, e.value.dx);
+      minY = math.min(minY, e.value.dy);
+      maxX = math.max(maxX, e.value.dx + sz.width);
+      maxY = math.max(maxY, e.value.dy + sz.height);
+    }
+    return Rect.fromLTRB(
+      minX - _padding,
+      minY - _padding,
+      maxX + _padding,
+      maxY + _padding,
+    );
+  }
+
+  void _handleGesture(Offset local, Rect bounds) {
+    final cx = bounds.left + local.dx / _mapW * bounds.width;
+    final cy = bounds.top + local.dy / _mapH * bounds.height;
+    onPanTo(Offset(cx, cy));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: transformCtrl,
+      builder: (ctx, _) {
+        final bounds = _canvasBounds();
+        final vpTL = transformCtrl.toScene(Offset.zero);
+        final vpBR = transformCtrl.toScene(
+          Offset(viewportSize.width, viewportSize.height),
+        );
+        final viewportRect = Rect.fromLTRB(vpTL.dx, vpTL.dy, vpBR.dx, vpBR.dy);
+
+        return GestureDetector(
+          onTapDown: (d) => _handleGesture(d.localPosition, bounds),
+          onPanUpdate: (d) => _handleGesture(d.localPosition, bounds),
+          child: Container(
+            width: _mapW,
+            height: _mapH,
+            decoration: BoxDecoration(
+              color: const Color(0xE50B0D12),
+              border: Border.all(color: const Color(0x3060A5FA)),
+              borderRadius: BorderRadius.circular(8),
+              boxShadow: const [
+                BoxShadow(color: Color(0x66000000), blurRadius: 10),
+              ],
+            ),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(7),
+              child: CustomPaint(
+                painter: _MiniMapPainter(
+                  positions: positions,
+                  sizes: sizes,
+                  hidden: hidden,
+                  nodeContent: nodeContent,
+                  bounds: bounds,
+                  viewportRect: viewportRect,
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _MiniMapPainter extends CustomPainter {
+  const _MiniMapPainter({
+    required this.positions,
+    required this.sizes,
+    required this.hidden,
+    required this.nodeContent,
+    required this.bounds,
+    required this.viewportRect,
+  });
+  final Map<String, Offset> positions;
+  final Map<String, Size> sizes;
+  final Set<String> hidden;
+  final Map<String, Map<String, dynamic>> nodeContent;
+  final Rect bounds;
+  final Rect viewportRect;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (bounds.isEmpty) return;
+    final scaleX = size.width / bounds.width;
+    final scaleY = size.height / bounds.height;
+
+    for (final e in positions.entries) {
+      if (hidden.contains(e.key)) continue;
+      final pos = e.value;
+      final nodeSz = sizes[e.key] ?? const Size(200, 150);
+      final mx = (pos.dx - bounds.left) * scaleX;
+      final my = (pos.dy - bounds.top) * scaleY;
+      final mw = math.max(3.0, nodeSz.width * scaleX);
+      final mh = math.max(2.0, nodeSz.height * scaleY);
+      final type =
+          (nodeContent[e.key]?['type'] as String?) ?? _typeFromId(e.key);
+
       canvas.drawRRect(
-        rect.shift(const Offset(0, 6)),
-        Paint()
-          ..color = Colors.black45
-          ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 16),
+        RRect.fromRectAndRadius(
+          Rect.fromLTWH(mx, my, mw, mh),
+          const Radius.circular(1.5),
+        ),
+        Paint()..color = _colorForType(type),
       );
     }
 
-    // Card background
-    canvas.drawRRect(rect,
-        Paint()..color = const Color(0xFF0D1117).withAlpha(245));
-
-    // Header accent band
-    canvas.drawRRect(
-      RRect.fromRectAndCorners(
-        Rect.fromLTWH(pos.dx, pos.dy, sz.width, 30),
-        topLeft: const Radius.circular(10),
-        topRight: const Radius.circular(10),
-      ),
-      Paint()..color = color.withAlpha(28),
+    // Viewport rectangle
+    final vx = (viewportRect.left - bounds.left) * scaleX;
+    final vy = (viewportRect.top - bounds.top) * scaleY;
+    final vw = math.max(8.0, viewportRect.width * scaleX);
+    final vh = math.max(8.0, viewportRect.height * scaleY);
+    final vpRRect = RRect.fromRectAndRadius(
+      Rect.fromLTWH(vx, vy, vw, vh),
+      const Radius.circular(3),
     );
-
-    // Coloured border
+    canvas.drawRRect(vpRRect, Paint()..color = const Color(0x2060A5FA));
     canvas.drawRRect(
-      rect,
+      vpRRect,
       Paint()
-        ..color = color.withAlpha(isDragging ? 220 : 160)
+        ..color = const Color(0xCC60A5FA)
         ..style = PaintingStyle.stroke
-        ..strokeWidth = isDragging ? 2.0 : 1.5,
+        ..strokeWidth = 1.5,
     );
-
-    // Type tag
-    _text(canvas, _typeFor(id),
-        Offset(pos.dx + 12, pos.dy + 7),
-        sz.width - 16,
-        color: color.withAlpha(190),
-        fontSize: 9,
-        weight: FontWeight.w700,
-        letterSpacing: 1.2);
-
-    // Main label
-    _text(canvas, _labelFor(id),
-        Offset(pos.dx + 12, pos.dy + 35),
-        sz.width - 16,
-        color: const Color(0xFFE8E8FF),
-        fontSize: 13,
-        weight: FontWeight.w600);
   }
 
-  void _text(
-    Canvas canvas,
-    String text,
-    Offset offset,
-    double maxWidth, {
-    required Color color,
-    required double fontSize,
-    required FontWeight weight,
-    double letterSpacing = 0,
-  }) {
-    final tp = TextPainter(
-      text: TextSpan(
-        text: text,
-        style: TextStyle(
-          color: color,
-          fontSize: fontSize,
-          fontWeight: weight,
-          letterSpacing: letterSpacing,
+  static String _typeFromId(String id) {
+    final i = id.indexOf(':');
+    return i < 0 ? 'node' : id.substring(0, i);
+  }
+
+  static Color _colorForType(String type) => switch (type) {
+    'workspace' => const Color(0xCC7C3AED),
+    'agent' => const Color(0xCC34D399),
+    'branch' => const Color(0xCC60A5FA),
+    'tree' => const Color(0xCC10B981),
+    'diff' => const Color(0xCC7C6BFF),
+    'files' => const Color(0xCCF59E0B),
+    'run' => const Color(0xCCF87171),
+    'editor' => const Color(0xCCE879F9),
+    'session' => const Color(0xCC93C5FD),
+    'repo' => const Color(0xCC94A3B8),
+    _ => const Color(0xCC64748B),
+  };
+
+  @override
+  bool shouldRepaint(_MiniMapPainter old) =>
+      old.viewportRect != viewportRect ||
+      old.positions != positions ||
+      old.bounds != bounds;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ── Sidebar ───────────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════
+
+class _WebSidebar extends StatefulWidget {
+  const _WebSidebar({
+    required this.state,
+    required this.onFocusNode,
+    required this.onToggleHide,
+  });
+  final MindMapState state;
+  final void Function(String nodeId) onFocusNode;
+  final void Function(String nodeId) onToggleHide;
+
+  @override
+  State<_WebSidebar> createState() => _WebSidebarState();
+}
+
+class _WebSidebarState extends State<_WebSidebar> {
+  @override
+  Widget build(BuildContext context) {
+    final cubit = context.read<MindMapCubit>();
+    final collab = context.read<CollaborationCubit>();
+    return MindMapShowHideSidebar(
+      data: buildShowHideSidebarDataFromSnapshotPayload(
+        buildShowHideSidebarSnapshotPayloadFromMindMapState(widget.state),
+      ),
+      onToggleHide: widget.onToggleHide,
+      onFocusNode: widget.onFocusNode,
+      onShowAll: cubit.showAllNodes,
+      onCreateWorkspace: () async {
+        final result = await _RemoteWorkspaceDialog.showCreate(context);
+        if (result != null) {
+          collab.sendGuestEvent('workspace_create', result);
+        }
+      },
+    );
+  }
+}
+
+class _SidebarRow extends StatelessWidget {
+  const _SidebarRow({
+    required this.nodeId,
+    required this.label,
+    required this.type,
+    required this.depth,
+    required this.hidden,
+    required this.expanded,
+    required this.hasChildren,
+    this.onToggleExpand,
+    required this.onToggleHide,
+    required this.onFocus,
+  });
+  final String nodeId;
+  final String label;
+  final String type;
+  final int depth;
+  final bool hidden;
+  final bool expanded;
+  final bool hasChildren;
+  final VoidCallback? onToggleExpand;
+  final VoidCallback onToggleHide;
+  final VoidCallback onFocus;
+
+  static const _typeIcons = <String, IconData>{
+    'workspace': Icons.folder_copy_outlined,
+    'agent': Icons.smart_toy,
+    'session': Icons.terminal,
+    'repo': Icons.source,
+    'branch': Icons.alt_route,
+    'run': Icons.play_circle_outline,
+    'files': Icons.insert_drive_file_outlined,
+    'tree': Icons.account_tree_outlined,
+    'diff': Icons.compare_arrows_rounded,
+    'editor': Icons.code,
+  };
+
+  static const _typeColors = <String, Color>{
+    'workspace': Color(0xFF7C6BFF),
+    'agent': Color(0xFF34D399),
+    'session': Color(0xFF6B7898),
+    'repo': Color(0xFF9AA3BF),
+    'branch': Color(0xFF60A5FA),
+    'run': Color(0xFFF87171),
+    'files': Color(0xFFFFAA33),
+    'tree': Color(0xFF34D399),
+    'diff': Color(0xFF7C6BFF),
+    'editor': Color(0xFFFFCC44),
+  };
+
+  @override
+  Widget build(BuildContext context) {
+    final icon = _typeIcons[type] ?? Icons.circle;
+    final color = _typeColors[type] ?? const Color(0xFF64748B);
+    final isWs = type == 'workspace';
+
+    return InkWell(
+      onTap: hasChildren ? onToggleExpand : onFocus,
+      child: Padding(
+        padding: EdgeInsets.fromLTRB(8.0 + depth * 14.0, 3, 4, 3),
+        child: Row(
+          children: [
+            // Expand/collapse arrow
+            if (hasChildren)
+              GestureDetector(
+                onTap: onToggleExpand,
+                child: Padding(
+                  padding: const EdgeInsets.only(right: 2),
+                  child: Icon(
+                    expanded ? Icons.expand_less : Icons.expand_more,
+                    size: 13,
+                    color: const Color(0xFF6B7898),
+                  ),
+                ),
+              )
+            else ...[
+              // Vertical tree line hint for non-root items
+              if (depth > 0)
+                Container(
+                  width: 1,
+                  height: 16,
+                  margin: const EdgeInsets.only(right: 5),
+                  color: const Color(0xFF2A3040),
+                ),
+              SizedBox(width: depth > 0 ? 10 : 16),
+            ],
+            // Eye icon (before node icon, matching macOS)
+            GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: onToggleHide,
+              child: Padding(
+                padding: const EdgeInsets.all(2),
+                child: Icon(
+                  hidden ? Icons.visibility_off : Icons.visibility,
+                  size: isWs ? 13 : 11,
+                  color: hidden
+                      ? const Color(0xFF4A5680)
+                      : (isWs
+                            ? const Color(0xFF7C6BFF)
+                            : const Color(0x997C6BFF)),
+                ),
+              ),
+            ),
+            const SizedBox(width: 5),
+            Icon(
+              icon,
+              size: isWs ? 13 : 11,
+              color: hidden ? const Color(0xFF4A5680) : color,
+            ),
+            const SizedBox(width: 6),
+            Expanded(
+              child: Text(
+                label,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: isWs ? FontWeight.w700 : FontWeight.normal,
+                  color: hidden
+                      ? const Color(0xFF4A5680)
+                      : (isWs
+                            ? const Color(0xFFE8E8FF)
+                            : const Color(0xFFCBD5E1)),
+                ),
+              ),
+            ),
+            // Expand chevron for workspaces (right side)
+            if (isWs)
+              Icon(
+                expanded ? Icons.expand_less : Icons.expand_more,
+                size: 13,
+                color: const Color(0xFF6B7898),
+              ),
+          ],
         ),
       ),
-      textDirection: TextDirection.ltr,
-    )..layout(maxWidth: maxWidth);
-    tp.paint(canvas, offset);
+    );
   }
+}
 
-  void _drawConnectors(Canvas canvas) {
+// ═══════════════════════════════════════════════════════════════════════════
+// ── Connectors painter ────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════
+
+class _ConnectorsPainter extends CustomPainter {
+  const _ConnectorsPainter(this.state);
+  final MindMapState state;
+
+  @override
+  void paint(Canvas canvas, Size size) {
     final paint = Paint()
       ..color = const Color(0xFF1E2D40)
       ..style = PaintingStyle.stroke
@@ -280,64 +1367,36 @@ class _NodesPainter extends CustomPainter {
 
     for (final conn in state.connections) {
       if (state.hidden.contains(conn.fromId) ||
-          state.hidden.contains(conn.toId)) continue;
+          state.hidden.contains(conn.toId))
+        continue;
       final fp = state.positions[conn.fromId];
       final tp2 = state.positions[conn.toId];
       if (fp == null || tp2 == null) continue;
-      final fsz = state.sizes[conn.fromId] ?? const Size(220, 120);
-      final tsz = state.sizes[conn.toId]   ?? const Size(220, 120);
+      final fsz = state.sizes[conn.fromId] ?? const Size(220, 160);
+      final tsz = state.sizes[conn.toId] ?? const Size(220, 160);
 
       final start = Offset(fp.dx + fsz.width, fp.dy + fsz.height / 2);
-      final end   = Offset(tp2.dx, tp2.dy + tsz.height / 2);
-      final mid   = (end.dx - start.dx) / 2;
+      final end = Offset(tp2.dx, tp2.dy + tsz.height / 2);
+      final mid = (end.dx - start.dx) / 2;
 
       canvas.drawPath(
         Path()
           ..moveTo(start.dx, start.dy)
-          ..cubicTo(start.dx + mid, start.dy,
-                    end.dx   - mid, end.dy,
-                    end.dx,         end.dy),
+          ..cubicTo(
+            start.dx + mid,
+            start.dy,
+            end.dx - mid,
+            end.dy,
+            end.dx,
+            end.dy,
+          ),
         paint,
       );
     }
   }
 
-  // ── helpers ────────────────────────────────────────────────────────────
-
-  Color _colorFor(String id) {
-    if (id.startsWith('ws:'))      return const Color(0xFF4B9EFF);
-    if (id.startsWith('session:')) return const Color(0xFFB87FFF);
-    if (id.startsWith('repo:'))    return const Color(0xFF00E5FF);
-    if (id.startsWith('branch:'))  return const Color(0xFF34D399);
-    if (id.startsWith('agent:'))   return const Color(0xFF00FF9F);
-    if (id.startsWith('files:'))   return const Color(0xFF94A3B8);
-    if (id.startsWith('diff:'))    return const Color(0xFFFF9500);
-    if (id.startsWith('run:'))     return const Color(0xFFFF6B85);
-    return const Color(0xFF64748B);
-  }
-
-  String _labelFor(String id) {
-    final i = id.indexOf(':');
-    if (i < 0) return id;
-    final s = id.substring(i + 1);
-    return s.length > 26 ? '${s.substring(0, 24)}…' : s;
-  }
-
-  String _typeFor(String id) {
-    if (id.startsWith('ws:'))      return 'WORKSPACE';
-    if (id.startsWith('session:')) return 'SESSION';
-    if (id.startsWith('repo:'))    return 'REPO';
-    if (id.startsWith('branch:'))  return 'BRANCH';
-    if (id.startsWith('agent:'))   return 'AGENT';
-    if (id.startsWith('files:'))   return 'FILES';
-    if (id.startsWith('diff:'))    return 'DIFF';
-    if (id.startsWith('run:'))     return 'RUN';
-    return 'NODE';
-  }
-
   @override
-  bool shouldRepaint(_NodesPainter old) =>
-      old.state != state || old.draggingId != draggingId;
+  bool shouldRepaint(_ConnectorsPainter old) => old.state != state;
 }
 
 // ── Dot-grid painter ───────────────────────────────────────────────────────
@@ -350,9 +1409,9 @@ class _GridPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final paint = Paint()..color = const Color(0xFF1E293B);
-    const base  = 30.0;
-    final step  = base * scale;
-    if (step < 4) return; // too small to draw
+    const base = 30.0;
+    final step = base * scale;
+    if (step < 4) return;
 
     final ox = offset.dx % step;
     final oy = offset.dy % step;
@@ -370,4 +1429,166 @@ class _GridPainter extends CustomPainter {
   @override
   bool shouldRepaint(_GridPainter old) =>
       old.offset != offset || old.scale != scale;
+}
+
+// ---------------------------------------------------------------------------
+// Remote workspace dialogs (no native FilePicker — runs in browser)
+// ---------------------------------------------------------------------------
+
+class _RemoteWorkspaceDialog {
+  _RemoteWorkspaceDialog._();
+
+  static const _kBg = Color(0xFF12151C);
+  static const _kBorder = Color(0xFF2A3040);
+  static const _kText = Color(0xFFE8E8FF);
+  static const _kHint = Color(0xFF6B7898);
+  static const _kAccent = Color(0xFF7C6BFF);
+
+  /// Shows a dialog asking for workspace name + folder path.
+  /// Returns `{'name': ..., 'path': ...}` or null if cancelled.
+  static Future<Map<String, String>?> showCreate(BuildContext context) async {
+    final nameCtrl = TextEditingController();
+    final pathCtrl = TextEditingController(text: '~/');
+    try {
+      return await showDialog<Map<String, String>>(
+        context: context,
+        barrierDismissible: false,
+        builder: (ctx) => _WorkspaceFormDialog(
+          title: 'New Workspace',
+          confirmLabel: 'Create',
+          nameCtrl: nameCtrl,
+          pathCtrl: pathCtrl,
+          onConfirm: () => Navigator.pop(
+            ctx,
+            {'name': nameCtrl.text.trim(), 'path': pathCtrl.text.trim()},
+          ),
+          onCancel: () => Navigator.pop(ctx),
+        ),
+      );
+    } finally {
+      nameCtrl.dispose();
+      pathCtrl.dispose();
+    }
+  }
+
+  /// Shows a dialog asking for a folder path to add to an existing workspace.
+  /// Returns the path string or null if cancelled.
+  static Future<String?> showAddFolder(BuildContext context) async {
+    final pathCtrl = TextEditingController(text: '~/');
+    try {
+      return await showDialog<String>(
+        context: context,
+        barrierDismissible: false,
+        builder: (ctx) => _WorkspaceFormDialog(
+          title: 'Add Folder',
+          confirmLabel: 'Add',
+          pathCtrl: pathCtrl,
+          onConfirm: () => Navigator.pop(ctx, pathCtrl.text.trim()),
+          onCancel: () => Navigator.pop(ctx),
+        ),
+      );
+    } finally {
+      pathCtrl.dispose();
+    }
+  }
+}
+
+class _WorkspaceFormDialog extends StatelessWidget {
+  const _WorkspaceFormDialog({
+    required this.title,
+    required this.confirmLabel,
+    this.nameCtrl,
+    required this.pathCtrl,
+    required this.onConfirm,
+    required this.onCancel,
+  });
+
+  final String title;
+  final String confirmLabel;
+  final TextEditingController? nameCtrl;
+  final TextEditingController pathCtrl;
+  final VoidCallback onConfirm;
+  final VoidCallback onCancel;
+
+  @override
+  Widget build(BuildContext context) {
+    const bg = _RemoteWorkspaceDialog._kBg;
+    const border = _RemoteWorkspaceDialog._kBorder;
+    const text = _RemoteWorkspaceDialog._kText;
+    const hint = _RemoteWorkspaceDialog._kHint;
+    const accent = _RemoteWorkspaceDialog._kAccent;
+
+    return AlertDialog(
+      backgroundColor: bg,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(10),
+        side: const BorderSide(color: border),
+      ),
+      title: Text(
+        title,
+        style: const TextStyle(color: text, fontSize: 14),
+      ),
+      content: SizedBox(
+        width: 360,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (nameCtrl != null) ...[
+              const Text(
+                'Name',
+                style: TextStyle(color: hint, fontSize: 11),
+              ),
+              const SizedBox(height: 4),
+              TextField(
+                controller: nameCtrl,
+                autofocus: true,
+                style: const TextStyle(color: text, fontSize: 13),
+                decoration: const InputDecoration(
+                  hintText: 'My Project',
+                  hintStyle: TextStyle(color: hint),
+                  isDense: true,
+                ),
+              ),
+              const SizedBox(height: 12),
+            ],
+            const Text(
+              'Folder path',
+              style: TextStyle(color: hint, fontSize: 11),
+            ),
+            const SizedBox(height: 4),
+            TextField(
+              controller: pathCtrl,
+              autofocus: nameCtrl == null,
+              style: const TextStyle(
+                color: text,
+                fontSize: 13,
+                fontFamily: 'monospace',
+              ),
+              decoration: const InputDecoration(
+                hintText: '~/projects/my-app',
+                hintStyle: TextStyle(color: hint),
+                isDense: true,
+              ),
+            ),
+            const SizedBox(height: 6),
+            const Text(
+              'You can use ~ for your home directory',
+              style: TextStyle(color: hint, fontSize: 11),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: onCancel,
+          child: const Text('Cancel', style: TextStyle(color: hint)),
+        ),
+        TextButton(
+          onPressed: onConfirm,
+          child: Text(confirmLabel, style: const TextStyle(color: accent)),
+        ),
+      ],
+    );
+  }
 }

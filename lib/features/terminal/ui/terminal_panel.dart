@@ -476,9 +476,18 @@ class _SessionInfoBar extends StatelessWidget {
 }
 
 class TerminalWidget extends StatefulWidget {
-  const TerminalWidget({super.key, required this.session, required this.isActive});
+  const TerminalWidget({
+    super.key,
+    required this.session,
+    required this.isActive,
+    this.autoRequestFocus = true,
+  });
   final AgentSession session;
   final bool isActive;
+  /// When false, the terminal won't auto-request focus on creation or when
+  /// becoming active. This prevents focus-fighting when multiple terminals
+  /// exist (e.g. mindmap cards). Focus will still be requested on click.
+  final bool autoRequestFocus;
 
   @override
   State<TerminalWidget> createState() => TerminalWidgetState();
@@ -526,7 +535,7 @@ class TerminalWidgetState extends State<TerminalWidget> {
     _focusNode.addListener(() {
     });
     _bindTerminal();
-    _requestFocusAfterFrame();
+    if (widget.autoRequestFocus) _requestFocusAfterFrame();
     HardwareKeyboard.instance.addHandler(_handleHardwareKey);
     // Load persisted font size
     SessionPrefs.load().then((snap) {
@@ -544,7 +553,7 @@ class TerminalWidgetState extends State<TerminalWidget> {
       HardwareKeyboard.instance.addHandler(_handleHardwareKey);
     }
     // Request focus when this session becomes active (IndexedStack shows it).
-    if (!old.isActive && widget.isActive) {
+    if (!old.isActive && widget.isActive && widget.autoRequestFocus) {
       _requestFocusAfterFrame();
     }
   }
@@ -1093,7 +1102,11 @@ class TerminalWidgetState extends State<TerminalWidget> {
               focusNode: _focusNode,
               autofocus: widget.isActive,
               onKeyEvent: _onTerminalKeyEvent,
-              textStyle: TerminalStyle(fontSize: _fontSize),
+              textStyle: TerminalStyle(
+                fontSize: _fontSize,
+                fontFamily: 'JetBrainsMono',
+                height: 1.2,
+              ),
               theme: TerminalTheme(
                 cursor: colors.primary,
                 selection: colors.primary.withAlpha(120),

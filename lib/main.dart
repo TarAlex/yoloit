@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:window_manager/window_manager.dart';
 import 'package:yoloit/app.dart';
+import 'package:yoloit/core/config/app_config.dart';
 import 'package:yoloit/core/hotkeys/hotkey_registry.dart';
 import 'package:yoloit/core/services/app_logger.dart';
 import 'package:yoloit/core/services/resource_monitor_service.dart';
@@ -34,6 +35,7 @@ void main() async {
 
   await ThemeManager.instance.load();
   await HotkeyRegistry.instance.load();
+  await AppConfig.instance.load();
 
   await windowManager.ensureInitialized();
   const options = WindowOptions(

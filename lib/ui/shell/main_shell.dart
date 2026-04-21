@@ -84,10 +84,10 @@ class _MainShellState extends State<MainShell> with WindowListener {
       context.read<TerminalCubit>().initialize();
       // Load workspaces — BlocListener in _BottomPanel will pick up active workspace
       context.read<WorkspaceCubit>().load();
-      // Focus terminal after startup
-      Future.delayed(const Duration(milliseconds: 600), () {
-        if (mounted) _terminalFocusNode.requestFocus();
-      });
+      // NOTE: do NOT requestFocus on _terminalFocusNode here — TerminalWidget
+      // auto-focuses its own xterm FocusNode via autofocus + _requestFocusAfterFrame.
+      // Calling requestFocus on the panel node would steal focus from xterm,
+      // breaking keyboard input in the terminal.
       // Show setup wizard on first launch
       Future.delayed(const Duration(milliseconds: 800), () {
         if (mounted) SetupGuidePage.showIfFirstLaunch(context);
@@ -250,7 +250,20 @@ class _MainShellState extends State<MainShell> with WindowListener {
             },
           ),
           FocusTerminalIntent: CallbackAction<FocusTerminalIntent>(
-            onInvoke: (_) => _terminalFocusNode.requestFocus(),
+            onInvoke: (_) {
+              // Focus the panel scope then immediately descend to the xterm widget
+              // so Cmd+` brings keyboard focus to the actual terminal, not just its container.
+              _terminalFocusNode.requestFocus();
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                if (!mounted) return;
+                final scope = FocusScope.of(context);
+                if (scope.focusedChild == _terminalFocusNode ||
+                    _terminalFocusNode.hasFocus) {
+                  FocusTraversalGroup.maybeOf(context)?.next(_terminalFocusNode);
+                }
+              });
+              return null;
+            },
           ),
           OpenSettingsIntent: CallbackAction<OpenSettingsIntent>(
             onInvoke: (_) => SettingsPage.show(context),

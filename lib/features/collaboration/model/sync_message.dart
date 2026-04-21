@@ -20,13 +20,19 @@ class SyncMessage {
 
   // ── Type constants ─────────────────────────────────────────────────────────
 
-  static const kSnapshot     = 'snapshot';
-  static const kDeltaMove    = 'delta.move';
-  static const kDeltaResize  = 'delta.resize';
-  static const kDeltaToggle  = 'delta.toggle';
-  static const kHello        = 'hello';
-  static const kConnected    = 'connected';
-  static const kDisconnected = 'disconnected';
+  static const kSnapshot      = 'snapshot';
+  static const kDeltaMove     = 'delta.move';
+  static const kDeltaResize   = 'delta.resize';
+  static const kDeltaToggle   = 'delta.toggle';
+  static const kHello         = 'hello';
+  static const kConnected     = 'connected';
+  static const kDisconnected  = 'disconnected';
+  /// Host → guest: rich content update for a single node.
+  static const kNodeUpdate    = 'node.update';
+  /// Guest → host: keyboard input for a terminal node.
+  static const kTerminalInput = 'terminal.input';
+  /// Host → guest: raw terminal output bytes (with ANSI) for live rendering.
+  static const kTerminalOutput = 'terminal.output';
 
   // ── Factories ──────────────────────────────────────────────────────────────
 
@@ -36,6 +42,8 @@ class SyncMessage {
     required List<String> hidden,
     required List<String> hiddenTypes,
     List<Map<String, dynamic>> connections = const [],
+    Map<String, Map<String, dynamic>> nodeContent = const {},
+    Map<String, Map<String, dynamic>> savedViews = const {},
     String senderId = 'host',
   }) => SyncMessage(
     type: kSnapshot, senderId: senderId,
@@ -45,6 +53,8 @@ class SyncMessage {
       'hidden':      hidden,
       'hiddenTypes': hiddenTypes,
       'connections': connections,
+      'nodeContent': nodeContent,
+      'savedViews':  savedViews,
     },
   );
 
@@ -66,6 +76,23 @@ class SyncMessage {
   factory SyncMessage.disconnected(String clientId) =>
       SyncMessage(type: kDisconnected, senderId: 'server', payload: {'id': clientId});
 
+  factory SyncMessage.nodeUpdate(String nodeId, Map<String, dynamic> content,
+      {String senderId = 'host'}) =>
+      SyncMessage(type: kNodeUpdate, senderId: senderId, payload: {'id': nodeId, 'content': content});
+
+  factory SyncMessage.terminalInput(String nodeId, String data,
+      {required String senderId}) =>
+      SyncMessage(type: kTerminalInput, senderId: senderId,
+          payload: {'id': nodeId, 'data': data});
+
+  /// Host → guest: raw terminal output. [data] is the raw PTY byte string
+  /// containing ANSI escapes, CSI sequences, etc. The guest feeds this
+  /// directly into its xterm Terminal instance.
+  factory SyncMessage.terminalOutput(String nodeId, String data,
+      {String senderId = 'host'}) =>
+      SyncMessage(type: kTerminalOutput, senderId: senderId,
+          payload: {'id': nodeId, 'data': data});
+
   // ── Serialisation ──────────────────────────────────────────────────────────
 
   String encode() => jsonEncode({'type': type, 'from': senderId, 'payload': payload});
@@ -73,10 +100,16 @@ class SyncMessage {
   static SyncMessage? decode(dynamic raw) {
     try {
       final m = jsonDecode(raw as String) as Map<String, dynamic>;
+      // Support both wrapped ({"type","payload":{..}}) and flat ({"type","name",...}) messages.
+      var payload = (m['payload'] as Map<String, dynamic>?) ?? <String, dynamic>{};
+      if (payload.isEmpty && m['type'] == kHello) {
+        // Flat hello: {"type":"hello","name":"X"} → wrap into payload format.
+        payload = Map<String, dynamic>.from(m)..remove('type')..remove('from');
+      }
       return SyncMessage(
         type:     m['type'] as String,
         senderId: (m['from'] as String?) ?? '',
-        payload:  (m['payload'] as Map<String, dynamic>?) ?? {},
+        payload:  payload,
       );
     } catch (_) {
       return null;

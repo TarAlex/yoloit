@@ -17,7 +17,7 @@ class GuestShell extends StatefulWidget {
 
 class _GuestShellState extends State<GuestShell> {
   late final TextEditingController _hostCtrl;
-  final _portCtrl = TextEditingController(text: '40401');
+  late final TextEditingController _portCtrl;
   final _nameCtrl = TextEditingController(text: 'Remote Guest');
   bool _autoConnectPending = false;
 
@@ -25,9 +25,11 @@ class _GuestShellState extends State<GuestShell> {
   void initState() {
     super.initState();
     final autoHost = _inferHost();
+    final autoPort = _inferWsPort();
     _hostCtrl = TextEditingController(text: autoHost);
-    // Auto-connect when page is served from localhost (local dev / test).
-    if (autoHost == 'localhost' || autoHost == '127.0.0.1') {
+    _portCtrl = TextEditingController(text: '$autoPort');
+    // Auto-connect when page is served with a known host (local or LAN).
+    if (autoHost.isNotEmpty) {
       _autoConnectPending = true;
     }
   }
@@ -40,6 +42,15 @@ class _GuestShellState extends State<GuestShell> {
       return host;
     } catch (_) {
       return '';
+    }
+  }
+
+  static int _inferWsPort() {
+    try {
+      final rawPort = Uri.base.queryParameters['wsPort'] ?? '';
+      return int.tryParse(rawPort) ?? 40401;
+    } catch (_) {
+      return 40401;
     }
   }
 
@@ -107,28 +118,40 @@ class _GuestShellState extends State<GuestShell> {
               Row(
                 children: [
                   Container(
-                    width: 36, height: 36,
+                    width: 36,
+                    height: 36,
                     decoration: BoxDecoration(
                       color: const Color(0xFF4B9EFF).withAlpha(20),
                       borderRadius: BorderRadius.circular(8),
                       border: Border.all(
-                          color: const Color(0xFF4B9EFF).withAlpha(80)),
+                        color: const Color(0xFF4B9EFF).withAlpha(80),
+                      ),
                     ),
-                    child: const Icon(Icons.hub_rounded,
-                        color: Color(0xFF4B9EFF), size: 20),
+                    child: const Icon(
+                      Icons.hub_rounded,
+                      color: Color(0xFF4B9EFF),
+                      size: 20,
+                    ),
                   ),
                   const SizedBox(width: 12),
                   const Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text('YoLoIT Space',
-                          style: TextStyle(
-                              color: Color(0xFFE8E8FF),
-                              fontSize: 18,
-                              fontWeight: FontWeight.w700)),
-                      Text('Connect to a running desktop session',
-                          style: TextStyle(
-                              color: Color(0xFF6B7898), fontSize: 11)),
+                      Text(
+                        'YoLoIT Space',
+                        style: TextStyle(
+                          color: Color(0xFFE8E8FF),
+                          fontSize: 18,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      Text(
+                        'Connect to a running desktop session',
+                        style: TextStyle(
+                          color: Color(0xFF6B7898),
+                          fontSize: 11,
+                        ),
+                      ),
                     ],
                   ),
                 ],
@@ -152,24 +175,36 @@ class _GuestShellState extends State<GuestShell> {
               // ── Error message ────────────────────────────────────────
               if (collab.error.isNotEmpty) ...[
                 Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 10,
+                  ),
                   decoration: BoxDecoration(
                     color: const Color(0xFFFF4F6A).withAlpha(15),
                     borderRadius: BorderRadius.circular(8),
                     border: Border.all(
-                        color: const Color(0xFFFF4F6A).withAlpha(60)),
-                  ),
-                  child: Row(children: [
-                    const Icon(Icons.error_outline,
-                        color: Color(0xFFFF4F6A), size: 14),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(collab.error,
-                          style: const TextStyle(
-                              color: Color(0xFFFF4F6A), fontSize: 12)),
+                      color: const Color(0xFFFF4F6A).withAlpha(60),
                     ),
-                  ]),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(
+                        Icons.error_outline,
+                        color: Color(0xFFFF4F6A),
+                        size: 14,
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          collab.error,
+                          style: const TextStyle(
+                            color: Color(0xFFFF4F6A),
+                            fontSize: 12,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
                 const SizedBox(height: 16),
               ],
@@ -182,13 +217,15 @@ class _GuestShellState extends State<GuestShell> {
                     backgroundColor: const Color(0xFF4B9EFF),
                     foregroundColor: Colors.white,
                     shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(10)),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
                     elevation: 0,
                   ),
                   onPressed: () => _connect(cubit),
-                  child: const Text('Connect to Space',
-                      style: TextStyle(
-                          fontSize: 14, fontWeight: FontWeight.w600)),
+                  child: const Text(
+                    'Connect to Space',
+                    style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+                  ),
                 ),
               ),
 
@@ -207,12 +244,16 @@ class _GuestShellState extends State<GuestShell> {
     );
   }
 
-  Widget _label(String text) => Text(text,
-      style: const TextStyle(
-          color: Color(0xFF6B7898), fontSize: 12, fontWeight: FontWeight.w500));
+  Widget _label(String text) => Text(
+    text,
+    style: const TextStyle(
+      color: Color(0xFF6B7898),
+      fontSize: 12,
+      fontWeight: FontWeight.w500,
+    ),
+  );
 
-  Widget _field(TextEditingController c, String hint,
-      {bool number = false}) =>
+  Widget _field(TextEditingController c, String hint, {bool number = false}) =>
       TextField(
         controller: c,
         keyboardType: number ? TextInputType.number : TextInputType.text,
@@ -232,11 +273,12 @@ class _GuestShellState extends State<GuestShell> {
           ),
           focusedBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(8),
-            borderSide:
-                const BorderSide(color: Color(0xFF4B9EFF), width: 1.5),
+            borderSide: const BorderSide(color: Color(0xFF4B9EFF), width: 1.5),
           ),
-          contentPadding:
-              const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+          contentPadding: const EdgeInsets.symmetric(
+            horizontal: 12,
+            vertical: 12,
+          ),
         ),
       );
 
@@ -263,11 +305,14 @@ class _GuestShellState extends State<GuestShell> {
         children: [
           const Icon(Icons.hub_rounded, color: Color(0xFF4B9EFF), size: 16),
           const SizedBox(width: 8),
-          const Text('YoLoIT Space',
-              style: TextStyle(
-                  color: Color(0xFFE8E8FF),
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600)),
+          const Text(
+            'YoLoIT Space',
+            style: TextStyle(
+              color: Color(0xFFE8E8FF),
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
           const SizedBox(width: 16),
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
@@ -275,28 +320,38 @@ class _GuestShellState extends State<GuestShell> {
               color: const Color(0xFF00FF9F).withAlpha(20),
               borderRadius: BorderRadius.circular(12),
               border: Border.all(
-                  color: const Color(0xFF00FF9F).withAlpha(60), width: 1),
+                color: const Color(0xFF00FF9F).withAlpha(60),
+                width: 1,
+              ),
             ),
-            child: Row(children: [
-              Container(
+            child: Row(
+              children: [
+                Container(
                   width: 6,
                   height: 6,
                   decoration: const BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: Color(0xFF00FF9F))),
-              const SizedBox(width: 5),
-              Text('Connected · ${collab.address}',
+                    shape: BoxShape.circle,
+                    color: Color(0xFF00FF9F),
+                  ),
+                ),
+                const SizedBox(width: 5),
+                Text(
+                  'Connected · ${collab.address}',
                   style: const TextStyle(
-                      color: Color(0xFF00FF9F),
-                      fontSize: 11,
-                      fontWeight: FontWeight.w500)),
-            ]),
+                    color: Color(0xFF00FF9F),
+                    fontSize: 11,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ],
+            ),
           ),
           if (collab.peerCount > 0) ...[
             const SizedBox(width: 12),
-            Text('${collab.peerCount} peer${collab.peerCount > 1 ? 's' : ''}',
-                style: const TextStyle(
-                    color: Color(0xFF6B7898), fontSize: 11)),
+            Text(
+              '${collab.peerCount} peer${collab.peerCount > 1 ? 's' : ''}',
+              style: const TextStyle(color: Color(0xFF6B7898), fontSize: 11),
+            ),
           ],
           const Spacer(),
           TextButton.icon(

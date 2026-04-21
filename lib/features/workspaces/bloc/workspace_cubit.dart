@@ -1,9 +1,12 @@
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:path/path.dart' as p;
+import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:yoloit/core/config/app_config.dart';
 import 'package:yoloit/core/session/session_prefs.dart';
 import 'package:yoloit/core/services/git_service.dart';
 import 'package:yoloit/features/workspaces/bloc/workspace_state.dart';
@@ -14,6 +17,70 @@ class WorkspaceCubit extends Cubit<WorkspaceState> {
   WorkspaceCubit() : super(const WorkspaceInitial());
 
   static const _storageKey = 'workspaces';
+  // Production bundle ID — used for cross-build migration only.
+  static const _kProductionBundleId = 'com.yoloit.yoloit';
+
+  // Shared file path comes from AppConfig (user-configurable, default ~/.yoloit/workspaces.json).
+  static Future<File> get _sharedFile async {
+    await AppConfig.instance.load();
+    final path = AppConfig.instance.workspacesFilePath;
+    final dir = Directory(p.dirname(path));
+    if (!dir.existsSync()) dir.createSync(recursive: true);
+    return File(path);
+  }
+
+  static Future<List<Workspace>> _loadShared() async {
+    try {
+      final f = await _sharedFile;
+      if (!f.existsSync()) return [];
+      final raw = jsonDecode(f.readAsStringSync());
+      if (raw is List) {
+        return raw
+            .map((e) => Workspace.fromJson(e as Map<String, dynamic>))
+            .toList();
+      }
+    } catch (_) {}
+    return [];
+  }
+
+  /// Try reading workspaces from the production app's plist (macOS only).
+  /// Used as a one-time migration source when the shared file is empty.
+  static Future<List<Workspace>> _loadFromProductionPrefs() async {
+    try {
+      final home = Platform.environment['HOME'];
+      if (home == null) return [];
+      final plist = File(
+        '$home/Library/Preferences/$_kProductionBundleId.plist',
+      );
+      if (!plist.existsSync()) return [];
+      final result = await Process.run(
+        'defaults',
+        ['read', _kProductionBundleId, 'flutter.workspaces'],
+      );
+      if (result.exitCode != 0) return [];
+      // `defaults read` returns macOS plist array as plain text — parse with plutil
+      final jsonResult = await Process.run(
+        'plutil',
+        ['-convert', 'json', '-o', '-', plist.path],
+      );
+      if (jsonResult.exitCode != 0) return [];
+      final decoded = jsonDecode(jsonResult.stdout as String) as Map<String, dynamic>;
+      final rawList = decoded['flutter.workspaces'];
+      if (rawList is! List) return [];
+      return rawList
+          .map((e) => Workspace.fromJson(jsonDecode(e as String) as Map<String, dynamic>))
+          .toList();
+    } catch (_) {
+      return [];
+    }
+  }
+
+  static Future<void> _saveShared(List<Workspace> workspaces) async {
+    final f = await _sharedFile;
+    f.writeAsStringSync(
+      jsonEncode(workspaces.map((w) => w.toJson()).toList()),
+    );
+  }
 
   final _dirService = WorkspaceDirService.instance;
 
@@ -34,11 +101,28 @@ class WorkspaceCubit extends Cubit<WorkspaceState> {
   Future<void> load() async {
     emit(const WorkspaceLoading());
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final json = prefs.getStringList(_storageKey) ?? [];
-      final workspaces = json
-          .map((s) => Workspace.fromJson(jsonDecode(s) as Map<String, dynamic>))
-          .toList();
+      // Primary: shared file at ~/.yoloit/workspaces.json (all builds share this)
+      var workspaces = await _loadShared();
+
+      // Migration priority:
+      // 1. Shared file at configured path (all builds share this)
+      // 2. Current build's SharedPreferences → migrate to shared file
+      // 3. Production app's plist → migrate to shared file (cross-bundle migration)
+      if (workspaces.isEmpty) {
+        final prefs = await SharedPreferences.getInstance();
+        final json = prefs.getStringList(_storageKey) ?? [];
+        if (json.isNotEmpty) {
+          workspaces = json
+              .map((s) => Workspace.fromJson(jsonDecode(s) as Map<String, dynamic>))
+              .toList();
+        }
+      }
+      if (workspaces.isEmpty) {
+        workspaces = await _loadFromProductionPrefs();
+      }
+      if (workspaces.isNotEmpty) {
+        await _saveShared(workspaces); // write to shared file for future loads
+      }
       // Sync symlinks for all workspaces on startup.
       for (final ws in workspaces) {
         _dirService.syncSymlinks(ws);
@@ -47,7 +131,7 @@ class WorkspaceCubit extends Cubit<WorkspaceState> {
       final savedId = snap.activeWorkspaceId;
       final activeId = savedId != null && workspaces.any((w) => w.id == savedId)
           ? savedId
-          : (workspaces.length == 1 ? workspaces.first.id : null);
+          : (workspaces.isNotEmpty ? workspaces.first.id : null);
       emit(WorkspaceLoaded(workspaces: workspaces, activeWorkspaceId: activeId));
       // Refresh git info for all workspaces
       for (final ws in workspaces) {
@@ -204,6 +288,8 @@ class WorkspaceCubit extends Cubit<WorkspaceState> {
   }
 
   Future<void> _save(List<Workspace> workspaces) async {
+    // Write to shared file (all builds) and keep SharedPreferences in sync.
+    await _saveShared(workspaces);
     final prefs = await SharedPreferences.getInstance();
     await prefs.setStringList(
       _storageKey,

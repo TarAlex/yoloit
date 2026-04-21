@@ -5,13 +5,14 @@ enum CollaborationMode { idle, hosting, connected }
 @immutable
 class CollaborationState {
   const CollaborationState({
-    this.mode         = CollaborationMode.idle,
-    this.address      = '',
+    this.mode = CollaborationMode.idle,
+    this.address = '',
     this.webClientUrl = '',
-    this.localUrl     = '',
-    this.peerCount    = 0,
-    this.error        = '',
-    this.peers        = const {},
+    this.localUrl = '',
+    this.peerCount = 0,
+    this.error = '',
+    this.peers = const {},
+    this.startingHost = false,
   });
 
   final CollaborationMode mode;
@@ -34,25 +35,31 @@ class CollaborationState {
   /// Peer client ids and names currently connected (host perspective).
   final Map<String, String> peers;
 
-  bool get isIdle     => mode == CollaborationMode.idle;
-  bool get isHosting  => mode == CollaborationMode.hosting;
-  bool get isGuest    => mode == CollaborationMode.connected;
+  /// True while the host server is probing ports / retrying startup.
+  final bool startingHost;
+
+  bool get isIdle => mode == CollaborationMode.idle && !startingHost;
+  bool get isHosting => mode == CollaborationMode.hosting;
+  bool get isGuest => mode == CollaborationMode.connected;
+  bool get isStartingHost => startingHost;
 
   CollaborationState copyWith({
     CollaborationMode? mode,
-    String?            address,
-    String?            webClientUrl,
-    String?            localUrl,
-    int?               peerCount,
-    String?            error,
+    String? address,
+    String? webClientUrl,
+    String? localUrl,
+    int? peerCount,
+    String? error,
     Map<String, String>? peers,
+    bool? startingHost,
   }) => CollaborationState(
-    mode:         mode         ?? this.mode,
-    address:      address      ?? this.address,
+    mode: mode ?? this.mode,
+    address: address ?? this.address,
     webClientUrl: webClientUrl ?? this.webClientUrl,
-    localUrl:     localUrl     ?? this.localUrl,
-    peerCount:    peerCount    ?? this.peerCount,
-    error:        error        ?? this.error,
-    peers:        peers        ?? this.peers,
+    localUrl: localUrl ?? this.localUrl,
+    peerCount: peerCount ?? this.peerCount,
+    error: error ?? this.error,
+    peers: peers ?? this.peers,
+    startingHost: startingHost ?? this.startingHost,
   );
 }
