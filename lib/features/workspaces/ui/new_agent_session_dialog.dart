@@ -494,6 +494,7 @@ class _BranchPickerFieldState extends State<_BranchPickerField> {
           key: _fieldKey,
           controller: _ctrl,
           focusNode: _focusNode,
+          autofocus: true,
           style: const TextStyle(color: AppColors.textPrimary, fontSize: 12),
           onChanged: (v) => setState(() => _query = v.trim()),
           onSubmitted: (v) {

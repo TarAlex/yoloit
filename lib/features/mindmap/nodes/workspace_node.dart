@@ -4,6 +4,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:yoloit/features/mindmap/model/mindmap_node_model.dart';
 import 'package:yoloit/features/mindmap/nodes/presentation/card_props.dart';
 import 'package:yoloit/features/mindmap/nodes/presentation/workspace_card.dart';
+import 'package:yoloit/features/terminal/bloc/terminal_cubit.dart';
 import 'package:yoloit/features/workspaces/bloc/workspace_cubit.dart';
 import 'package:yoloit/features/workspaces/data/worktree_service.dart';
 import 'package:yoloit/features/workspaces/models/worktree_model.dart';
@@ -53,16 +54,27 @@ class WorkspaceNode extends StatelessWidget {
 
   Future<void> _openSessionDialog(BuildContext context) async {
     final ws = data.workspace;
+    // Capture both the navigator context and TerminalCubit BEFORE any async
+    // gap so the dialog receives proper keyboard focus on macOS.
+    final navigator = Navigator.of(context, rootNavigator: true);
+    final terminalCubit = context.read<TerminalCubit>();
+
     final worktrees = <String, List<WorktreeEntry>>{};
     for (final repoPath in ws.paths) {
       worktrees[repoPath] =
           await WorktreeService.instance.listWorktrees(repoPath);
     }
-    if (!context.mounted) return;
-    showNewAgentSessionDialog(
-      context,
-      workspace: ws,
-      worktrees: worktrees,
+    if (!navigator.mounted) return;
+    showDialog<void>(
+      context: navigator.context,
+      builder: (_) => BlocProvider.value(
+        value: terminalCubit,
+        child: NewAgentSessionDialog(
+          workspace: ws,
+          worktrees: worktrees,
+          onSpawned: () {},
+        ),
+      ),
     );
   }
 }
