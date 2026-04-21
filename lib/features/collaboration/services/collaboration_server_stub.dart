@@ -1,5 +1,6 @@
 import '../collaboration_ports.dart';
 import '../model/sync_message.dart';
+import 'collaboration_cipher.dart';
 
 /// Web stub — the browser cannot host a WebSocket server.
 class CollaborationServer {
@@ -7,10 +8,12 @@ class CollaborationServer {
     required void Function(String, SyncMessage) onClientMessage,
     this.port = kDefaultWsPort,
     this.httpPort = kDefaultHttpPort,
+    this.cipher,
   });
 
   final int port;
   final int httpPort;
+  final CollaborationCipher? cipher;
   int get clientCount => 0;
   String get webClientUrl => '';
   String get localUrl => '';

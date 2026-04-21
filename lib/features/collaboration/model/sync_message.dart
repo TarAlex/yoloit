@@ -8,9 +8,11 @@ import 'dart:convert';
 ///   delta.move    – a single node was moved
 ///   delta.resize  – a single node was resized
 ///   delta.toggle  – a single node was hidden/shown
-///   hello         – guest handshake
+///   hello         – guest handshake (includes name, color, clientId)
 ///   connected     – server notifies others of new peer
 ///   disconnected  – peer left
+///   presence      – full peer list (id, name, color) broadcast by host
+///   cursor.move   – live canvas-coordinate cursor position from a peer
 class SyncMessage {
   const SyncMessage({required this.type, required this.payload, this.senderId = ''});
 
@@ -27,6 +29,10 @@ class SyncMessage {
   static const kHello         = 'hello';
   static const kConnected     = 'connected';
   static const kDisconnected  = 'disconnected';
+  /// Host → all: current peer list with names and colors.
+  static const kPresence      = 'presence';
+  /// Any peer → all others: live cursor position on the canvas.
+  static const kCursorMove    = 'cursor.move';
   /// Host → guest: rich content update for a single node.
   static const kNodeUpdate    = 'node.update';
   /// Guest → host: keyboard input for a terminal node.
@@ -67,14 +73,50 @@ class SyncMessage {
   factory SyncMessage.toggle(String nodeId, {required bool hidden, String senderId = 'host'}) =>
       SyncMessage(type: kDeltaToggle, senderId: senderId, payload: {'id': nodeId, 'hidden': hidden});
 
-  factory SyncMessage.hello({required String clientId, required String clientName}) =>
-      SyncMessage(type: kHello, senderId: clientId, payload: {'id': clientId, 'name': clientName});
+  factory SyncMessage.hello({
+    required String clientId,
+    required String clientName,
+    String clientColor = '#60A5FA',
+  }) =>
+      SyncMessage(
+        type: kHello,
+        senderId: clientId,
+        payload: {'id': clientId, 'name': clientName, 'color': clientColor},
+      );
 
-  factory SyncMessage.connected(String clientId, String clientName) =>
-      SyncMessage(type: kConnected, senderId: 'server', payload: {'id': clientId, 'name': clientName});
+  factory SyncMessage.connected(String clientId, String clientName, {String color = '#60A5FA'}) =>
+      SyncMessage(
+        type: kConnected,
+        senderId: 'server',
+        payload: {'id': clientId, 'name': clientName, 'color': color},
+      );
 
   factory SyncMessage.disconnected(String clientId) =>
       SyncMessage(type: kDisconnected, senderId: 'server', payload: {'id': clientId});
+
+  /// Broadcast by the host whenever the peer list changes.
+  /// [peers] is a list of `{id, name, color}` maps.
+  factory SyncMessage.presence(List<Map<String, String>> peers) =>
+      SyncMessage(
+        type: kPresence,
+        senderId: 'server',
+        payload: {'peers': peers},
+      );
+
+  /// A peer is sharing their current canvas cursor position.
+  /// [x] and [y] are canvas coordinates (not screen pixels).
+  factory SyncMessage.cursorMove(
+    String clientId, {
+    required double x,
+    required double y,
+    required String color,
+    required String name,
+  }) =>
+      SyncMessage(
+        type: kCursorMove,
+        senderId: clientId,
+        payload: {'id': clientId, 'x': x, 'y': y, 'color': color, 'name': name},
+      );
 
   factory SyncMessage.nodeUpdate(String nodeId, Map<String, dynamic> content,
       {String senderId = 'host'}) =>

@@ -2,6 +2,30 @@ import 'package:flutter/foundation.dart';
 
 enum CollaborationMode { idle, hosting, connected }
 
+/// Identifies a connected remote peer (from the host's perspective).
+@immutable
+class PeerInfo {
+  const PeerInfo({required this.id, required this.name, required this.color});
+
+  final String id;
+  final String name;
+  /// Hex colour string (e.g. `#60A5FA`) assigned to this peer.
+  final String color;
+
+  PeerInfo copyWith({String? name, String? color}) => PeerInfo(
+    id: id,
+    name: name ?? this.name,
+    color: color ?? this.color,
+  );
+
+  @override
+  bool operator ==(Object other) =>
+      other is PeerInfo && other.id == id && other.name == name && other.color == color;
+
+  @override
+  int get hashCode => Object.hash(id, name, color);
+}
+
 @immutable
 class CollaborationState {
   const CollaborationState({
@@ -13,6 +37,7 @@ class CollaborationState {
     this.error = '',
     this.peers = const {},
     this.startingHost = false,
+    this.encryptionEnabled = false,
   });
 
   final CollaborationMode mode;
@@ -32,11 +57,15 @@ class CollaborationState {
   /// Non-empty when an error occurred (e.g., connection refused).
   final String error;
 
-  /// Peer client ids and names currently connected (host perspective).
-  final Map<String, String> peers;
+  /// Connected peers keyed by client id (host perspective).
+  /// Includes name and assigned colour for cursor/presence display.
+  final Map<String, PeerInfo> peers;
 
   /// True while the host server is probing ports / retrying startup.
   final bool startingHost;
+
+  /// Whether E2EE (AES-256-GCM) is active for this session.
+  final bool encryptionEnabled;
 
   bool get isIdle => mode == CollaborationMode.idle && !startingHost;
   bool get isHosting => mode == CollaborationMode.hosting;
@@ -50,8 +79,9 @@ class CollaborationState {
     String? localUrl,
     int? peerCount,
     String? error,
-    Map<String, String>? peers,
+    Map<String, PeerInfo>? peers,
     bool? startingHost,
+    bool? encryptionEnabled,
   }) => CollaborationState(
     mode: mode ?? this.mode,
     address: address ?? this.address,
@@ -61,5 +91,6 @@ class CollaborationState {
     error: error ?? this.error,
     peers: peers ?? this.peers,
     startingHost: startingHost ?? this.startingHost,
+    encryptionEnabled: encryptionEnabled ?? this.encryptionEnabled,
   );
 }

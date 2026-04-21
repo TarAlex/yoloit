@@ -16,7 +16,9 @@ import '../../terminal/models/agent_session.dart';
 import '../../runs/models/run_session.dart';
 import '../collaboration_ports.dart';
 import '../model/sync_message.dart';
+import '../services/collaboration_cipher.dart';
 import '../services/collaboration_client.dart';
+import '../services/collaboration_key_store.dart';
 import '../services/collaboration_server_platform.dart';
 import '../services/guest_terminal_registry.dart';
 import 'collaboration_state.dart';
@@ -95,6 +97,7 @@ class CollaborationCubit extends Cubit<CollaborationState> {
 
   CollaborationServer? _server;
   CollaborationClient? _client;
+  CollaborationCipher? _cipher;
   StreamSubscription<MindMapState>? _stateSub;
   StreamSubscription<(String, String)>? _terminalSub;
   MindMapState? _lastBroadcast;
@@ -123,6 +126,9 @@ class CollaborationCubit extends Cubit<CollaborationState> {
       ),
     );
 
+    // Load E2EE cipher once — non-null if a key exists in secure storage.
+    _cipher = await CollaborationKeyStore.loadCipher();
+
     Object? lastError;
     for (final attempt in _hostingAttempts(port)) {
       if (attempt.delay > Duration.zero) {
@@ -133,6 +139,7 @@ class CollaborationCubit extends Cubit<CollaborationState> {
           port: attempt.wsPort,
           httpPort: attempt.httpPort,
           onClientMessage: _onClientMessage,
+          cipher: _cipher,
         );
         final address = await _server!.start();
         _finishHosting(address);
@@ -165,6 +172,7 @@ class CollaborationCubit extends Cubit<CollaborationState> {
         localUrl: _server!.localUrl,
         error: '',
         startingHost: false,
+        encryptionEnabled: _cipher != null,
       ),
     );
   }
@@ -223,12 +231,23 @@ class CollaborationCubit extends Cubit<CollaborationState> {
     if (!state.isIdle) return;
     emit(state.copyWith(error: ''));
     try {
-      _client = CollaborationClient(onMessage: _onMessageFromHost);
-      await _client!.connect(host, port);
+      _cipher = await CollaborationKeyStore.loadCipher();
+      final clientId = await CollaborationKeyStore.getOrCreateClientId();
+      _client = CollaborationClient(
+        onMessage: _onMessageFromHost,
+        cipher: _cipher,
+      );
+      await _client!.connect(
+        host,
+        port,
+        clientId: clientId,
+        clientName: 'Remote Guest',
+      );
       emit(
         state.copyWith(
           mode: CollaborationMode.connected,
           address: '$host:$port',
+          encryptionEnabled: _cipher != null,
         ),
       );
     } catch (e) {
@@ -591,17 +610,36 @@ class CollaborationCubit extends Cubit<CollaborationState> {
         final id = msg.payload['id'] as String;
         final data = (msg.payload['data'] as String?) ?? '';
         GuestTerminalRegistry.instance.writeOutput(id, data);
+      case SyncMessage.kPresence:
+        // Full peer list from server — replace the peers map entirely.
+        final list = (msg.payload['peers'] as List?) ?? [];
+        final peers = <String, PeerInfo>{};
+        for (final raw in list) {
+          final m = raw as Map<String, dynamic>;
+          final id    = m['id'] as String? ?? '';
+          final name  = m['name'] as String? ?? 'Guest';
+          final color = m['color'] as String? ?? '#60A5FA';
+          if (id.isNotEmpty) peers[id] = PeerInfo(id: id, name: name, color: color);
+        }
+        emit(state.copyWith(peers: peers, peerCount: peers.length));
+      case SyncMessage.kCursorMove:
+        // Future: render peer cursor overlay.  No-op for now.
+        break;
       case SyncMessage.kConnected:
-        final map = Map<String, String>.from(state.peers)
-          ..[msg.payload['id'] as String] = msg.payload['name'] as String;
-        emit(state.copyWith(peers: map, peerCount: map.length));
+        final id    = msg.payload['id'] as String? ?? '';
+        final name  = msg.payload['name'] as String? ?? 'Guest';
+        final color = msg.payload['color'] as String? ?? '#60A5FA';
+        if (id.isEmpty) break;
+        final peers = Map<String, PeerInfo>.from(state.peers)
+          ..[id] = PeerInfo(id: id, name: name, color: color);
+        emit(state.copyWith(peers: peers, peerCount: peers.length));
       case SyncMessage.kDisconnected:
         if (msg.payload['id'] == 'server') {
           disconnect();
         } else {
-          final map = Map<String, String>.from(state.peers)
+          final peers = Map<String, PeerInfo>.from(state.peers)
             ..remove(msg.payload['id']);
-          emit(state.copyWith(peers: map, peerCount: map.length));
+          emit(state.copyWith(peers: peers, peerCount: peers.length));
         }
     }
   }
@@ -683,9 +721,11 @@ class CollaborationCubit extends Cubit<CollaborationState> {
         final id =
             (msg.payload['id'] as String?) ??
             (msg.senderId.isNotEmpty ? msg.senderId : clientId);
-        final name = (msg.payload['name'] as String?) ?? 'Remote';
-        final map = Map<String, String>.from(state.peers)..[id] = name;
-        emit(state.copyWith(peers: map, peerCount: map.length));
+        final name  = (msg.payload['name']  as String?) ?? 'Remote';
+        final color = (msg.payload['color'] as String?) ?? '#60A5FA';
+        final peers = Map<String, PeerInfo>.from(state.peers)
+          ..[id] = PeerInfo(id: id, name: name, color: color);
+        emit(state.copyWith(peers: peers, peerCount: peers.length));
         // Populate mind map from workspace/terminal state if not yet done,
         // then send the full snapshot to the newly connected client.
         _sendSnapshotAfterPopulate(clientId);

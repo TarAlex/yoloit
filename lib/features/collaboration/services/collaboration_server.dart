@@ -7,6 +7,7 @@ import 'package:flutter/foundation.dart';
 
 import '../collaboration_ports.dart';
 import '../model/sync_message.dart';
+import 'collaboration_cipher.dart';
 
 /// WebSocket server (port [port]) + static HTTP server (port [httpPort]).
 ///
@@ -23,16 +24,32 @@ class CollaborationServer {
     required this.onClientMessage,
     this.port = kDefaultWsPort,
     this.httpPort = kDefaultHttpPort,
+    this.cipher,
   });
 
   final void Function(String clientId, SyncMessage msg) onClientMessage;
   final int port;
   final int httpPort;
 
+  /// When non-null, ALL outgoing WS frames are AES-256-GCM encrypted and all
+  /// incoming frames are expected to be encrypted.  Plain frames from clients
+  /// are still decoded (they just won't decrypt and SyncMessage.decode will
+  /// handle them gracefully).
+  CollaborationCipher? cipher;
+
   ServerSocket? _wsServerSocket;
   ServerSocket? _staticServerSocket;
   final Map<String, _WsClient> _clients = {};
+  /// Per-client metadata (name, colour) accumulated as hellos arrive.
+  final Map<String, _PeerMeta> _peerMeta = {};
   String _resolvedIp = '127.0.0.1';
+
+  /// Colour palette for assigning distinct colours to guests.
+  static const _palette = [
+    '#60A5FA', '#34D399', '#F87171', '#FBBF24',
+    '#A78BFA', '#F472B6', '#38BDF8', '#4ADE80',
+  ];
+  int _nextColor = 0;
 
   bool get isRunning => _wsServerSocket != null;
   int get clientCount => _clients.length;
@@ -94,19 +111,42 @@ class CollaborationServer {
   }
 
   void broadcastRaw(SyncMessage msg, {String? exclude}) {
-    final encoded = msg.encode();
+    final wire = _toWire(msg);
     for (final entry in _clients.entries) {
       if (entry.key == exclude) continue;
       try {
-        entry.value.send(encoded);
+        entry.value.send(wire);
       } catch (_) {}
     }
   }
 
   void sendTo(String clientId, SyncMessage msg) {
     try {
-      _clients[clientId]?.send(msg.encode());
+      _clients[clientId]?.send(_toWire(msg));
     } catch (_) {}
+  }
+
+  /// Encodes a message to the wire format (encrypted if cipher is active).
+  String _toWire(SyncMessage msg) {
+    final json = msg.encode();
+    return cipher != null ? cipher!.encryptWire(json) : json;
+  }
+
+  /// Decodes a raw wire frame to its JSON string (decrypts if needed).
+  /// Returns `null` if decryption fails (wrong key / tampered frame).
+  String? _fromWire(String raw) {
+    if (raw.startsWith('e:')) {
+      return cipher?.decryptWire(raw); // null if no cipher or bad key
+    }
+    return raw; // plain JSON (legacy / no key configured)
+  }
+
+  /// Broadcasts the current peer list to all clients.
+  void _broadcastPresence() {
+    final peers = _peerMeta.entries
+        .map((e) => {'id': e.key, 'name': e.value.name, 'color': e.value.color})
+        .toList();
+    broadcastRaw(SyncMessage.presence(peers));
   }
 
   // ── WebSocket server (single subscription, manual frame parsing) ───────────
@@ -219,24 +259,48 @@ class CollaborationServer {
   }
 
   void _processWsChunk(_WsClient client, String clientId, List<int> chunk) {
-    for (final text in client.processChunk(chunk)) {
-      if (text.isEmpty) {
+    for (final raw in client.processChunk(chunk)) {
+      if (raw.isEmpty) {
         if (client.isClosed) {
           _onDisconnect(clientId);
           return;
         }
         continue;
       }
+      // Decrypt if the frame is encrypted, else treat as plain JSON.
+      final text = _fromWire(raw);
+      if (text == null) continue; // wrong key / tampered — drop silently
       final msg = SyncMessage.decode(text);
       if (msg == null) continue;
+
+      // Update peer metadata when hello is received.
+      if (msg.type == SyncMessage.kHello) {
+        final name  = (msg.payload['name']  as String?) ?? 'Guest';
+        final color = (msg.payload['color'] as String?)
+            ?? _palette[_nextColor++ % _palette.length];
+        _peerMeta[clientId] = _PeerMeta(name: name, color: color);
+        // Rebroadcast connected with resolved name/color.
+        broadcastRaw(SyncMessage.connected(clientId, name, color: color));
+        _broadcastPresence();
+      }
+
+      // Relay cursor moves to everyone except the sender.
+      if (msg.type == SyncMessage.kCursorMove) {
+        broadcastRaw(msg, exclude: clientId);
+        // Also deliver to host via onClientMessage so it can render the cursor.
+      }
+
       onClientMessage(clientId, msg);
+      // Mirror deltas to all other guests.
       if (msg.type.startsWith('delta.')) broadcastRaw(msg, exclude: clientId);
     }
   }
 
   void _onDisconnect(String clientId) {
     _clients.remove(clientId);
+    _peerMeta.remove(clientId);
     broadcastRaw(SyncMessage.disconnected(clientId));
+    _broadcastPresence();
   }
 
   // ── Static HTTP file server ────────────────────────────────────────────────
@@ -548,6 +612,14 @@ class CollaborationServer {
     }
     return '127.0.0.1';
   }
+}
+
+// ── Peer metadata ──────────────────────────────────────────────────────────
+
+class _PeerMeta {
+  const _PeerMeta({required this.name, required this.color});
+  final String name;
+  final String color;
 }
 
 // ── Manual WebSocket client (no dart:io WebSocket, avoids stream re-sub bug) ──
