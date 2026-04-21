@@ -6,6 +6,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../bloc/collaboration_cubit.dart';
 import '../bloc/collaboration_state.dart';
+import '../collaboration_ports.dart';
 
 /// Toolbar button that opens the collaboration (Share Space) popover.
 class CollaborationButton extends StatelessWidget {
@@ -319,7 +320,7 @@ class _GuestTab extends StatelessWidget {
                     // Allow "192.168.1.10:40401" — extract host and port
                     final colonIdx = raw.lastIndexOf(':');
                     String host = raw;
-                    int port = 40401;
+                    int port = kDefaultWsPort;
                     if (colonIdx > 0) {
                       final maybePart = raw.substring(colonIdx + 1);
                       final maybePort = int.tryParse(maybePart);

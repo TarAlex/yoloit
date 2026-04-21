@@ -3,7 +3,9 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:crypto/crypto.dart';
+import 'package:flutter/foundation.dart';
 
+import '../collaboration_ports.dart';
 import '../model/sync_message.dart';
 
 /// WebSocket server (port [port]) + static HTTP server (port [httpPort]).
@@ -19,8 +21,8 @@ import '../model/sync_message.dart';
 class CollaborationServer {
   CollaborationServer({
     required this.onClientMessage,
-    this.port = 40401,
-    this.httpPort = 40400,
+    this.port = kDefaultWsPort,
+    this.httpPort = kDefaultHttpPort,
   });
 
   final void Function(String clientId, SyncMessage msg) onClientMessage;
@@ -489,15 +491,24 @@ class CollaborationServer {
     final exe = Platform.resolvedExecutable;
     final appDir = File(exe).parent.path;
 
-    final fixed = [
+    // Release: web client is bundled inside .app/Contents/Resources/web_client
+    if (kReleaseMode) {
+      final path = '$appDir/../Resources/web_client';
+      if (await File('$path/index.html').exists()) return _resolved(path);
+      return null;
+    }
+
+    // Debug: check well-known dev locations, then walk up to find build/web
+    final devCandidates = [
       '$appDir/../Resources/web_client',
       '$appDir/web_client',
       '$home/.yoloit/web_client',
       '${Directory.current.path}/build/web',
     ];
-    for (final path in fixed) {
+    for (final path in devCandidates) {
       if (await File('$path/index.html').exists()) return _resolved(path);
     }
+    // Walk up from executable to find build/web in the repo
     var dir = File(exe).parent;
     for (int i = 0; i < 12; i++) {
       final path = '${dir.path}/build/web';
