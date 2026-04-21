@@ -215,6 +215,40 @@ class _MindMapViewState extends State<MindMapView>
     _panCtrl.forward(from: 0.0);
   }
 
+  /// Zoom in or out keeping the current viewport **center** fixed.
+  /// [factor] > 1 = zoom in, < 1 = zoom out.  Animated via [_panCtrl].
+  void _zoomAtCenter(double factor) {
+    final screen = _viewportSize ?? MediaQuery.sizeOf(context);
+    if (screen.isEmpty) return;
+
+    final focal       = Offset(screen.width / 2, screen.height / 2);
+    // Canvas point currently beneath the viewport center.
+    final focalCanvas = _transformCtrl.toScene(focal);
+
+    final currentScale = _transformCtrl.value.getMaxScaleOnAxis();
+    final newScale     = (currentScale * factor).clamp(0.05, 3.0);
+
+    // Keep focalCanvas at the same screen position after the new scale.
+    final tx = focalCanvas.dx - focal.dx / newScale;
+    final ty = focalCanvas.dy - focal.dy / newScale;
+
+    final targetMatrix = Matrix4.identity()
+      ..scale(newScale)
+      ..translate(-tx, -ty);
+
+    _panCtrl.stop();
+    _panAnim?.removeListener(_applyPanAnim);
+    _panAnim =
+        Matrix4Tween(
+            begin: _transformCtrl.value.clone(),
+            end: targetMatrix,
+          ).animate(
+            CurvedAnimation(parent: _panCtrl, curve: Curves.easeInOutCubic),
+          )
+          ..addListener(_applyPanAnim);
+    _panCtrl.forward(from: 0.0);
+  }
+
   /// Smoothly pans so [canvasCenter] appears at the center of the viewport.
   /// Called by the minimap when the user taps/drags on it.
   void _animateToCenterOffset(Offset canvasCenter) {
@@ -328,7 +362,12 @@ class _MindMapViewState extends State<MindMapView>
                           conns: conns,
                           transformCtrl: _transformCtrl,
                           dashAnimation: _dashAnim,
-                          onResetView: _animateToIdentity,
+                          onResetView: () {
+                            final mm = context.read<MindMapCubit>();
+                            _fitAllNodes(mm.state.positions, mm.state.sizes);
+                          },
+                          onZoomIn:  () => _zoomAtCenter(1.25),
+                          onZoomOut: () => _zoomAtCenter(0.8),
                           onPanToOffset: _animateToCenterOffset,
                           onViewportSize: _onViewportSize,
                         );
@@ -354,6 +393,8 @@ class _MindMapCanvas extends StatefulWidget {
     required this.transformCtrl,
     required this.dashAnimation,
     required this.onResetView,
+    required this.onZoomIn,
+    required this.onZoomOut,
     required this.onPanToOffset,
     required this.onViewportSize,
   });
@@ -362,6 +403,8 @@ class _MindMapCanvas extends StatefulWidget {
   final TransformationController transformCtrl;
   final Animation<double> dashAnimation;
   final VoidCallback onResetView;
+  final VoidCallback onZoomIn;
+  final VoidCallback onZoomOut;
   final void Function(Offset canvasCenter) onPanToOffset;
   final void Function(Size) onViewportSize;
 
@@ -371,6 +414,7 @@ class _MindMapCanvas extends StatefulWidget {
 
 class _MindMapCanvasState extends State<_MindMapCanvas> {
   bool _nodeDragging = false;
+  bool _showMinimap = true;
 
   // Large canvas with generous top/left padding so users can scroll in all
   // directions. boundaryMargin(infinity) on InteractiveViewer makes it infinite.
@@ -526,9 +570,34 @@ class _MindMapCanvasState extends State<_MindMapCanvas> {
                     _CanvasToolbar(
                       transformCtrl: widget.transformCtrl,
                       onResetView: widget.onResetView,
+                      onZoomIn: widget.onZoomIn,
+                      onZoomOut: widget.onZoomOut,
                     ),
-                    const SizedBox(height: 8),
+                    const SizedBox(height: 4),
+                    GestureDetector(
+                      onTap: () => setState(() => _showMinimap = !_showMinimap),
+                      child: Tooltip(
+                        message: _showMinimap ? 'Hide minimap' : 'Show minimap',
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF0D1117),
+                            borderRadius: BorderRadius.circular(4),
+                            border: Border.all(color: const Color(0xFF2A3040)),
+                          ),
+                          child: Icon(
+                            _showMinimap ? Icons.map : Icons.map_outlined,
+                            size: 12,
+                            color: _showMinimap
+                                ? const Color(0xFF60A5FA)
+                                : const Color(0xFF6B7898),
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 4),
                     // ── Mini-map ───────────────────────────────────────────
+                    if (_showMinimap)
                     BlocBuilder<MindMapCubit, MindMapState>(
                       buildWhen: (prev, next) =>
                           prev.positions != next.positions ||
@@ -640,9 +709,13 @@ class _CanvasToolbar extends StatelessWidget {
   const _CanvasToolbar({
     required this.transformCtrl,
     required this.onResetView,
+    required this.onZoomIn,
+    required this.onZoomOut,
   });
   final TransformationController transformCtrl;
   final VoidCallback onResetView;
+  final VoidCallback onZoomIn;
+  final VoidCallback onZoomOut;
 
   @override
   Widget build(BuildContext context) {
@@ -651,19 +724,19 @@ class _CanvasToolbar extends StatelessWidget {
         _ToolBtn(
           icon: Icons.remove,
           tooltip: 'Zoom out',
-          onTap: () => _zoom(context, 0.8),
+          onTap: onZoomOut,
         ),
         const SizedBox(width: 1),
         _ToolBtn(
           icon: Icons.filter_center_focus,
-          tooltip: 'Fit / reset',
+          tooltip: 'Fit all nodes',
           onTap: onResetView,
         ),
         const SizedBox(width: 1),
         _ToolBtn(
           icon: Icons.add,
           tooltip: 'Zoom in',
-          onTap: () => _zoom(context, 1.25),
+          onTap: onZoomIn,
         ),
         const SizedBox(width: 8),
         _ToolBtn(
@@ -695,12 +768,6 @@ class _CanvasToolbar extends StatelessWidget {
         const SizedBox(width: 1),
       ],
     );
-  }
-
-  void _zoom(BuildContext context, double factor) {
-    final m = transformCtrl.value.clone();
-    m.scaleByDouble(factor, factor, 1.0, 1.0);
-    transformCtrl.value = m;
   }
 }
 
@@ -1579,6 +1646,13 @@ class _MiniMap extends StatelessWidget {
         );
         final viewportRect = Rect.fromLTRB(vpTL.dx, vpTL.dy, vpBR.dx, vpBR.dy);
 
+        final nodeColors = <String, Color>{};
+        for (final n in nodes) {
+          if (n is WorkspaceNodeData && n.workspace.color != null) {
+            nodeColors[n.id] = n.workspace.color!.withAlpha(0xCC);
+          }
+        }
+
         return GestureDetector(
           onTapDown: (d) => _handleGesture(d.localPosition, bounds),
           onPanUpdate: (d) => _handleGesture(d.localPosition, bounds),
@@ -1602,6 +1676,7 @@ class _MiniMap extends StatelessWidget {
                   sizes: sizes,
                   bounds: bounds,
                   viewportRect: viewportRect,
+                  nodeColors: nodeColors,
                 ),
               ),
             ),
@@ -1619,6 +1694,7 @@ class _MiniMapPainter extends CustomPainter {
     required this.sizes,
     required this.bounds,
     required this.viewportRect,
+    this.nodeColors = const {},
   });
 
   final List<MindMapNodeData> nodes;
@@ -1626,6 +1702,7 @@ class _MiniMapPainter extends CustomPainter {
   final Map<String, Size> sizes;
   final Rect bounds;
   final Rect viewportRect;
+  final Map<String, Color> nodeColors;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -1648,7 +1725,7 @@ class _MiniMapPainter extends CustomPainter {
           Rect.fromLTWH(mx, my, mw, mh),
           const Radius.circular(1.5),
         ),
-        Paint()..color = _colorForType(node.typeTag),
+        Paint()..color = nodeColors[node.id] ?? _colorForType(node.typeTag),
       );
     }
 
@@ -1691,7 +1768,8 @@ class _MiniMapPainter extends CustomPainter {
       old.viewportRect != viewportRect ||
       old.positions != positions ||
       old.nodes.length != nodes.length ||
-      old.bounds != bounds;
+      old.bounds != bounds ||
+      old.nodeColors != nodeColors;
 }
 
 // ────────────────────────────────────────────────────────────────────────────
