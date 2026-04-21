@@ -1,5 +1,6 @@
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -359,6 +360,8 @@ class _WebNode extends StatefulWidget {
 
 class _WebNodeState extends State<_WebNode> {
   bool _hovered = false;
+  /// True on touch devices when the user has tapped the card header.
+  bool _mobileSelected = false;
   /// Non-null while the node is being dragged locally. We use this instead of
   /// `widget.position` so that incoming host position echoes don't cause jitter.
   Offset? _dragPos;
@@ -366,6 +369,14 @@ class _WebNodeState extends State<_WebNode> {
   static const _handleH = 20.0;
   static const _minW = 140.0;
   static const _minH = 80.0;
+  static const _resizeStep = 40.0;
+
+  bool get _isMobile =>
+      defaultTargetPlatform == TargetPlatform.iOS ||
+      defaultTargetPlatform == TargetPlatform.android;
+
+  /// Whether resize handles should be visible.
+  bool get _showHandles => _hovered || (_isMobile && _mobileSelected);
 
   @override
   Widget build(BuildContext context) {
@@ -404,6 +415,11 @@ class _WebNodeState extends State<_WebNode> {
                         collab.sendGuestMove(widget.nodeId, finalPos);
                       }
                     },
+                    onTap: _isMobile
+                        ? () => setState(
+                              () => _mobileSelected = !_mobileSelected,
+                            )
+                        : null,
                     child: _DragHandle(hovered: _hovered),
                   ),
                   // Card content
@@ -426,7 +442,7 @@ class _WebNodeState extends State<_WebNode> {
               width: 12,
               child: _ResizeEdge(
                 axis: Axis.vertical,
-                visible: _hovered,
+                visible: _showHandles,
                 onDrag: (d) {
                   cubit.resizeNode(
                     widget.nodeId,
@@ -446,7 +462,7 @@ class _WebNodeState extends State<_WebNode> {
               width: 12,
               child: _ResizeEdge(
                 axis: Axis.vertical,
-                visible: _hovered,
+                visible: _showHandles,
                 onDrag: (d) {
                   cubit.resizeFromLeft(
                     widget.nodeId,
@@ -466,7 +482,7 @@ class _WebNodeState extends State<_WebNode> {
               height: 12,
               child: _ResizeEdge(
                 axis: Axis.horizontal,
-                visible: _hovered,
+                visible: _showHandles,
                 onDrag: (d) {
                   cubit.resizeNode(
                     widget.nodeId,
@@ -560,6 +576,158 @@ class _WebNodeState extends State<_WebNode> {
                   ),
                 ),
               ),
+
+            // ── Mobile quick-action panel ────────────────────────────
+            if (_isMobile && _mobileSelected)
+              Positioned(
+                top: _handleH,
+                left: 0,
+                right: 0,
+                child: _MobileQuickActions(
+                  onClose: () => setState(() => _mobileSelected = false),
+                  onWider: () {
+                    cubit.resizeNode(
+                      widget.nodeId,
+                      const Offset(_resizeStep, 0),
+                      const Size(_minW, _minH),
+                    );
+                    final sz = cubit.state.sizes[widget.nodeId];
+                    if (sz != null) collab.sendGuestResize(widget.nodeId, sz);
+                  },
+                  onNarrower: () {
+                    cubit.resizeNode(
+                      widget.nodeId,
+                      const Offset(-_resizeStep, 0),
+                      const Size(_minW, _minH),
+                    );
+                    final sz = cubit.state.sizes[widget.nodeId];
+                    if (sz != null) collab.sendGuestResize(widget.nodeId, sz);
+                  },
+                  onTaller: () {
+                    cubit.resizeNode(
+                      widget.nodeId,
+                      const Offset(0, _resizeStep),
+                      const Size(_minW, _minH),
+                    );
+                    final sz = cubit.state.sizes[widget.nodeId];
+                    if (sz != null) collab.sendGuestResize(widget.nodeId, sz);
+                  },
+                  onShorter: () {
+                    cubit.resizeNode(
+                      widget.nodeId,
+                      const Offset(0, -_resizeStep),
+                      const Size(_minW, _minH),
+                    );
+                    final sz = cubit.state.sizes[widget.nodeId];
+                    if (sz != null) collab.sendGuestResize(widget.nodeId, sz);
+                  },
+                  onHide: widget.onClose,
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ── Mobile Quick Actions ───────────────────────────────────────────────────
+
+class _MobileQuickActions extends StatelessWidget {
+  const _MobileQuickActions({
+    required this.onClose,
+    required this.onWider,
+    required this.onNarrower,
+    required this.onTaller,
+    required this.onShorter,
+    this.onHide,
+  });
+
+  final VoidCallback onClose;
+  final VoidCallback onWider;
+  final VoidCallback onNarrower;
+  final VoidCallback onTaller;
+  final VoidCallback onShorter;
+  final VoidCallback? onHide;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 2),
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+      decoration: BoxDecoration(
+        color: const Color(0xF00D1117),
+        border: Border.all(color: const Color(0xFF2A3040)),
+        borderRadius: BorderRadius.circular(8),
+        boxShadow: const [BoxShadow(color: Color(0x66000000), blurRadius: 8)],
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+        children: [
+          _QBtn(icon: Icons.keyboard_arrow_right, label: '+W', onTap: onWider),
+          _QBtn(icon: Icons.keyboard_arrow_left, label: '-W', onTap: onNarrower),
+          _QBtn(icon: Icons.keyboard_arrow_down, label: '+H', onTap: onTaller),
+          _QBtn(icon: Icons.keyboard_arrow_up, label: '-H', onTap: onShorter),
+          if (onHide != null)
+            _QBtn(icon: Icons.visibility_off, label: 'Hide', onTap: onHide!),
+          _QBtn(icon: Icons.close, label: '', onTap: onClose, accent: true),
+        ],
+      ),
+    );
+  }
+}
+
+class _QBtn extends StatelessWidget {
+  const _QBtn({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+    this.accent = false,
+  });
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+  final bool accent;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+        decoration: BoxDecoration(
+          color: accent
+              ? const Color(0x33FF4F6A)
+              : const Color(0xFF1A1F2E),
+          borderRadius: BorderRadius.circular(6),
+          border: Border.all(
+            color: accent
+                ? const Color(0x80FF4F6A)
+                : const Color(0xFF2A3040),
+          ),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              icon,
+              size: 16,
+              color: accent
+                  ? const Color(0xFFFF7A8A)
+                  : const Color(0xFFCBD5E1),
+            ),
+            if (label.isNotEmpty) ...[
+              const SizedBox(height: 1),
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 9,
+                  color: accent
+                      ? const Color(0xFFFF7A8A)
+                      : const Color(0xFF6B7898),
+                ),
+              ),
+            ],
           ],
         ),
       ),
