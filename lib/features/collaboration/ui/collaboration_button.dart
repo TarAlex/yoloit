@@ -552,14 +552,19 @@ class _HostActiveView extends StatelessWidget {
               padding: const EdgeInsets.symmetric(vertical: 2),
               child: Row(
                 children: [
-                  const Icon(
+                  Icon(
                     Icons.person_outline,
                     size: 13,
-                    color: Color(0xFF60A5FA),
+                    color: Color(
+                      int.tryParse(
+                            e.value.color.replaceFirst('#', '0xFF'),
+                          ) ??
+                          0xFF60A5FA,
+                    ),
                   ),
                   const SizedBox(width: 6),
                   Text(
-                    e.value.isEmpty ? e.key : e.value,
+                    e.value.name.isNotEmpty ? e.value.name : e.key,
                     style: const TextStyle(
                       color: Color(0xFFE8E8FF),
                       fontSize: 12,
