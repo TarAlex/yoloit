@@ -284,30 +284,39 @@ class CollaborationServer {
   /// Serves one HTTP request on [socket] using the same stream-listener pattern
   /// as [_handleWsSocket] — no `await for`, no subscription cancel.
   static Future<void> _serveHttpSocket(Socket socket, String webDir) async {
-    final done = Completer<void>();
+    // Two completers: one fires when we have the full request headers, the
+    // other fires when the peer closes its write side (FIN received).
+    final requestDone = Completer<void>();
+    final peerEof = Completer<void>();
     final buf = <int>[];
 
     socket.listen(
       (chunk) {
-        if (done.isCompleted) return;
+        if (requestDone.isCompleted) return;
         buf.addAll(chunk);
         for (int i = 0; i <= buf.length - 4; i++) {
           if (buf[i] == 13 &&
               buf[i + 1] == 10 &&
               buf[i + 2] == 13 &&
               buf[i + 3] == 10) {
-            done.complete();
+            requestDone.complete();
             return;
           }
         }
-        if (buf.length > 65536) done.complete();
+        if (buf.length > 65536) requestDone.complete();
       },
-      onError: (_) { if (!done.isCompleted) done.complete(); },
-      onDone: () { if (!done.isCompleted) done.complete(); },
+      onError: (_) {
+        if (!requestDone.isCompleted) requestDone.complete();
+        if (!peerEof.isCompleted) peerEof.complete();
+      },
+      onDone: () {
+        if (!requestDone.isCompleted) requestDone.complete();
+        if (!peerEof.isCompleted) peerEof.complete();
+      },
       cancelOnError: false,
     );
 
-    await done.future;
+    await requestDone.future;
     if (buf.length < 4) { socket.destroy(); return; }
 
     final headers = _parseHeaders(buf);
@@ -324,14 +333,7 @@ class CollaborationServer {
         'Connection: close\r\n'
         '\r\n',
       );
-      bool optFlushed = false;
-      try { await socket.flush(); optFlushed = true; } catch (_) {}
-      try {
-        await socket.close();
-      } catch (_) {
-        if (optFlushed) await Future<void>.delayed(const Duration(milliseconds: 400));
-        try { socket.destroy(); } catch (_) {}
-      }
+      await _closeAfterFlush(socket, peerEof);
       return;
     }
 
@@ -357,24 +359,37 @@ class CollaborationServer {
       '\r\n',
     );
     try { socket.add(bytes); } catch (_) {}
+    await _closeAfterFlush(socket, peerEof);
+  }
 
-    // On macOS, socket.close() internally calls shutdown(SHUT_WR) which throws
-    // EINVAL (errno=22) for sockets accepted on a non-loopback interface.
-    // Fix: flush first, then attempt graceful close; if close() throws, delay
-    // before destroy() so the kernel has time to deliver the already-flushed
-    // data to the client before RST is sent.
-    bool flushed = false;
-    try { await socket.flush(); flushed = true; } catch (_) {}
+  /// Flushes [socket] and closes it gracefully.
+  ///
+  /// On macOS, [socket.close()] (shutdown SHUT_WR) throws EINVAL (errno=22)
+  /// for sockets accepted on a LAN interface (non-loopback). On loopback it
+  /// works fine.
+  ///
+  /// Strategy:
+  ///  1. Flush buffered writes to the OS.
+  ///  2. Try socket.close() — succeeds on loopback, throws EINVAL on LAN.
+  ///  3. If close() throws: wait for the peer to send its FIN (which happens
+  ///     once the peer has read all Content-Length bytes), then destroy().
+  ///     A 10-second timeout guards against peers that never close.
+  static Future<void> _closeAfterFlush(
+    Socket socket,
+    Completer<void> peerEof,
+  ) async {
+    try { await socket.flush(); } catch (_) {}
     try {
       await socket.close();
+      return; // graceful half-close succeeded (loopback / most platforms)
     } catch (_) {
-      if (flushed) {
-        // Data was flushed to the kernel — give the client time to read it
-        // before RST terminates the connection.
-        await Future<void>.delayed(const Duration(milliseconds: 400));
-      }
-      try { socket.destroy(); } catch (_) {}
+      // macOS EINVAL on LAN sockets — fall through to peer-wait approach
     }
+    await peerEof.future.timeout(
+      const Duration(seconds: 10),
+      onTimeout: () {},
+    );
+    try { socket.destroy(); } catch (_) {}
   }
 
   // ── Helpers ────────────────────────────────────────────────────────────────
