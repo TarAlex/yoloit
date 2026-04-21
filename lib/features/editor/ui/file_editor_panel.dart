@@ -31,6 +31,7 @@ import 'package:yoloit/core/theme/app_colors.dart';
 import 'package:yoloit/features/editor/bloc/file_editor_cubit.dart';
 import 'package:yoloit/features/editor/bloc/file_editor_state.dart';
 import 'package:yoloit/features/editor/utils/file_type_utils.dart';
+import 'package:yoloit/features/mindmap/bloc/mindmap_cubit.dart';
 import 'package:yoloit/features/review/models/review_models.dart';
 
 class FileEditorPanel extends StatefulWidget {
@@ -810,6 +811,9 @@ class _TabBar extends StatelessWidget {
                 isActive: i == state.activeIndex,
                 onTap: () => context.read<FileEditorCubit>().switchTab(i),
                 onClose: () => context.read<FileEditorCubit>().closeTab(i),
+                onCloseOthers: () =>
+                    context.read<FileEditorCubit>().closeOthers(i),
+                onPopOut: () => _popOutTab(context, state.tabs[i]),
               ),
             ),
           ),
@@ -817,66 +821,135 @@ class _TabBar extends StatelessWidget {
       ),
     );
   }
+
+  void _popOutTab(BuildContext context, EditorTab tab) {
+    final nodeId = 'editor:${tab.filePath.hashCode}';
+    context.read<MindMapCubit>().openFileAsPanel(
+      id: nodeId,
+      filePath: tab.filePath,
+      content: tab.content ?? '',
+      language: FileTypeUtils.languageFor(tab.filePath) ?? '',
+    );
+  }
 }
 
-class _Tab extends StatelessWidget {
+class _Tab extends StatefulWidget {
   const _Tab({
     required this.tab,
     required this.isActive,
     required this.onTap,
     required this.onClose,
+    this.onCloseOthers,
+    this.onPopOut,
   });
 
   final EditorTab tab;
   final bool isActive;
   final VoidCallback onTap;
   final VoidCallback onClose;
+  final VoidCallback? onCloseOthers;
+  final VoidCallback? onPopOut;
+
+  @override
+  State<_Tab> createState() => _TabState();
+}
+
+class _TabState extends State<_Tab> {
+  Future<void> _showTabMenu(BuildContext context, Offset globalPos) async {
+    final result = await showMenu<String>(
+      context: context,
+      position: RelativeRect.fromLTRB(
+          globalPos.dx, globalPos.dy, globalPos.dx, globalPos.dy),
+      color: const Color(0xFF12151C),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(8),
+        side: const BorderSide(color: Color(0xFF2A3040)),
+      ),
+      items: [
+        const PopupMenuItem(
+          value: 'close',
+          child: Text('✕ Close',
+              style: TextStyle(fontSize: 12, color: Color(0xFFCECEEE))),
+        ),
+        const PopupMenuItem(
+          value: 'close_others',
+          child: Text('✕ Close Others',
+              style: TextStyle(fontSize: 12, color: Color(0xFFCECEEE))),
+        ),
+        if (widget.onPopOut != null)
+          const PopupMenuItem(
+            value: 'pop_out',
+            child: Text('⬡ Open in Map panel',
+                style: TextStyle(fontSize: 12, color: Color(0xFFCECEEE))),
+          ),
+      ],
+    );
+    if (result == null) return;
+    switch (result) {
+      case 'close':
+        widget.onClose();
+      case 'close_others':
+        widget.onCloseOthers?.call();
+      case 'pop_out':
+        widget.onPopOut?.call();
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     final colors = context.appColors;
-    final fileInfo = tab.isDiff ? null : FileTypeUtils.forPath(tab.filePath);
-    final displayName = tab.isDiff
-        ? '${tab.filePath.replaceFirst('diff:', '').split('/').last} (diff)'
-        : tab.fileName;
+    final fileInfo =
+        widget.tab.isDiff ? null : FileTypeUtils.forPath(widget.tab.filePath);
+    final displayName = widget.tab.isDiff
+        ? '${widget.tab.filePath.replaceFirst('diff:', '').split('/').last} (diff)'
+        : widget.tab.fileName;
 
     return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        constraints: const BoxConstraints(maxWidth: 200, minWidth: 80),
-        padding: const EdgeInsets.symmetric(horizontal: 10),
-        decoration: BoxDecoration(
-          color: isActive ? colors.background : Colors.transparent,
-          border: Border(
-            bottom: BorderSide(
-              color: isActive ? colors.primary : Colors.transparent,
-              width: 2,
-            ),
-          ),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              tab.isDiff ? Icons.difference : fileInfo!.icon,
-              size: 12,
-              color: tab.isDiff ? AppColors.textMuted : fileInfo!.color,
-            ),
-            const SizedBox(width: 5),
-            Flexible(
-              child: Text(
-                displayName,
-                style: TextStyle(
-                  color: isActive ? colors.primaryLight : AppColors.textMuted,
-                  fontSize: 12,
-                  fontWeight: isActive ? FontWeight.w600 : FontWeight.normal,
-                ),
-                overflow: TextOverflow.ellipsis,
+      onSecondaryTapDown: (d) => _showTabMenu(context, d.globalPosition),
+      child: GestureDetector(
+        onTap: widget.onTap,
+        child: Container(
+          constraints: const BoxConstraints(maxWidth: 200, minWidth: 80),
+          padding: const EdgeInsets.symmetric(horizontal: 10),
+          decoration: BoxDecoration(
+            color: widget.isActive ? colors.background : Colors.transparent,
+            border: Border(
+              bottom: BorderSide(
+                color: widget.isActive ? colors.primary : Colors.transparent,
+                width: 2,
               ),
             ),
-            const SizedBox(width: 4),
-            _TabCloseButton(onClose: onClose),
-          ],
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                widget.tab.isDiff ? Icons.difference : fileInfo!.icon,
+                size: 12,
+                color: widget.tab.isDiff
+                    ? AppColors.textMuted
+                    : fileInfo!.color,
+              ),
+              const SizedBox(width: 5),
+              Flexible(
+                child: Text(
+                  displayName,
+                  style: TextStyle(
+                    color: widget.isActive
+                        ? colors.primaryLight
+                        : AppColors.textMuted,
+                    fontSize: 12,
+                    fontWeight: widget.isActive
+                        ? FontWeight.w600
+                        : FontWeight.normal,
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              const SizedBox(width: 4),
+              _TabCloseButton(onClose: widget.onClose),
+            ],
+          ),
         ),
       ),
     );
@@ -908,7 +981,7 @@ class _TabCloseButtonState extends State<_TabCloseButton> {
           child: Icon(
             Icons.close,
             size: 12,
-            color: _hovering ? AppColors.textPrimary : AppColors.textMuted,
+            color: _hovering ? AppColors.textPrimary : const Color(0xFF3D4A6A),
           ),
         ),
       ),

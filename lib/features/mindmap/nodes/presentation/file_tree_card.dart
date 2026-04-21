@@ -1,4 +1,7 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import 'package:yoloit/features/mindmap/nodes/presentation/card_props.dart';
 
@@ -9,10 +12,18 @@ class FileTreeCard extends StatelessWidget {
     required this.props,
     this.onToggle,
     this.onSelect,
+    this.onNewFolder,
+    this.onCopyPath,
+    this.onShowInFinder,
+    this.onOpenInPanel,
   });
   final FileTreeCardProps props;
   final void Function(String path)? onToggle;
   final void Function(String path)? onSelect;
+  final void Function(String path)? onNewFolder;
+  final void Function(String path)? onCopyPath;
+  final void Function(String path)? onShowInFinder;
+  final void Function(String path)? onOpenInPanel;
 
   @override
   Widget build(BuildContext context) {
@@ -94,6 +105,10 @@ class FileTreeCard extends StatelessWidget {
                           onSelect: onSelect != null
                               ? () => onSelect!(entry.path)
                               : null,
+                          onNewFolder: onNewFolder,
+                          onCopyPath: onCopyPath,
+                          onShowInFinder: onShowInFinder,
+                          onOpenInPanel: onOpenInPanel,
                         );
                       },
                     ),
@@ -106,10 +121,22 @@ class FileTreeCard extends StatelessWidget {
 }
 
 class _TreeRow extends StatefulWidget {
-  const _TreeRow({required this.entry, this.onToggle, this.onSelect});
+  const _TreeRow({
+    required this.entry,
+    this.onToggle,
+    this.onSelect,
+    this.onNewFolder,
+    this.onCopyPath,
+    this.onShowInFinder,
+    this.onOpenInPanel,
+  });
   final TreeEntry entry;
   final VoidCallback? onToggle;
   final VoidCallback? onSelect;
+  final void Function(String path)? onNewFolder;
+  final void Function(String path)? onCopyPath;
+  final void Function(String path)? onShowInFinder;
+  final void Function(String path)? onOpenInPanel;
 
   @override
   State<_TreeRow> createState() => _TreeRowState();
@@ -117,6 +144,47 @@ class _TreeRow extends StatefulWidget {
 
 class _TreeRowState extends State<_TreeRow> {
   bool _hovered = false;
+
+  Future<void> _showContextMenu(BuildContext context, Offset globalPos) async {
+    final e = widget.entry;
+    final result = await showMenu<String>(
+      context: context,
+      position: RelativeRect.fromLTRB(
+        globalPos.dx, globalPos.dy, globalPos.dx, globalPos.dy),
+      color: const Color(0xFF12151C),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(8),
+        side: const BorderSide(color: Color(0xFF2A3040)),
+      ),
+      items: [
+        if (e.isDir)
+          const PopupMenuItem(value: 'new_folder', child: Text('📁 New Folder',
+              style: TextStyle(fontSize: 12, color: Color(0xFFCECEEE)))),
+        const PopupMenuItem(value: 'copy_path', child: Text('📋 Copy path',
+            style: TextStyle(fontSize: 12, color: Color(0xFFCECEEE)))),
+        const PopupMenuItem(value: 'copy_name', child: Text('📄 Copy filename',
+            style: TextStyle(fontSize: 12, color: Color(0xFFCECEEE)))),
+        const PopupMenuItem(value: 'show_finder', child: Text('📂 Show in Finder',
+            style: TextStyle(fontSize: 12, color: Color(0xFFCECEEE)))),
+        if (!e.isDir && widget.onOpenInPanel != null)
+          const PopupMenuItem(value: 'open_panel', child: Text('⬡ Open in panel',
+              style: TextStyle(fontSize: 12, color: Color(0xFFCECEEE)))),
+      ],
+    );
+    if (result == null) return;
+    switch (result) {
+      case 'new_folder':
+        widget.onNewFolder?.call(e.path);
+      case 'copy_path':
+        await Clipboard.setData(ClipboardData(text: e.path));
+      case 'copy_name':
+        await Clipboard.setData(ClipboardData(text: e.name));
+      case 'show_finder':
+        await Process.run('open', ['-R', e.path]);
+      case 'open_panel':
+        widget.onOpenInPanel?.call(e.path);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -126,6 +194,7 @@ class _TreeRowState extends State<_TreeRow> {
       onEnter: (_) => setState(() => _hovered = true),
       onExit: (_) => setState(() => _hovered = false),
       child: GestureDetector(
+        onSecondaryTapDown: (d) => _showContextMenu(context, d.globalPosition),
         onTap: e.isDir ? widget.onToggle : widget.onSelect,
         child: Container(
           color: _hovered ? const Color(0xFF1A1E2A) : Colors.transparent,

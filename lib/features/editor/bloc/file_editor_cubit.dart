@@ -176,6 +176,15 @@ class FileEditorCubit extends Cubit<FileEditorState> {
   }
 
   void closeFile() => closeTab(state.activeIndex);
+
+  /// Closes all tabs except the one at [keepIndex].
+  void closeOthers(int keepIndex) {
+    if (keepIndex < 0 || keepIndex >= state.tabs.length) return;
+    final keep = state.tabs[keepIndex];
+    emit(state.copyWith(tabs: [keep], activeIndex: 0));
+    _saveTabsToPrefs();
+  }
+
   void togglePanel() => emit(state.copyWith(isVisible: !state.isVisible));
   void showPanel() => emit(state.copyWith(isVisible: true));
   void hidePanel() => emit(state.copyWith(isVisible: false));

@@ -317,6 +317,59 @@ class MindMapCubit extends Cubit<MindMapState> {
     await prefs.setString(_kSavedViews, jsonEncode(map));
   }
 
+  // ── Open file as panel node ───────────────────────────────────────────────
+
+  void openFileAsPanel({
+    required String id,
+    required String filePath,
+    required String content,
+    required String language,
+  }) {
+    if (state.nodes.any((n) => n.id == id)) {
+      final newHidden = {...state.hidden}..remove(id);
+      emit(state.copyWith(hidden: newHidden));
+      _saveHidden(newHidden);
+      return;
+    }
+    final newNode = EditorNodeData(
+      id: id,
+      filePath: filePath,
+      content: content,
+      language: language,
+    );
+    // Find a matching file tree node to connect from.
+    final treeNode = state.nodes.whereType<FileTreeNodeData>().where(
+      (n) => n.repoPath != null && filePath.startsWith(n.repoPath!),
+    ).firstOrNull;
+
+    final newNodes = [...state.nodes, newNode];
+    final newConnections = treeNode != null
+        ? [
+            ...state.connections,
+            MindMapConnection(
+              fromId: treeNode.id,
+              toId: id,
+              style: ConnectorStyle.dashed,
+              color: const Color(0x7060A5FA),
+            ),
+          ]
+        : state.connections;
+
+    final newPositions = _engine.compute(
+      nodes: newNodes,
+      existing: state.positions,
+      sizes: state.sizes,
+      locked: state.locked,
+      connections: newConnections,
+    );
+    emit(state.copyWith(
+      nodes: newNodes,
+      positions: newPositions,
+      connections: newConnections,
+    ));
+    _savePositions(newPositions);
+  }
+
   // ── Remote collaboration helpers ──────────────────────────────────────────
 
   /// Applies a full state snapshot received from the host.

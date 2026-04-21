@@ -9,10 +9,12 @@ class WorkspaceCard extends StatelessWidget {
     required this.props,
     this.onAddFolder,
     this.onCreateSession,
+    this.onColorDotTap,
   });
   final WorkspaceCardProps props;
   final VoidCallback? onAddFolder;
   final VoidCallback? onCreateSession;
+  final VoidCallback? onColorDotTap;
 
   static const _borderColor = Color(0x8060A5FA);
   static const _bgGrad = [Color(0xFF181E2E), Color(0xFF141826)];
@@ -43,15 +45,23 @@ class WorkspaceCard extends StatelessWidget {
         children: [
           Row(
             children: [
-              Container(
-                width: 10,
-                height: 10,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: color,
-                  boxShadow: [
-                    BoxShadow(color: color.withAlpha(160), blurRadius: 8)
-                  ],
+              MouseRegion(
+                cursor: onColorDotTap != null
+                    ? SystemMouseCursors.click
+                    : MouseCursor.defer,
+                child: GestureDetector(
+                  onTap: onColorDotTap,
+                  child: Container(
+                    width: 10,
+                    height: 10,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: color,
+                      boxShadow: [
+                        BoxShadow(color: color.withAlpha(160), blurRadius: 8)
+                      ],
+                    ),
+                  ),
                 ),
               ),
               const SizedBox(width: 8),
