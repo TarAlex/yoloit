@@ -62,6 +62,7 @@ class MindMapState extends Equatable {
     this.savedViews  = const {},
     this.activeViewName,
     this.nodeContent = const {},
+    this.nodeColors  = const {},
   });
 
   /// Node id → canvas offset (top-left corner).
@@ -95,6 +96,11 @@ class MindMapState extends Equatable {
   /// Map of nodeId → JSON-serializable content map.
   final Map<String, Map<String, dynamic>> nodeContent;
 
+  /// Per-node custom colours received from the collaboration host.
+  /// Key: node id, Value: ARGB colour integer (Color.toARGB32()).
+  /// Empty on the host machine; populated on guests when a snapshot is applied.
+  final Map<String, int> nodeColors;
+
   MindMapState copyWith({
     Map<String, Offset>? positions,
     Map<String, Size>?   sizes,
@@ -107,6 +113,7 @@ class MindMapState extends Equatable {
     String? activeViewName,
     bool clearActiveViewName = false,
     Map<String, Map<String, dynamic>>? nodeContent,
+    Map<String, int>? nodeColors,
   }) {
     return MindMapState(
       positions:      positions      ?? this.positions,
@@ -119,12 +126,13 @@ class MindMapState extends Equatable {
       savedViews:     savedViews     ?? this.savedViews,
       activeViewName: clearActiveViewName ? null : (activeViewName ?? this.activeViewName),
       nodeContent:    nodeContent    ?? this.nodeContent,
+      nodeColors:     nodeColors     ?? this.nodeColors,
     );
   }
 
   @override
   List<Object?> get props => [
     positions, sizes, locked, hidden, hiddenTypes,
-    nodes, connections, savedViews, activeViewName, nodeContent,
+    nodes, connections, savedViews, activeViewName, nodeContent, nodeColors,
   ];
 }

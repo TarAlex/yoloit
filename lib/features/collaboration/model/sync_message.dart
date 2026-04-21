@@ -50,6 +50,7 @@ class SyncMessage {
     List<Map<String, dynamic>> connections = const [],
     Map<String, Map<String, dynamic>> nodeContent = const {},
     Map<String, Map<String, dynamic>> savedViews = const {},
+    Map<String, int> nodeColors = const {},
     String senderId = 'host',
   }) => SyncMessage(
     type: kSnapshot, senderId: senderId,
@@ -61,6 +62,7 @@ class SyncMessage {
       'connections': connections,
       'nodeContent': nodeContent,
       'savedViews':  savedViews,
+      'nodeColors':  nodeColors,
     },
   );
 

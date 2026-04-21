@@ -288,6 +288,17 @@ class CollaborationCubit extends Cubit<CollaborationState> {
       return;
     }
 
+    // When structural / non-delta-able fields change (hiddenTypes, connections,
+    // savedViews, nodes), broadcast a full snapshot rather than fine-grained
+    // deltas that cannot express these changes.
+    if (!identical(mmState.hiddenTypes, prev.hiddenTypes) ||
+        !identical(mmState.connections, prev.connections) ||
+        !identical(mmState.savedViews, prev.savedViews) ||
+        !identical(mmState.nodes, prev.nodes)) {
+      _server!.broadcastRaw(_buildSnapshot(mmState));
+      return;
+    }
+
     for (final entry in mmState.positions.entries) {
       final old = prev.positions[entry.key];
       if (old == null || old != entry.value) {
@@ -319,6 +330,13 @@ class CollaborationCubit extends Cubit<CollaborationState> {
     final savedViewsMap = mm.savedViews.map(
       (k, v) => MapEntry(k, v.toJson().cast<String, dynamic>()),
     );
+    // Extract custom colours for workspace cards so guests can display them.
+    final nodeColorsMap = <String, int>{};
+    for (final node in mm.nodes) {
+      if (node is WorkspaceNodeData && node.workspace.color != null) {
+        nodeColorsMap[node.id] = node.workspace.color!.toARGB32();
+      }
+    }
     return SyncMessage.snapshot(
       positions: mm.positions.map((k, v) => MapEntry(k, [v.dx, v.dy])),
       sizes: mm.sizes.map((k, v) => MapEntry(k, [v.width, v.height])),
@@ -336,6 +354,7 @@ class CollaborationCubit extends Cubit<CollaborationState> {
           .toList(),
       nodeContent: Map.fromEntries(ncEntries),
       savedViews: savedViewsMap,
+      nodeColors: nodeColorsMap,
     );
   }
 
@@ -685,6 +704,12 @@ class CollaborationCubit extends Cubit<CollaborationState> {
       (k, v) => MapEntry(k, MindMapViewSnapshot.fromJson(v as Map<String, dynamic>)),
     );
 
+    final nodeColors = ((p['nodeColors'] as Map<String, dynamic>?) ?? {}).map(
+      (k, v) => MapEntry(k, (v as num).toInt()),
+    );
+
+    final remoteNodes = _deserializeRemoteNodes(nodeContent);
+
     mindMapCubit.applyRemoteSnapshot(
       positions: positions,
       sizes: sizes,
@@ -693,6 +718,8 @@ class CollaborationCubit extends Cubit<CollaborationState> {
       connections: connections,
       nodeContent: nodeContent,
       savedViews: savedViews,
+      remoteNodes: remoteNodes,
+      nodeColors: nodeColors,
     );
   }
 
@@ -713,6 +740,34 @@ class CollaborationCubit extends Cubit<CollaborationState> {
       mindMapCubit.hideNode(id);
     } else {
       mindMapCubit.showNode(id);
+    }
+  }
+
+  /// Deserialises remote node content into [MindMapNodeData] objects.
+  /// Only handles node types that can be meaningfully reconstructed on a guest
+  /// machine (e.g. [FilePanelNodeData]).  Native cubit-owned nodes (agent,
+  /// workspace, session…) are omitted because each machine manages those via
+  /// its own blocs.
+  static List<MindMapNodeData> _deserializeRemoteNodes(
+      Map<String, Map<String, dynamic>> nodeContent) {
+    final result = <MindMapNodeData>[];
+    for (final entry in nodeContent.entries) {
+      final node = _deserializeNode(entry.key, entry.value);
+      if (node != null) result.add(node);
+    }
+    return result;
+  }
+
+  static MindMapNodeData? _deserializeNode(
+      String id, Map<String, dynamic> content) {
+    switch (content['type'] as String?) {
+      case 'panel':
+        final filePath = content['filePath'] as String? ?? '';
+        return filePath.isNotEmpty
+            ? FilePanelNodeData(id: id, filePath: filePath)
+            : null;
+      default:
+        return null;
     }
   }
 

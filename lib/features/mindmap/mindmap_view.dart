@@ -603,7 +603,8 @@ class _MindMapCanvasState extends State<_MindMapCanvas> {
                           prev.positions != next.positions ||
                           prev.sizes != next.sizes ||
                           prev.hidden != next.hidden ||
-                          prev.hiddenTypes != next.hiddenTypes,
+                          prev.hiddenTypes != next.hiddenTypes ||
+                          prev.nodeColors != next.nodeColors,
                       builder: (ctx, mm) => _MiniMap(
                         nodes: widget.nodes,
                         positions: mm.positions,
@@ -613,6 +614,7 @@ class _MindMapCanvasState extends State<_MindMapCanvas> {
                         transformCtrl: widget.transformCtrl,
                         viewportSize: viewportSize,
                         onPanTo: widget.onPanToOffset,
+                        syncedNodeColors: mm.nodeColors,
                       ),
                     ),
                   ],
@@ -1593,6 +1595,7 @@ class _MiniMap extends StatelessWidget {
     required this.transformCtrl,
     required this.viewportSize,
     required this.onPanTo,
+    this.syncedNodeColors = const {},
   });
 
   final List<MindMapNodeData> nodes;
@@ -1603,6 +1606,8 @@ class _MiniMap extends StatelessWidget {
   final TransformationController transformCtrl;
   final Size viewportSize;
   final void Function(Offset canvasCenter) onPanTo;
+  /// Node colours received from the collaboration host (guest-side only).
+  final Map<String, int> syncedNodeColors;
 
   static const double _mapW = 210.0;
   static const double _mapH = 130.0;
@@ -1661,6 +1666,11 @@ class _MiniMap extends StatelessWidget {
           if (n is WorkspaceNodeData && n.workspace.color != null) {
             nodeColors[n.id] = n.workspace.color!.withAlpha(0xCC);
           }
+        }
+        // Apply collaboration-synced colours for nodes that don't have a local colour.
+        for (final entry in syncedNodeColors.entries) {
+          nodeColors.putIfAbsent(
+              entry.key, () => Color(entry.value).withAlpha(0xCC));
         }
 
         return GestureDetector(

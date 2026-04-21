@@ -394,7 +394,20 @@ class MindMapCubit extends Cubit<MindMapState> {
     List<MindMapConnection>         connections = const [],
     Map<String, Map<String, dynamic>> nodeContent = const {},
     Map<String, MindMapViewSnapshot> savedViews = const {},
+    List<MindMapNodeData>           remoteNodes = const [],
+    Map<String, int>                nodeColors  = const {},
   }) {
+    // Merge remote-only nodes (e.g. FilePanelNodeData created on the host)
+    // that don't exist in local state. Existing local nodes are preserved.
+    List<MindMapNodeData>? mergedNodes;
+    if (remoteNodes.isNotEmpty) {
+      final localIds = state.nodes.map((n) => n.id).toSet();
+      final newRemote =
+          remoteNodes.where((n) => !localIds.contains(n.id)).toList();
+      if (newRemote.isNotEmpty) {
+        mergedNodes = [...state.nodes, ...newRemote];
+      }
+    }
     emit(state.copyWith(
       positions:   {...state.positions, ...positions},
       sizes:       {...state.sizes, ...sizes},
@@ -403,6 +416,8 @@ class MindMapCubit extends Cubit<MindMapState> {
       connections: connections.isNotEmpty ? connections : null,
       nodeContent: nodeContent.isNotEmpty ? nodeContent : null,
       savedViews:  savedViews.isNotEmpty ? savedViews : null,
+      nodes:       mergedNodes,
+      nodeColors:  nodeColors.isNotEmpty ? nodeColors : null,
     ));
   }
 
