@@ -31,6 +31,8 @@ class SyncMessage {
   static const kNodeUpdate    = 'node.update';
   /// Guest → host: keyboard input for a terminal node.
   static const kTerminalInput = 'terminal.input';
+  /// Host → guest: raw terminal output bytes (with ANSI) for live rendering.
+  static const kTerminalOutput = 'terminal.output';
 
   // ── Factories ──────────────────────────────────────────────────────────────
 
@@ -41,6 +43,7 @@ class SyncMessage {
     required List<String> hiddenTypes,
     List<Map<String, dynamic>> connections = const [],
     Map<String, Map<String, dynamic>> nodeContent = const {},
+    Map<String, Map<String, dynamic>> savedViews = const {},
     String senderId = 'host',
   }) => SyncMessage(
     type: kSnapshot, senderId: senderId,
@@ -51,6 +54,7 @@ class SyncMessage {
       'hiddenTypes': hiddenTypes,
       'connections': connections,
       'nodeContent': nodeContent,
+      'savedViews':  savedViews,
     },
   );
 
@@ -79,6 +83,14 @@ class SyncMessage {
   factory SyncMessage.terminalInput(String nodeId, String data,
       {required String senderId}) =>
       SyncMessage(type: kTerminalInput, senderId: senderId,
+          payload: {'id': nodeId, 'data': data});
+
+  /// Host → guest: raw terminal output. [data] is the raw PTY byte string
+  /// containing ANSI escapes, CSI sequences, etc. The guest feeds this
+  /// directly into its xterm Terminal instance.
+  factory SyncMessage.terminalOutput(String nodeId, String data,
+      {String senderId = 'host'}) =>
+      SyncMessage(type: kTerminalOutput, senderId: senderId,
           payload: {'id': nodeId, 'data': data});
 
   // ── Serialisation ──────────────────────────────────────────────────────────

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:yoloit/features/mindmap/bloc/mindmap_cubit.dart';
 import 'package:yoloit/features/mindmap/bloc/mindmap_state.dart';
+import 'package:yoloit/features/mindmap/widgets/canvas_interaction_lock.dart';
 
 /// A draggable, multi-directional resizable node on the mind-map canvas.
 ///
@@ -53,10 +54,11 @@ class _MindMapNodeState extends State<MindMapNode> {
         return Positioned(
           left: pos.dx,
           top:  pos.dy,
-          child: MouseRegion(
-            onEnter: (_) => setState(() => _hovered = true),
-            onExit:  (_) => setState(() => _hovered = false),
-            child: AnimatedScale(
+          child: ScrollableCardMarker(
+            child: MouseRegion(
+              onEnter: (_) => setState(() => _hovered = true),
+              onExit:  (_) => setState(() => _hovered = false),
+              child: AnimatedScale(
               scale:    _dragging ? 1.02 : 1.0,
               duration: const Duration(milliseconds: 100),
               // Stack with clipBehavior.none so handles can extend outside the card.
@@ -76,8 +78,14 @@ class _MindMapNodeState extends State<MindMapNode> {
                           onPanEnd:    (_) => setState(() => _dragging = false),
                           child: _DragHandle(dragging: _dragging),
                         ),
-                        // Card content.
-                        Expanded(child: widget.child),
+                        // Card content. Wrapped in ScrollableCardRegion so
+                        // the canvas pan is disabled while the pointer is
+                        // over the card body — this way two-finger scroll
+                        // inside a terminal/editor/file-tree scrolls the
+                        // card, not the infinite canvas underneath.
+                        Expanded(
+                          child: ScrollableCardRegion(child: widget.child),
+                        ),
                       ],
                     ),
                   ),
@@ -120,35 +128,23 @@ class _MindMapNodeState extends State<MindMapNode> {
                   // Bottom-right L-corner (inside card bounds — always visible, hit area 22×22)
                   Positioned(
                     right: 0, bottom: 0,
-                    child: GestureDetector(
-                      behavior: HitTestBehavior.opaque,
+                    child: _CornerResize(
+                      cursor: SystemMouseCursors.resizeUpLeftDownRight,
                       onPanUpdate: (d) =>
                           cubit.resizeNode(widget.id, d.delta, minSize),
-                      child: MouseRegion(
-                        cursor: SystemMouseCursors.resizeUpLeftDownRight,
-                        child: SizedBox(
-                          width: 22, height: 22,
-                          child: CustomPaint(painter: _LCornerPainter(hovered: _hovered)),
-                        ),
-                      ),
+                      painter: _LCornerPainter(hovered: _hovered),
                     ),
                   ),
                   // Bottom-left L-corner
                   Positioned(
                     left: 0, bottom: 0,
-                    child: GestureDetector(
-                      behavior: HitTestBehavior.opaque,
+                    child: _CornerResize(
+                      cursor: SystemMouseCursors.resizeUpRightDownLeft,
                       onPanUpdate: (d) {
                         cubit.resizeFromLeft(widget.id, d.delta.dx, minSize);
                         cubit.resizeNode(widget.id, Offset(0, d.delta.dy), minSize);
                       },
-                      child: MouseRegion(
-                        cursor: SystemMouseCursors.resizeUpRightDownLeft,
-                        child: SizedBox(
-                          width: 22, height: 22,
-                          child: CustomPaint(painter: _LCornerPainter(hovered: _hovered, flipX: true)),
-                        ),
-                      ),
+                      painter: _LCornerPainter(hovered: _hovered, flipX: true),
                     ),
                   ),
 
@@ -161,6 +157,7 @@ class _MindMapNodeState extends State<MindMapNode> {
                 ],
               ),
             ),
+          ),
           ),
         );
       },
@@ -226,6 +223,22 @@ class _ResizeEdge extends StatefulWidget {
 class _ResizeEdgeState extends State<_ResizeEdge> {
   bool _hovered = false;
 
+  void _setHover(bool v) {
+    if (_hovered == v) return;
+    if (v) {
+      CanvasInteractionLock.instance.enter();
+    } else {
+      CanvasInteractionLock.instance.exit();
+    }
+    setState(() => _hovered = v);
+  }
+
+  @override
+  void dispose() {
+    if (_hovered) CanvasInteractionLock.instance.exit();
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
     final isVertical = widget.axis == Axis.vertical;
@@ -235,8 +248,8 @@ class _ResizeEdgeState extends State<_ResizeEdge> {
       onPanUpdate: widget.onDrag,
       child: MouseRegion(
         cursor: isVertical ? SystemMouseCursors.resizeColumn : SystemMouseCursors.resizeRow,
-        onEnter: (_) => setState(() => _hovered = true),
-        onExit:  (_) => setState(() => _hovered = false),
+        onEnter: (_) => _setHover(true),
+        onExit:  (_) => _setHover(false),
         child: Center(
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 120),
@@ -327,6 +340,60 @@ class _CloseButtonState extends State<_CloseButton> {
             size: 11,
             color: _hovered ? Colors.white : const Color(0xFF8A93B0),
           ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Corner resize handle — locks the canvas interaction while hovered so
+/// the parent InteractiveViewer doesn't steal the drag gesture on web.
+class _CornerResize extends StatefulWidget {
+  const _CornerResize({
+    required this.cursor,
+    required this.onPanUpdate,
+    required this.painter,
+  });
+  final MouseCursor cursor;
+  final ValueChanged<DragUpdateDetails> onPanUpdate;
+  final CustomPainter painter;
+
+  @override
+  State<_CornerResize> createState() => _CornerResizeState();
+}
+
+class _CornerResizeState extends State<_CornerResize> {
+  bool _hovered = false;
+
+  void _setHover(bool v) {
+    if (_hovered == v) return;
+    if (v) {
+      CanvasInteractionLock.instance.enter();
+    } else {
+      CanvasInteractionLock.instance.exit();
+    }
+    _hovered = v;
+  }
+
+  @override
+  void dispose() {
+    if (_hovered) CanvasInteractionLock.instance.exit();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return MouseRegion(
+      cursor: widget.cursor,
+      onEnter: (_) => _setHover(true),
+      onExit: (_) => _setHover(false),
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onPanUpdate: widget.onPanUpdate,
+        child: SizedBox(
+          width: 22,
+          height: 22,
+          child: CustomPaint(painter: widget.painter),
         ),
       ),
     );

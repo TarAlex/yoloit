@@ -46,7 +46,13 @@ class AgentSession extends Equatable {
   /// NOT included in [props] — mutations don't trigger state rebuilds.
   final List<String> recentLines = [];
 
+  /// Rolling buffer of RAW PTY bytes (with ANSI) — replayed to new remote
+  /// guests so they see the full current terminal state, not just new data.
+  /// Capped at [_maxRawBytes] to bound memory.
+  final StringBuffer _rawBuffer = StringBuffer();
+
   static const _maxRecentLines = 300;
+  static const _maxRawBytes = 256 * 1024; // 256 KiB raw ANSI history
 
   /// Append raw PTY data: strips ANSI codes, splits into lines, trims buffer.
   void appendOutput(String rawData) {
@@ -56,8 +62,22 @@ class AgentSession extends Equatable {
     if (recentLines.length > _maxRecentLines) {
       recentLines.removeRange(0, recentLines.length - _maxRecentLines);
     }
-    TerminalOutputBus.instance.write(id, plain);
+
+    // Append raw bytes to rolling buffer (trim when over limit).
+    _rawBuffer.write(rawData);
+    if (_rawBuffer.length > _maxRawBytes) {
+      final s = _rawBuffer.toString();
+      _rawBuffer.clear();
+      _rawBuffer.write(s.substring(s.length - _maxRawBytes));
+    }
+
+    // Push RAW bytes (with ANSI) so remote web guests can render via xterm.
+    TerminalOutputBus.instance.write(id, rawData);
   }
+
+  /// Returns accumulated raw PTY bytes since the session started (capped).
+  /// Used to replay history to newly-connected web guests.
+  String rawHistory() => _rawBuffer.toString();
 
   /// Last [n] non-empty plain-text lines for display in the browser.
   /// Falls back to reading the xterm buffer when the ring buffer is still empty
@@ -67,13 +87,29 @@ class AgentSession extends Equatable {
       final nonEmpty = recentLines.where((l) => l.trim().isNotEmpty).toList();
       return nonEmpty.length <= n ? nonEmpty : nonEmpty.sublist(nonEmpty.length - n);
     }
-    // Fallback: extract all text from xterm scrollback buffer.
+    // Fallback: read only the current visible screen rows (no scrollback).
+    // Using getText() on the full buffer causes duplicates when the terminal
+    // app (e.g. Copilot CLI) redraws the screen — the scrollback retains the
+    // previous draw AND the current one.
     try {
-      final raw = terminal.buffer.getText();
-      final lines = raw.split('\n')
-          .map(stripAnsi)
-          .where((l) => l.trim().isNotEmpty)
-          .toList();
+      final buf = terminal.buffer;
+      final startRow = buf.scrollBack;  // first visible row
+      final lines = <String>[];
+      if (startRow < buf.lines.length) {
+        for (int row = startRow; row < buf.lines.length; row++) {
+          final text = stripAnsi(buf.lines[row].getText()).trimRight();
+          if (text.trim().isNotEmpty) lines.add(text);
+        }
+      }
+      if (lines.isEmpty) {
+        // Fallback if visible screen was blank: use full buffer, last n lines.
+        final raw = buf.getText();
+        final allLines = raw.split('\n')
+            .map(stripAnsi)
+            .where((l) => l.trim().isNotEmpty)
+            .toList();
+        return allLines.length <= n ? allLines : allLines.sublist(allLines.length - n);
+      }
       return lines.length <= n ? lines : lines.sublist(lines.length - n);
     } catch (_) {
       return const [];

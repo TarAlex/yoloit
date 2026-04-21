@@ -328,6 +328,7 @@ class MindMapCubit extends Cubit<MindMapState> {
     required Set<String>            hiddenTypes,
     List<MindMapConnection>         connections = const [],
     Map<String, Map<String, dynamic>> nodeContent = const {},
+    Map<String, MindMapViewSnapshot> savedViews = const {},
   }) {
     emit(state.copyWith(
       positions:   {...state.positions, ...positions},
@@ -336,6 +337,7 @@ class MindMapCubit extends Cubit<MindMapState> {
       hiddenTypes: hiddenTypes,
       connections: connections.isNotEmpty ? connections : null,
       nodeContent: nodeContent.isNotEmpty ? nodeContent : null,
+      savedViews:  savedViews.isNotEmpty ? savedViews : null,
     ));
   }
 

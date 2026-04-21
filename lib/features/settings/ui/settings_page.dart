@@ -1,6 +1,8 @@
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:yoloit/core/config/app_config.dart';
 import 'package:yoloit/core/hotkeys/hotkey_definition.dart';
 import 'package:yoloit/core/hotkeys/hotkey_registry.dart';
 import 'package:yoloit/core/services/app_logger.dart';
@@ -1431,6 +1433,8 @@ class _SessionSettingsState extends State<_SessionSettings> {
             ),
             if (_showAppLog) _buildAppLogSection(context),
           ],
+          Divider(height: 1, color: colors.border),
+          _WorkspaceStorageRow(),
         ],
       ),
     );
@@ -1732,6 +1736,95 @@ class _LogViewerDialogState extends State<_LogViewerDialog> {
                     ),
                   ),
           ),
+        ],
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Workspace storage path row
+// ---------------------------------------------------------------------------
+
+// ignore: must_be_immutable
+class _WorkspaceStorageRow extends StatefulWidget {
+  @override
+  State<_WorkspaceStorageRow> createState() => _WorkspaceStorageRowState();
+}
+
+class _WorkspaceStorageRowState extends State<_WorkspaceStorageRow> {
+  late String _currentPath;
+
+  @override
+  void initState() {
+    super.initState();
+    _currentPath = AppConfig.instance.workspacesFilePath;
+  }
+
+  Future<void> _pickDirectory(BuildContext context) async {
+    final result = await FilePicker.platform.getDirectoryPath(
+      dialogTitle: 'Choose workspace storage folder',
+    );
+    if (result == null) return;
+    final newPath = '$result/workspaces.json';
+    await AppConfig.instance.setWorkspacesFilePath(newPath);
+    if (mounted) {
+      setState(() => _currentPath = newPath);
+      if (context.mounted) await context.read<WorkspaceCubit>().load();
+    }
+  }
+
+  Future<void> _resetPath(BuildContext context) async {
+    await AppConfig.instance.resetWorkspacesFilePath();
+    if (mounted) {
+      setState(() => _currentPath = AppConfig.instance.workspacesFilePath);
+      if (context.mounted) await context.read<WorkspaceCubit>().load();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.appColors;
+    final isDefault = _currentPath == AppConfig.defaultWorkspacesFilePath;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      child: Row(
+        children: [
+          Icon(Icons.folder_open, size: 16, color: AppColors.textMuted),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Workspace storage',
+                  style: TextStyle(color: AppColors.textPrimary, fontSize: 13),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  _currentPath,
+                  style: const TextStyle(
+                    color: AppColors.textMuted,
+                    fontSize: 11,
+                    fontFamily: 'monospace',
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
+            ),
+          ),
+          TextButton(
+            onPressed: () => _pickDirectory(context),
+            child: Text('Change…', style: TextStyle(fontSize: 12, color: colors.primary)),
+          ),
+          if (!isDefault)
+            TextButton(
+              onPressed: () => _resetPath(context),
+              child: const Text(
+                'Reset',
+                style: TextStyle(fontSize: 12, color: AppColors.textSecondary),
+              ),
+            ),
         ],
       ),
     );

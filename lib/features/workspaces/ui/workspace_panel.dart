@@ -6,6 +6,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:yoloit/core/theme/app_colors.dart';
 import 'package:yoloit/core/theme/app_theme.dart';
 import 'package:yoloit/core/theme/theme_manager.dart';
+import 'package:yoloit/core/utils/git_init_prompt.dart';
 import 'package:yoloit/features/review/bloc/review_cubit.dart';
 import 'package:yoloit/features/runs/bloc/run_cubit.dart';
 import 'package:yoloit/features/runs/bloc/run_state.dart';
@@ -192,6 +193,9 @@ class WorkspacePanelState extends State<WorkspacePanel> {
     );
     if (folder == null || !context.mounted) return;
 
+    await maybePromptGitInit(context, folder);
+    if (!context.mounted) return;
+
     final cubit = context.read<WorkspaceCubit>();
     await cubit.addWorkspace(folder, customName: name);
 
@@ -209,6 +213,8 @@ class WorkspacePanelState extends State<WorkspacePanel> {
         dialogTitle: 'Add Folder to "$name"',
       );
       if (extra == null || !context.mounted) break;
+      await maybePromptGitInit(context, extra);
+      if (!context.mounted) break;
       // Find the newly created workspace by name to get its id
       final state = context.read<WorkspaceCubit>().state;
       if (state is WorkspaceLoaded) {
@@ -286,7 +292,9 @@ class WorkspacePanelState extends State<WorkspacePanel> {
     final result = await FilePicker.platform.getDirectoryPath(
       dialogTitle: 'Add Folder to Workspace',
     );
-    if (result != null && context.mounted) {
+    if (result == null || !context.mounted) return;
+    await maybePromptGitInit(context, result);
+    if (context.mounted) {
       await context.read<WorkspaceCubit>().addPathToWorkspace(workspaceId, result);
     }
   }

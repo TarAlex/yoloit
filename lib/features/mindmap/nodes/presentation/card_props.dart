@@ -235,16 +235,22 @@ class EditorCardProps {
     this.language = '',
     this.content = '',
     this.tabs = const [],
+    this.imageBase64,
   });
   final String filePath;
   final String language;
   final String content;
   final List<TabInfo> tabs;
+  /// Non-null when the file is an image. Contains raw base64-encoded bytes.
+  final String? imageBase64;
+
+  bool get isImage => imageBase64 != null && imageBase64!.isNotEmpty;
 
   factory EditorCardProps.fromJson(Map<String, dynamic> j) => EditorCardProps(
         filePath: j['filePath'] as String? ?? '',
         language: j['language'] as String? ?? '',
         content: j['content'] as String? ?? '',
+        imageBase64: j['imageBase64'] as String?,
         tabs: (j['tabs'] as List?)
                 ?.map((t) => TabInfo.fromJson(t as Map<String, dynamic>))
                 .toList() ??

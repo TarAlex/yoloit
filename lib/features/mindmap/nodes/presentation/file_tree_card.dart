@@ -29,7 +29,7 @@ class FileTreeCard extends StatelessWidget {
       child: ClipRRect(
         borderRadius: BorderRadius.circular(9),
         child: Column(
-          mainAxisSize: MainAxisSize.min,
+          mainAxisSize: MainAxisSize.max,
           children: [
             Container(
               padding:
@@ -61,10 +61,26 @@ class FileTreeCard extends StatelessWidget {
             ),
             Expanded(
               child: props.entries.isEmpty
-                  ? const Center(
-                      child: Text('No files loaded',
-                          style: TextStyle(
-                              fontSize: 10, color: Color(0xFF475569))))
+                  ? Center(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Text('No files loaded',
+                              style: TextStyle(
+                                  fontSize: 10, color: Color(0xFF475569))),
+                          if (props.repoPath != null &&
+                              props.repoPath!.isNotEmpty)
+                            Padding(
+                              padding:
+                                  const EdgeInsets.only(top: 4, left: 8, right: 8),
+                              child: Text(props.repoPath!,
+                                  textAlign: TextAlign.center,
+                                  style: const TextStyle(
+                                      fontSize: 9, color: Color(0xFF334155))),
+                            ),
+                        ],
+                      ),
+                    )
                   : ListView.builder(
                       padding: const EdgeInsets.symmetric(vertical: 4),
                       itemCount: props.entries.length,

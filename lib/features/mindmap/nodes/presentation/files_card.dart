@@ -11,7 +11,9 @@ class FilesCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final files = props.files.take(8).toList();
+    final visibleLimit = 8;
+    final files = props.files.take(visibleLimit).toList();
+    final remaining = props.files.length - visibleLimit;
     return Container(
       decoration: BoxDecoration(
         color: const Color(0xFF12151C),
@@ -23,7 +25,7 @@ class FilesCard extends StatelessWidget {
         ],
       ),
       child: Column(
-        mainAxisSize: MainAxisSize.min,
+        mainAxisSize: MainAxisSize.max,
         children: [
           Container(
             padding:
@@ -61,20 +63,27 @@ class FilesCard extends StatelessWidget {
               ],
             ),
           ),
-          ...files.map((f) => _FileRow(
-                file: f,
-                onTap: onFileSelect != null
-                    ? () => onFileSelect!(f.path)
-                    : null,
-              )),
-          if (props.files.length > 8)
-            Padding(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-              child: Text('+${props.files.length - 8} more',
-                  style: const TextStyle(
-                      fontSize: 9, color: Color(0xFF44446A))),
+          Expanded(
+            child: ListView(
+              padding: EdgeInsets.zero,
+              children: [
+                ...files.map((f) => _FileRow(
+                      file: f,
+                      onTap: onFileSelect != null
+                          ? () => onFileSelect!(f.path)
+                          : null,
+                    )),
+                if (remaining > 0)
+                  Padding(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    child: Text('+$remaining more',
+                        style: const TextStyle(
+                            fontSize: 9, color: Color(0xFF44446A))),
+                  ),
+              ],
             ),
+          ),
         ],
       ),
     );

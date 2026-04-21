@@ -37,11 +37,13 @@ class FileEditorPanel extends StatefulWidget {
   const FileEditorPanel({
     super.key,
     this.immersive = false,
+    this.hideTabBar = false,
     this.onToggleImmersive,
   });
 
   /// When true the tab bar and toggle bar are hidden so only raw content shows.
   final bool immersive;
+  final bool hideTabBar;
 
   /// Called by buttons inside the panel to enter/exit immersive mode.
   final VoidCallback? onToggleImmersive;
@@ -54,16 +56,21 @@ class _FileEditorPanelState extends State<FileEditorPanel>
     with WidgetsBindingObserver {
   /// One CodeController per open file path.
   final Map<String, CodeController> _controllers = {};
+
   /// Tracks which content was last loaded into each controller (to avoid loops).
   final Map<String, String> _loadedContent = {};
+
   /// True when we're programmatically updating a controller (suppress auto-save).
   bool _suppressControllerUpdates = false;
+
   /// File paths currently showing Markdown/SVG preview instead of raw code.
   final Set<String> _previewPaths = {};
+
   /// Paths we have already auto-decided preview mode for (prevents repeated auto-toggle).
   final Set<String> _seenPaths = {};
   double _scaleBase = 13.0;
   final _fontSizeNotifier = ValueNotifier<double>(13.0);
+
   /// True after first frame renders for the current file (prevents toggle bar
   /// from appearing before CodeField has painted its content).
   bool _editorReady = false;
@@ -118,7 +125,8 @@ class _FileEditorPanelState extends State<FileEditorPanel>
       'yaml' => yaml,
       'xml' => xml,
       'sql' => sql,
-      'markdown' => null, // markdown has preview mode — skip slow syntax parsing
+      'markdown' =>
+        null, // markdown has preview mode — skip slow syntax parsing
       'swift' => swift,
       _ => null,
     };
@@ -138,7 +146,8 @@ class _FileEditorPanelState extends State<FileEditorPanel>
         final text = ctrl.text;
         final cubit = context.read<FileEditorCubit>();
         final currentTab = cubit.state.activeTab;
-        if (currentTab?.filePath == tab.filePath && text != currentTab?.content) {
+        if (currentTab?.filePath == tab.filePath &&
+            text != currentTab?.content) {
           cubit.updateContent(text);
         }
       });
@@ -158,7 +167,9 @@ class _FileEditorPanelState extends State<FileEditorPanel>
   /// Dispose controllers for tabs that are no longer open.
   void _cleanupControllers(List<EditorTab> openTabs) {
     final openPaths = openTabs.map((t) => t.filePath).toSet();
-    final toRemove = _controllers.keys.where((p) => !openPaths.contains(p)).toList();
+    final toRemove = _controllers.keys
+        .where((p) => !openPaths.contains(p))
+        .toList();
     for (final path in toRemove) {
       _controllers.remove(path)?.dispose();
       _loadedContent.remove(path);
@@ -176,7 +187,9 @@ class _FileEditorPanelState extends State<FileEditorPanel>
         final activeTab = state.activeTab!;
         // Only create controller when content is available (not during loading).
         CodeController? controller;
-        if (!activeTab.isDiff && !_isImage(activeTab.filePath) && !activeTab.isLoading) {
+        if (!activeTab.isDiff &&
+            !_isImage(activeTab.filePath) &&
+            !activeTab.isLoading) {
           controller = _controllerFor(activeTab, context);
         }
 
@@ -204,18 +217,21 @@ class _FileEditorPanelState extends State<FileEditorPanel>
           }
         }
 
-        final toggleVisible = _editorReady &&
+        final toggleVisible =
+            _editorReady &&
             !activeTab.isDiff &&
             !activeTab.isLoading &&
             !_isImage(activeTab.filePath) &&
             (_isMarkdown(activeTab.filePath) || _isSvg(activeTab.filePath));
 
-        final isVisualPreview = !activeTab.isLoading &&
+        final isVisualPreview =
+            !activeTab.isLoading &&
             !activeTab.isDiff &&
             (_isImage(activeTab.filePath) ||
-             _isSvg(activeTab.filePath) ||
-             _isMarkdown(activeTab.filePath)) &&
-            (_isImage(activeTab.filePath) || _previewPaths.contains(activeTab.filePath));
+                _isSvg(activeTab.filePath) ||
+                _isMarkdown(activeTab.filePath)) &&
+            (_isImage(activeTab.filePath) ||
+                _previewPaths.contains(activeTab.filePath));
 
         final immersive = widget.immersive;
 
@@ -230,7 +246,7 @@ class _FileEditorPanelState extends State<FileEditorPanel>
           child: Column(
             children: [
               // Tab bar — hidden in immersive mode.
-              if (!immersive) _TabBar(state: state),
+              if (!immersive && !widget.hideTabBar) _TabBar(state: state),
               Expanded(
                 child: Stack(
                   children: [
@@ -239,25 +255,36 @@ class _FileEditorPanelState extends State<FileEditorPanel>
                       child: activeTab.isLoading
                           ? const Center(child: CircularProgressIndicator())
                           : activeTab.error != null
-                              ? _ErrorView(message: activeTab.error!)
-                              : activeTab.isDiff
-                                  ? _DiffBody(tab: activeTab)
-                                  : _isImage(activeTab.filePath)
-                                      ? _ImagePreview(filePath: activeTab.filePath)
-                                      : _previewPaths.contains(activeTab.filePath)
-                                          ? (_isSvg(activeTab.filePath)
-                                              ? _SvgPreview(filePath: activeTab.filePath)
-                                              : _MarkdownPreview(content: activeTab.content ?? ''))
-                                          : _EditorBody(key: ValueKey(activeTab.filePath), tab: activeTab, codeController: controller!, fontSizeNotifier: _fontSizeNotifier),
+                          ? _ErrorView(message: activeTab.error!)
+                          : activeTab.isDiff
+                          ? _DiffBody(tab: activeTab)
+                          : _isImage(activeTab.filePath)
+                          ? _ImagePreview(filePath: activeTab.filePath)
+                          : _previewPaths.contains(activeTab.filePath)
+                          ? (_isSvg(activeTab.filePath)
+                                ? _SvgPreview(filePath: activeTab.filePath)
+                                : _MarkdownPreview(
+                                    content: activeTab.content ?? '',
+                                  ))
+                          : _EditorBody(
+                              key: ValueKey(activeTab.filePath),
+                              tab: activeTab,
+                              codeController: controller!,
+                              fontSizeNotifier: _fontSizeNotifier,
+                            ),
                     ),
                     // Toggle bar: floats at top, fades in/out — hidden in immersive mode.
                     if (!immersive)
                       Positioned(
-                        top: 0, left: 0, right: 0,
+                        top: 0,
+                        left: 0,
+                        right: 0,
                         child: _AnimatedToggleBar(
                           visible: toggleVisible,
                           child: _MarkdownToggleBar(
-                            isPreview: _previewPaths.contains(activeTab.filePath),
+                            isPreview: _previewPaths.contains(
+                              activeTab.filePath,
+                            ),
                             onToggle: () => setState(() {
                               final path = activeTab.filePath;
                               if (_previewPaths.contains(path)) {
@@ -265,7 +292,9 @@ class _FileEditorPanelState extends State<FileEditorPanel>
                               } else {
                                 _previewPaths.add(path);
                               }
-                              SessionPrefs.savePreviewPaths(_previewPaths.toList());
+                              SessionPrefs.savePreviewPaths(
+                                _previewPaths.toList(),
+                              );
                             }),
                           ),
                         ),
@@ -273,7 +302,8 @@ class _FileEditorPanelState extends State<FileEditorPanel>
                     // Immersive-mode exit button (top-right corner).
                     if (immersive && widget.onToggleImmersive != null)
                       Positioned(
-                        top: 8, right: 8,
+                        top: 8,
+                        right: 8,
                         child: _ImmersiveButton(
                           icon: Icons.close_fullscreen_rounded,
                           tooltip: 'Exit focus mode',
@@ -281,9 +311,12 @@ class _FileEditorPanelState extends State<FileEditorPanel>
                         ),
                       ),
                     // Enter-immersive button — shown when in a visual preview and not already immersive.
-                    if (!immersive && isVisualPreview && widget.onToggleImmersive != null)
+                    if (!immersive &&
+                        isVisualPreview &&
+                        widget.onToggleImmersive != null)
                       Positioned(
-                        bottom: 8, right: 8,
+                        bottom: 8,
+                        right: 8,
                         child: _ImmersiveButton(
                           icon: Icons.open_in_full_rounded,
                           tooltip: 'Focus mode — hide chrome',
@@ -308,7 +341,11 @@ class _FileEditorPanelState extends State<FileEditorPanel>
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.code, size: 40, color: AppColors.textMuted.withAlpha(60)),
+            Icon(
+              Icons.code,
+              size: 40,
+              color: AppColors.textMuted.withAlpha(60),
+            ),
             const SizedBox(height: 12),
             const Text(
               'Open a file to edit',
@@ -319,6 +356,7 @@ class _FileEditorPanelState extends State<FileEditorPanel>
       ),
     );
   }
+
   static bool _isMarkdown(String filePath) {
     final ext = filePath.split('.').last.toLowerCase();
     return ext == 'md' || ext == 'mdx' || ext == 'markdown';
@@ -326,10 +364,19 @@ class _FileEditorPanelState extends State<FileEditorPanel>
 
   static bool _isImage(String filePath) {
     final ext = filePath.split('.').last.toLowerCase();
-    return const {'png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'ico'}.contains(ext);
+    return const {
+      'png',
+      'jpg',
+      'jpeg',
+      'gif',
+      'webp',
+      'bmp',
+      'ico',
+    }.contains(ext);
   }
 
-  static bool _isSvg(String filePath) => filePath.split('.').last.toLowerCase() == 'svg';
+  static bool _isSvg(String filePath) =>
+      filePath.split('.').last.toLowerCase() == 'svg';
 }
 
 // ── Animated wrapper for the markdown toggle bar ───────────────────────────
@@ -459,7 +506,11 @@ class _ModeButton extends StatelessWidget {
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(icon, size: 11, color: active ? colors.primary : AppColors.textMuted),
+            Icon(
+              icon,
+              size: 11,
+              color: active ? colors.primary : AppColors.textMuted,
+            ),
             const SizedBox(width: 4),
             Text(
               label,
@@ -600,9 +651,7 @@ class _MarkdownPreview extends StatelessWidget {
           ),
           codeblockPadding: const EdgeInsets.all(14),
           blockquoteDecoration: BoxDecoration(
-            border: Border(
-              left: BorderSide(color: colors.primary, width: 3),
-            ),
+            border: Border(left: BorderSide(color: colors.primary, width: 3)),
           ),
           blockquotePadding: const EdgeInsets.only(left: 12),
           blockquote: const TextStyle(
@@ -616,14 +665,22 @@ class _MarkdownPreview extends StatelessWidget {
             fontWeight: FontWeight.w600,
             fontSize: 13,
           ),
-          tableBody: const TextStyle(color: AppColors.textSecondary, fontSize: 13),
-          tableBorder: TableBorder.all(color: AppColors.textMuted.withAlpha(40)),
+          tableBody: const TextStyle(
+            color: AppColors.textSecondary,
+            fontSize: 13,
+          ),
+          tableBorder: TableBorder.all(
+            color: AppColors.textMuted.withAlpha(40),
+          ),
           horizontalRuleDecoration: BoxDecoration(
             border: Border(
               top: BorderSide(color: AppColors.textMuted.withAlpha(60)),
             ),
           ),
-          a: TextStyle(color: colors.primary, decoration: TextDecoration.underline),
+          a: TextStyle(
+            color: colors.primary,
+            decoration: TextDecoration.underline,
+          ),
         ),
       ),
     );
@@ -655,11 +712,27 @@ class _ImagePreview extends StatelessWidget {
             ),
             child: Row(
               children: [
-                Icon(Icons.image_outlined, size: 14, color: AppColors.textMuted),
+                Icon(
+                  Icons.image_outlined,
+                  size: 14,
+                  color: AppColors.textMuted,
+                ),
                 const SizedBox(width: 6),
-                Text(fileName, style: const TextStyle(color: AppColors.textMuted, fontSize: 12)),
+                Text(
+                  fileName,
+                  style: const TextStyle(
+                    color: AppColors.textMuted,
+                    fontSize: 12,
+                  ),
+                ),
                 const SizedBox(width: 6),
-                Text(ext.toUpperCase(), style: const TextStyle(color: AppColors.textMuted, fontSize: 11)),
+                Text(
+                  ext.toUpperCase(),
+                  style: const TextStyle(
+                    color: AppColors.textMuted,
+                    fontSize: 11,
+                  ),
+                ),
               ],
             ),
           ),
@@ -671,7 +744,10 @@ class _ImagePreview extends StatelessWidget {
                 child: Image.file(
                   File(filePath),
                   errorBuilder: (_, __, ___) => const Center(
-                    child: Text('Cannot load image', style: TextStyle(color: AppColors.textMuted)),
+                    child: Text(
+                      'Cannot load image',
+                      style: TextStyle(color: AppColors.textMuted),
+                    ),
                   ),
                 ),
               ),
@@ -698,10 +774,7 @@ class _SvgPreview extends StatelessWidget {
         minScale: 0.1,
         maxScale: 10,
         child: Center(
-          child: SvgPicture.file(
-            File(filePath),
-            fit: BoxFit.contain,
-          ),
+          child: SvgPicture.file(File(filePath), fit: BoxFit.contain),
         ),
       ),
     );
@@ -722,7 +795,9 @@ class _TabBar extends StatelessWidget {
       height: 36,
       decoration: BoxDecoration(
         color: colors.surface,
-        border: Border(bottom: BorderSide(color: const Color(0xFF32327A), width: 1)),
+        border: Border(
+          bottom: BorderSide(color: const Color(0xFF32327A), width: 1),
+        ),
       ),
       child: Row(
         children: [
@@ -867,7 +942,12 @@ class _ErrorView extends StatelessWidget {
 // ── Editor body (StatefulWidget) ────────────────────────────────────────────
 
 class _EditorBody extends StatefulWidget {
-  const _EditorBody({super.key, required this.tab, required this.codeController, required this.fontSizeNotifier});
+  const _EditorBody({
+    super.key,
+    required this.tab,
+    required this.codeController,
+    required this.fontSizeNotifier,
+  });
   final EditorTab tab;
   final CodeController codeController;
   final ValueNotifier<double> fontSizeNotifier;
@@ -965,11 +1045,11 @@ class _EditorBodyState extends State<_EditorBody> {
   }
 
   static String? _closingBracket(String ch) => switch (ch) {
-        '(' => ')',
-        '[' => ']',
-        '{' => '}',
-        _ => null,
-      };
+    '(' => ')',
+    '[' => ']',
+    '{' => '}',
+    _ => null,
+  };
 
   // ── Git gutter ───────────────────────────────────────────────────────────
 
@@ -977,8 +1057,10 @@ class _EditorBodyState extends State<_EditorBody> {
     final workspacePath = widget.tab.workspacePath;
     if (workspacePath == null || widget.tab.isDiff) return;
     try {
-      final diff =
-          await GitService.instance.getDiff(workspacePath, widget.tab.filePath);
+      final diff = await GitService.instance.getDiff(
+        workspacePath,
+        widget.tab.filePath,
+      );
       if (mounted && diff.isNotEmpty) {
         setState(() => _gitMarkers = _parseDiffMarkers(diff));
       }
@@ -1055,12 +1137,31 @@ class _EditorBodyState extends State<_EditorBody> {
   }
 
   // ── Find & replace ──────────────────────────────────────────────────────
-  void _openFind() => setState(() { _showFind = true; _showReplace = false; SchedulerBinding.instance.addPostFrameCallback((_) => _findFocus.requestFocus()); });
-  void _openReplace() => setState(() { _showFind = true; _showReplace = true; SchedulerBinding.instance.addPostFrameCallback((_) => _findFocus.requestFocus()); });
-  void _closeFind() => setState(() { _showFind = false; _showReplace = false; });
+  void _openFind() => setState(() {
+    _showFind = true;
+    _showReplace = false;
+    SchedulerBinding.instance.addPostFrameCallback(
+      (_) => _findFocus.requestFocus(),
+    );
+  });
+  void _openReplace() => setState(() {
+    _showFind = true;
+    _showReplace = true;
+    SchedulerBinding.instance.addPostFrameCallback(
+      (_) => _findFocus.requestFocus(),
+    );
+  });
+  void _closeFind() => setState(() {
+    _showFind = false;
+    _showReplace = false;
+  });
 
   void _updateMatches() {
-    if (_findQuery.isEmpty) { _matchOffsets = []; _currentMatch = 0; return; }
+    if (_findQuery.isEmpty) {
+      _matchOffsets = [];
+      _currentMatch = 0;
+      return;
+    }
     final text = widget.codeController.text;
     final q = _caseSensitive ? _findQuery : _findQuery.toLowerCase();
     final src = _caseSensitive ? text : text.toLowerCase();
@@ -1079,7 +1180,10 @@ class _EditorBodyState extends State<_EditorBody> {
   void _selectCurrentMatch() {
     if (_matchOffsets.isEmpty) return;
     final off = _matchOffsets[_currentMatch];
-    widget.codeController.selection = TextSelection(baseOffset: off, extentOffset: off + _findQuery.length);
+    widget.codeController.selection = TextSelection(
+      baseOffset: off,
+      extentOffset: off + _findQuery.length,
+    );
   }
 
   void _findNext() {
@@ -1090,7 +1194,10 @@ class _EditorBodyState extends State<_EditorBody> {
 
   void _findPrev() {
     if (_matchOffsets.isEmpty) return;
-    setState(() => _currentMatch = (_currentMatch - 1 + _matchOffsets.length) % _matchOffsets.length);
+    setState(
+      () => _currentMatch =
+          (_currentMatch - 1 + _matchOffsets.length) % _matchOffsets.length,
+    );
     _selectCurrentMatch();
   }
 
@@ -1099,8 +1206,16 @@ class _EditorBodyState extends State<_EditorBody> {
     final ctrl = widget.codeController;
     final off = _matchOffsets[_currentMatch];
     final text = ctrl.text;
-    final newText = text.substring(0, off) + _replaceCtrl.text + text.substring(off + _findQuery.length);
-    ctrl.value = TextEditingValue(text: newText, selection: TextSelection.collapsed(offset: off + _replaceCtrl.text.length));
+    final newText =
+        text.substring(0, off) +
+        _replaceCtrl.text +
+        text.substring(off + _findQuery.length);
+    ctrl.value = TextEditingValue(
+      text: newText,
+      selection: TextSelection.collapsed(
+        offset: off + _replaceCtrl.text.length,
+      ),
+    );
     _updateMatches();
     setState(() {});
   }
@@ -1109,10 +1224,15 @@ class _EditorBodyState extends State<_EditorBody> {
     if (_findQuery.isEmpty) return;
     final ctrl = widget.codeController;
     final newText = ctrl.text.replaceAll(
-      _caseSensitive ? _findQuery : RegExp(RegExp.escape(_findQuery), caseSensitive: false),
+      _caseSensitive
+          ? _findQuery
+          : RegExp(RegExp.escape(_findQuery), caseSensitive: false),
       _replaceCtrl.text,
     );
-    ctrl.value = TextEditingValue(text: newText, selection: const TextSelection.collapsed(offset: 0));
+    ctrl.value = TextEditingValue(
+      text: newText,
+      selection: const TextSelection.collapsed(offset: 0),
+    );
     _updateMatches();
     setState(() {});
   }
@@ -1130,14 +1250,21 @@ class _EditorBodyState extends State<_EditorBody> {
     String newLine;
     int delta;
     if (trimmed.startsWith(prefix)) {
-      newLine = lineContent.substring(0, indent) + trimmed.substring(prefix.length);
+      newLine =
+          lineContent.substring(0, indent) + trimmed.substring(prefix.length);
       delta = -prefix.length;
     } else {
       newLine = lineContent.substring(0, indent) + prefix + trimmed;
       delta = prefix.length;
     }
-    final newText = text.substring(0, r.start) + newLine + text.substring(r.end);
-    ctrl.value = TextEditingValue(text: newText, selection: TextSelection.collapsed(offset: (sel.start + delta).clamp(r.start, r.start + newLine.length)));
+    final newText =
+        text.substring(0, r.start) + newLine + text.substring(r.end);
+    ctrl.value = TextEditingValue(
+      text: newText,
+      selection: TextSelection.collapsed(
+        offset: (sel.start + delta).clamp(r.start, r.start + newLine.length),
+      ),
+    );
   }
 
   void _duplicateLine() {
@@ -1145,8 +1272,14 @@ class _EditorBodyState extends State<_EditorBody> {
     final text = ctrl.text;
     final r = _lineRange(text, ctrl.selection.start);
     final lineContent = text.substring(r.start, r.end);
-    final newText = '${text.substring(0, r.end)}\n$lineContent${text.substring(r.end)}';
-    ctrl.value = TextEditingValue(text: newText, selection: TextSelection.collapsed(offset: r.end + 1 + (ctrl.selection.start - r.start)));
+    final newText =
+        '${text.substring(0, r.end)}\n$lineContent${text.substring(r.end)}';
+    ctrl.value = TextEditingValue(
+      text: newText,
+      selection: TextSelection.collapsed(
+        offset: r.end + 1 + (ctrl.selection.start - r.start),
+      ),
+    );
   }
 
   void _deleteLine() {
@@ -1164,7 +1297,12 @@ class _EditorBodyState extends State<_EditorBody> {
     } else {
       return;
     }
-    ctrl.value = TextEditingValue(text: newText, selection: TextSelection.collapsed(offset: newCursor.clamp(0, newText.length)));
+    ctrl.value = TextEditingValue(
+      text: newText,
+      selection: TextSelection.collapsed(
+        offset: newCursor.clamp(0, newText.length),
+      ),
+    );
   }
 
   void _moveLineUp() {
@@ -1179,7 +1317,12 @@ class _EditorBodyState extends State<_EditorBody> {
     final after = r.end < text.length ? text.substring(r.end) : '';
     final newText = '$before$cur\n$above$after';
     final off = ctrl.selection.start - r.start;
-    ctrl.value = TextEditingValue(text: newText, selection: TextSelection.collapsed(offset: prev.start + off.clamp(0, cur.length)));
+    ctrl.value = TextEditingValue(
+      text: newText,
+      selection: TextSelection.collapsed(
+        offset: prev.start + off.clamp(0, cur.length),
+      ),
+    );
   }
 
   void _moveLineDown() {
@@ -1195,7 +1338,12 @@ class _EditorBodyState extends State<_EditorBody> {
     final newText = '$before$below\n$cur$after';
     final off = ctrl.selection.start - r.start;
     final newLineStart = r.start + below.length + 1;
-    ctrl.value = TextEditingValue(text: newText, selection: TextSelection.collapsed(offset: newLineStart + off.clamp(0, cur.length)));
+    ctrl.value = TextEditingValue(
+      text: newText,
+      selection: TextSelection.collapsed(
+        offset: newLineStart + off.clamp(0, cur.length),
+      ),
+    );
   }
 
   void _indentLine() {
@@ -1205,7 +1353,9 @@ class _EditorBodyState extends State<_EditorBody> {
     const sp = '  ';
     ctrl.value = TextEditingValue(
       text: text.substring(0, r.start) + sp + text.substring(r.start),
-      selection: TextSelection.collapsed(offset: ctrl.selection.start + sp.length),
+      selection: TextSelection.collapsed(
+        offset: ctrl.selection.start + sp.length,
+      ),
     );
   }
 
@@ -1214,11 +1364,23 @@ class _EditorBodyState extends State<_EditorBody> {
     final text = ctrl.text;
     final r = _lineRange(text, ctrl.selection.start);
     final line = text.substring(r.start, r.end);
-    final strip = line.startsWith('  ') ? 2 : line.startsWith(' ') ? 1 : 0;
+    final strip = line.startsWith('  ')
+        ? 2
+        : line.startsWith(' ')
+        ? 1
+        : 0;
     if (strip == 0) return;
     ctrl.value = TextEditingValue(
-      text: text.substring(0, r.start) + line.substring(strip) + text.substring(r.end),
-      selection: TextSelection.collapsed(offset: (ctrl.selection.start - strip).clamp(r.start, text.length - strip)),
+      text:
+          text.substring(0, r.start) +
+          line.substring(strip) +
+          text.substring(r.end),
+      selection: TextSelection.collapsed(
+        offset: (ctrl.selection.start - strip).clamp(
+          r.start,
+          text.length - strip,
+        ),
+      ),
     );
   }
 
@@ -1230,7 +1392,10 @@ class _EditorBodyState extends State<_EditorBody> {
       final result = await Process.run('dart', ['format', '--fix', path]);
       if (result.exitCode == 0 && mounted) {
         final newContent = await File(path).readAsString();
-        widget.codeController.value = TextEditingValue(text: newContent, selection: const TextSelection.collapsed(offset: 0));
+        widget.codeController.value = TextEditingValue(
+          text: newContent,
+          selection: const TextSelection.collapsed(offset: 0),
+        );
         if (mounted) context.read<FileEditorCubit>().updateContent(newContent);
       }
     } catch (_) {}
@@ -1253,25 +1418,45 @@ class _EditorBodyState extends State<_EditorBody> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text('Go to Line', style: TextStyle(color: AppColors.textPrimary, fontSize: 14, fontWeight: FontWeight.w600)),
+              const Text(
+                'Go to Line',
+                style: TextStyle(
+                  color: AppColors.textPrimary,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
               const SizedBox(height: 12),
               TextField(
                 controller: inputCtrl,
                 autofocus: true,
                 keyboardType: TextInputType.number,
-                style: const TextStyle(color: AppColors.textPrimary, fontSize: 13),
+                style: const TextStyle(
+                  color: AppColors.textPrimary,
+                  fontSize: 13,
+                ),
                 decoration: InputDecoration(
                   hintText: '1 – $lineCount',
                   hintStyle: const TextStyle(color: AppColors.textMuted),
-                  border: const OutlineInputBorder(borderSide: BorderSide(color: Color(0xFF2A2A4E))),
-                  enabledBorder: const OutlineInputBorder(borderSide: BorderSide(color: Color(0xFF2A2A4E))),
-                  focusedBorder: const OutlineInputBorder(borderSide: BorderSide(color: Color(0xFF7C3AED))),
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  border: const OutlineInputBorder(
+                    borderSide: BorderSide(color: Color(0xFF2A2A4E)),
+                  ),
+                  enabledBorder: const OutlineInputBorder(
+                    borderSide: BorderSide(color: Color(0xFF2A2A4E)),
+                  ),
+                  focusedBorder: const OutlineInputBorder(
+                    borderSide: BorderSide(color: Color(0xFF7C3AED)),
+                  ),
+                  contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 8,
+                  ),
                   isDense: true,
                 ),
                 onSubmitted: (v) {
                   final n = int.tryParse(v);
-                  if (n != null && n >= 1 && n <= lineCount) _jumpToLine(ctrl, n);
+                  if (n != null && n >= 1 && n <= lineCount)
+                    _jumpToLine(ctrl, n);
                   Navigator.of(dctx).pop();
                 },
               ),
@@ -1289,7 +1474,9 @@ class _EditorBodyState extends State<_EditorBody> {
     for (int i = 0; i < lineNumber - 1 && i < lines.length; i++) {
       offset += lines[i].length + 1;
     }
-    ctrl.selection = TextSelection.collapsed(offset: offset.clamp(0, ctrl.text.length));
+    ctrl.selection = TextSelection.collapsed(
+      offset: offset.clamp(0, ctrl.text.length),
+    );
   }
 
   // ── Outline toggle ──────────────────────────────────────────────────────
@@ -1304,17 +1491,28 @@ class _EditorBodyState extends State<_EditorBody> {
     return CallbackShortcuts(
       bindings: <ShortcutActivator, VoidCallback>{
         const SingleActivator(LogicalKeyboardKey.keyF, meta: true): _openFind,
-        const SingleActivator(LogicalKeyboardKey.keyH, meta: true): _openReplace,
-        const SingleActivator(LogicalKeyboardKey.slash, meta: true): _toggleComment,
-        const SingleActivator(LogicalKeyboardKey.keyD, meta: true): _duplicateLine,
-        const SingleActivator(LogicalKeyboardKey.keyK, meta: true, shift: true): _deleteLine,
-        const SingleActivator(LogicalKeyboardKey.arrowUp, alt: true): _moveLineUp,
-        const SingleActivator(LogicalKeyboardKey.arrowDown, alt: true): _moveLineDown,
-        const SingleActivator(LogicalKeyboardKey.bracketRight, meta: true): _indentLine,
-        const SingleActivator(LogicalKeyboardKey.bracketLeft, meta: true): _outdentLine,
-        const SingleActivator(LogicalKeyboardKey.keyG, meta: true): () => _showGoToLine(context),
-        const SingleActivator(LogicalKeyboardKey.keyF, meta: true, shift: true): _formatDocument,
-        const SingleActivator(LogicalKeyboardKey.keyO, meta: true, shift: true): _toggleOutline,
+        const SingleActivator(LogicalKeyboardKey.keyH, meta: true):
+            _openReplace,
+        const SingleActivator(LogicalKeyboardKey.slash, meta: true):
+            _toggleComment,
+        const SingleActivator(LogicalKeyboardKey.keyD, meta: true):
+            _duplicateLine,
+        const SingleActivator(LogicalKeyboardKey.keyK, meta: true, shift: true):
+            _deleteLine,
+        const SingleActivator(LogicalKeyboardKey.arrowUp, alt: true):
+            _moveLineUp,
+        const SingleActivator(LogicalKeyboardKey.arrowDown, alt: true):
+            _moveLineDown,
+        const SingleActivator(LogicalKeyboardKey.bracketRight, meta: true):
+            _indentLine,
+        const SingleActivator(LogicalKeyboardKey.bracketLeft, meta: true):
+            _outdentLine,
+        const SingleActivator(LogicalKeyboardKey.keyG, meta: true): () =>
+            _showGoToLine(context),
+        const SingleActivator(LogicalKeyboardKey.keyF, meta: true, shift: true):
+            _formatDocument,
+        const SingleActivator(LogicalKeyboardKey.keyO, meta: true, shift: true):
+            _toggleOutline,
         const SingleActivator(LogicalKeyboardKey.escape): _closeFind,
       },
       child: Focus(
@@ -1345,9 +1543,19 @@ class _EditorBodyState extends State<_EditorBody> {
                 onPrev: _findPrev,
                 onReplace: _replaceOne,
                 onReplaceAll: _replaceAll,
-                onToggleCase: () { setState(() => _caseSensitive = !_caseSensitive); _updateMatches(); setState(() {}); },
-                onToggleReplace: () => setState(() => _showReplace = !_showReplace),
-                onQueryChanged: (q) { setState(() { _findQuery = q; _updateMatches(); }); },
+                onToggleCase: () {
+                  setState(() => _caseSensitive = !_caseSensitive);
+                  _updateMatches();
+                  setState(() {});
+                },
+                onToggleReplace: () =>
+                    setState(() => _showReplace = !_showReplace),
+                onQueryChanged: (q) {
+                  setState(() {
+                    _findQuery = q;
+                    _updateMatches();
+                  });
+                },
               ),
             Expanded(
               child: Row(
@@ -1363,8 +1571,10 @@ class _EditorBodyState extends State<_EditorBody> {
                               return NotificationListener<ScrollNotification>(
                                 onNotification: (n) {
                                   if (n.metrics.axis == Axis.vertical) {
-                                    setState(() => _codeScrollOffset =
-                                        n.metrics.pixels);
+                                    setState(
+                                      () =>
+                                          _codeScrollOffset = n.metrics.pixels,
+                                    );
                                   }
                                   return false;
                                 },
@@ -1377,16 +1587,18 @@ class _EditorBodyState extends State<_EditorBody> {
                                         expands: true,
                                         wrap: _wordWrap,
                                         textStyle: TextStyle(
-                                            fontFamily: 'monospace',
-                                            fontSize: fontSize,
-                                            height: 1.5),
+                                          fontFamily: 'monospace',
+                                          fontSize: fontSize,
+                                          height: 1.5,
+                                        ),
                                         background: colors.background,
                                         gutterStyle: GutterStyle(
                                           width: 72,
                                           margin: 8,
                                           textStyle: const TextStyle(
-                                              color: AppColors.textMuted,
-                                              fontFamily: 'monospace'),
+                                            color: AppColors.textMuted,
+                                            fontFamily: 'monospace',
+                                          ),
                                           background: colors.surfaceElevated,
                                         ),
                                       ),
@@ -1410,7 +1622,10 @@ class _EditorBodyState extends State<_EditorBody> {
                             },
                           ),
                         ),
-                        _EditorStatusBar(controller: widget.codeController, language: language),
+                        _EditorStatusBar(
+                          controller: widget.codeController,
+                          language: language,
+                        ),
                       ],
                     ),
                   ),
@@ -1418,7 +1633,8 @@ class _EditorBodyState extends State<_EditorBody> {
                     _SymbolOutline(
                       content: widget.codeController.text,
                       filePath: widget.tab.filePath,
-                      onJumpToLine: (line) => _jumpToLine(widget.codeController, line),
+                      onJumpToLine: (line) =>
+                          _jumpToLine(widget.codeController, line),
                     ),
                 ],
               ),
@@ -1430,7 +1646,10 @@ class _EditorBodyState extends State<_EditorBody> {
   }
 
   static const Map<String, TextStyle> _darkTheme = {
-    'root': TextStyle(color: Color(0xFFABB2BF), backgroundColor: Colors.transparent),
+    'root': TextStyle(
+      color: Color(0xFFABB2BF),
+      backgroundColor: Colors.transparent,
+    ),
     'comment': TextStyle(color: Color(0xFF5C6370), fontStyle: FontStyle.italic),
     'keyword': TextStyle(color: Color(0xFFC678DD)),
     'built_in': TextStyle(color: Color(0xFFE5C07B)),
@@ -1446,7 +1665,10 @@ class _EditorBodyState extends State<_EditorBody> {
     'title': TextStyle(color: Color(0xFF61AFEF)),
     'params': TextStyle(color: Color(0xFFABB2BF)),
     'formula': TextStyle(color: Color(0xFF98C379)),
-    'comment-doc': TextStyle(color: Color(0xFF5C6370), fontStyle: FontStyle.italic),
+    'comment-doc': TextStyle(
+      color: Color(0xFF5C6370),
+      fontStyle: FontStyle.italic,
+    ),
     'meta': TextStyle(color: Color(0xFF56B6C2)),
     'tag': TextStyle(color: Color(0xFFE06C75)),
     'name': TextStyle(color: Color(0xFFE06C75)),
@@ -1457,7 +1679,10 @@ class _EditorBodyState extends State<_EditorBody> {
     'code': TextStyle(color: Color(0xFF98C379)),
     'emphasis': TextStyle(fontStyle: FontStyle.italic),
     'strong': TextStyle(fontWeight: FontWeight.bold),
-    'link': TextStyle(color: Color(0xFF56B6C2), decoration: TextDecoration.underline),
+    'link': TextStyle(
+      color: Color(0xFF56B6C2),
+      decoration: TextDecoration.underline,
+    ),
     'section': TextStyle(color: Color(0xFFE06C75), fontWeight: FontWeight.bold),
     'selector-tag': TextStyle(color: Color(0xFFE06C75)),
     'selector-id': TextStyle(color: Color(0xFF61AFEF)),
@@ -1508,7 +1733,7 @@ class _GutterPaint extends CustomPainter {
   final double lineHeight;
   final double scrollOffset;
 
-  static const _added = Color(0xFF00FF9F);   // neon green
+  static const _added = Color(0xFF00FF9F); // neon green
   static const _removed = Color(0xFFFF4F6A); // neon red
 
   @override
@@ -1522,7 +1747,12 @@ class _GutterPaint extends CustomPainter {
       final bottom = top + lineHeight;
       if (bottom < 0 || top > size.height) continue;
       canvas.drawRect(
-        Rect.fromLTRB(0, top.clamp(0, size.height), 3, bottom.clamp(0, size.height)),
+        Rect.fromLTRB(
+          0,
+          top.clamp(0, size.height),
+          3,
+          bottom.clamp(0, size.height),
+        ),
         entry.value == _GutterMarkerType.added ? addedPaint : removedPaint,
       );
     }
@@ -1530,7 +1760,9 @@ class _GutterPaint extends CustomPainter {
 
   @override
   bool shouldRepaint(_GutterPaint old) =>
-      old.scrollOffset != scrollOffset || old.markers != markers || old.lineHeight != lineHeight;
+      old.scrollOffset != scrollOffset ||
+      old.markers != markers ||
+      old.lineHeight != lineHeight;
 }
 
 // ── Editor toolbar ───────────────────────────────────────────────────────────
@@ -1560,18 +1792,46 @@ class _EditorToolbar extends StatelessWidget {
     final colors = context.appColors;
     return Container(
       height: 28,
-      decoration: BoxDecoration(color: colors.surface, border: Border(bottom: BorderSide(color: colors.border))),
+      decoration: BoxDecoration(
+        color: colors.surface,
+        border: Border(bottom: BorderSide(color: colors.border)),
+      ),
       child: Row(
         children: [
-          _ToolbarBtn(icon: Icons.search, tooltip: 'Find  ⌘F', onTap: onOpenFind),
-          _ToolbarBtn(icon: Icons.wrap_text, tooltip: 'Word Wrap', active: wordWrap, onTap: onToggleWordWrap),
-          _ToolbarBtn(icon: Icons.auto_fix_high, tooltip: 'Format  ⌘⇧F', onTap: onFormat),
-          _ToolbarBtn(icon: Icons.last_page, tooltip: 'Go to Line  ⌘G', onTap: onGoToLine),
-          _ToolbarBtn(icon: Icons.account_tree_outlined, tooltip: 'Outline  ⌘⇧O', active: showOutline, onTap: onToggleOutline),
+          _ToolbarBtn(
+            icon: Icons.search,
+            tooltip: 'Find  ⌘F',
+            onTap: onOpenFind,
+          ),
+          _ToolbarBtn(
+            icon: Icons.wrap_text,
+            tooltip: 'Word Wrap',
+            active: wordWrap,
+            onTap: onToggleWordWrap,
+          ),
+          _ToolbarBtn(
+            icon: Icons.auto_fix_high,
+            tooltip: 'Format  ⌘⇧F',
+            onTap: onFormat,
+          ),
+          _ToolbarBtn(
+            icon: Icons.last_page,
+            tooltip: 'Go to Line  ⌘G',
+            onTap: onGoToLine,
+          ),
+          _ToolbarBtn(
+            icon: Icons.account_tree_outlined,
+            tooltip: 'Outline  ⌘⇧O',
+            active: showOutline,
+            onTap: onToggleOutline,
+          ),
           const Spacer(),
           Padding(
             padding: const EdgeInsets.only(right: 10),
-            child: Text(language, style: const TextStyle(color: AppColors.textMuted, fontSize: 10)),
+            child: Text(
+              language,
+              style: const TextStyle(color: AppColors.textMuted, fontSize: 10),
+            ),
           ),
         ],
       ),
@@ -1580,7 +1840,12 @@ class _EditorToolbar extends StatelessWidget {
 }
 
 class _ToolbarBtn extends StatelessWidget {
-  const _ToolbarBtn({required this.icon, required this.tooltip, required this.onTap, this.active = false});
+  const _ToolbarBtn({
+    required this.icon,
+    required this.tooltip,
+    required this.onTap,
+    this.active = false,
+  });
   final IconData icon;
   final String tooltip;
   final VoidCallback onTap;
@@ -1597,7 +1862,11 @@ class _ToolbarBtn extends StatelessWidget {
           width: 28,
           height: 28,
           color: active ? colors.primary.withAlpha(40) : Colors.transparent,
-          child: Icon(icon, size: 14, color: active ? colors.primaryLight : AppColors.textMuted),
+          child: Icon(
+            icon,
+            size: 14,
+            color: active ? colors.primaryLight : AppColors.textMuted,
+          ),
         ),
       ),
     );
@@ -1645,7 +1914,10 @@ class _FindBar extends StatelessWidget {
     final colors = context.appColors;
     final hasQuery = findCtrl.text.isNotEmpty;
     return Container(
-      decoration: BoxDecoration(color: colors.surfaceElevated, border: Border(bottom: BorderSide(color: colors.border))),
+      decoration: BoxDecoration(
+        color: colors.surfaceElevated,
+        border: Border(bottom: BorderSide(color: colors.border)),
+      ),
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       child: Column(
         mainAxisSize: MainAxisSize.min,
@@ -1661,26 +1933,62 @@ class _FindBar extends StatelessWidget {
                   controller: findCtrl,
                   focusNode: findFocus,
                   onChanged: onQueryChanged,
-                  style: const TextStyle(color: AppColors.textPrimary, fontSize: 12),
+                  style: const TextStyle(
+                    color: AppColors.textPrimary,
+                    fontSize: 12,
+                  ),
                   decoration: const InputDecoration(
                     hintText: 'Find',
-                    hintStyle: TextStyle(color: AppColors.textMuted, fontSize: 12),
+                    hintStyle: TextStyle(
+                      color: AppColors.textMuted,
+                      fontSize: 12,
+                    ),
                     border: InputBorder.none,
-                    contentPadding: EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                    contentPadding: EdgeInsets.symmetric(
+                      horizontal: 4,
+                      vertical: 2,
+                    ),
                     isDense: true,
                   ),
                 ),
               ),
               const SizedBox(width: 6),
               if (hasQuery && matchCount > 0)
-                Text('${currentMatch + 1} / $matchCount', style: const TextStyle(color: AppColors.textMuted, fontSize: 10)),
+                Text(
+                  '${currentMatch + 1} / $matchCount',
+                  style: const TextStyle(
+                    color: AppColors.textMuted,
+                    fontSize: 10,
+                  ),
+                ),
               if (hasQuery && matchCount == 0)
-                const Text('No results', style: TextStyle(color: Colors.redAccent, fontSize: 10)),
+                const Text(
+                  'No results',
+                  style: TextStyle(color: Colors.redAccent, fontSize: 10),
+                ),
               const SizedBox(width: 4),
-              _FBBtn(icon: Icons.text_fields, tooltip: 'Case sensitive', active: caseSensitive, onTap: onToggleCase),
-              _FBBtn(icon: Icons.keyboard_arrow_up, tooltip: 'Previous  ⇧Enter', onTap: onPrev),
-              _FBBtn(icon: Icons.keyboard_arrow_down, tooltip: 'Next  Enter', onTap: onNext),
-              _FBBtn(icon: Icons.find_replace, tooltip: 'Toggle Replace  ⌘H', active: showReplace, onTap: onToggleReplace),
+              _FBBtn(
+                icon: Icons.text_fields,
+                tooltip: 'Case sensitive',
+                active: caseSensitive,
+                onTap: onToggleCase,
+              ),
+              _FBBtn(
+                icon: Icons.keyboard_arrow_up,
+                tooltip: 'Previous  ⇧Enter',
+                onTap: onPrev,
+              ),
+              _FBBtn(
+                icon: Icons.keyboard_arrow_down,
+                tooltip: 'Next  Enter',
+                onTap: onNext,
+              ),
+              _FBBtn(
+                icon: Icons.find_replace,
+                tooltip: 'Toggle Replace  ⌘H',
+                active: showReplace,
+                onTap: onToggleReplace,
+              ),
               const Spacer(),
               _FBBtn(icon: Icons.close, tooltip: 'Close  Esc', onTap: onClose),
             ],
@@ -1696,12 +2004,21 @@ class _FindBar extends StatelessWidget {
                   height: 24,
                   child: TextField(
                     controller: replaceCtrl,
-                    style: const TextStyle(color: AppColors.textPrimary, fontSize: 12),
+                    style: const TextStyle(
+                      color: AppColors.textPrimary,
+                      fontSize: 12,
+                    ),
                     decoration: const InputDecoration(
                       hintText: 'Replace',
-                      hintStyle: TextStyle(color: AppColors.textMuted, fontSize: 12),
+                      hintStyle: TextStyle(
+                        color: AppColors.textMuted,
+                        fontSize: 12,
+                      ),
                       border: InputBorder.none,
-                      contentPadding: EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                      contentPadding: EdgeInsets.symmetric(
+                        horizontal: 4,
+                        vertical: 2,
+                      ),
                       isDense: true,
                     ),
                   ),
@@ -1720,7 +2037,12 @@ class _FindBar extends StatelessWidget {
 }
 
 class _FBBtn extends StatelessWidget {
-  const _FBBtn({required this.icon, required this.tooltip, required this.onTap, this.active = false});
+  const _FBBtn({
+    required this.icon,
+    required this.tooltip,
+    required this.onTap,
+    this.active = false,
+  });
   final IconData icon;
   final String tooltip;
   final VoidCallback onTap;
@@ -1737,8 +2059,15 @@ class _FBBtn extends StatelessWidget {
         child: Container(
           width: 22,
           height: 22,
-          decoration: BoxDecoration(color: active ? colors.primary.withAlpha(60) : Colors.transparent, borderRadius: BorderRadius.circular(4)),
-          child: Icon(icon, size: 13, color: active ? colors.primaryLight : AppColors.textMuted),
+          decoration: BoxDecoration(
+            color: active ? colors.primary.withAlpha(60) : Colors.transparent,
+            borderRadius: BorderRadius.circular(4),
+          ),
+          child: Icon(
+            icon,
+            size: 13,
+            color: active ? colors.primaryLight : AppColors.textMuted,
+          ),
         ),
       ),
     );
@@ -1758,8 +2087,14 @@ class _TextBtn extends StatelessWidget {
       borderRadius: BorderRadius.circular(4),
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-        decoration: BoxDecoration(border: Border.all(color: colors.border), borderRadius: BorderRadius.circular(4)),
-        child: Text(label, style: const TextStyle(color: AppColors.textMuted, fontSize: 11)),
+        decoration: BoxDecoration(
+          border: Border.all(color: colors.border),
+          borderRadius: BorderRadius.circular(4),
+        ),
+        child: Text(
+          label,
+          style: const TextStyle(color: AppColors.textMuted, fontSize: 11),
+        ),
       ),
     );
   }
@@ -1800,7 +2135,11 @@ class _EditorStatusBarState extends State<_EditorStatusBar> {
     final lines = before.split('\n');
     final l = lines.length;
     final c = lines.last.length + 1;
-    if (l != _line || c != _col) setState(() { _line = l; _col = c; });
+    if (l != _line || c != _col)
+      setState(() {
+        _line = l;
+        _col = c;
+      });
   }
 
   @override
@@ -1808,17 +2147,32 @@ class _EditorStatusBarState extends State<_EditorStatusBar> {
     final colors = context.appColors;
     return Container(
       height: 22,
-      decoration: BoxDecoration(color: colors.surfaceElevated, border: Border(top: BorderSide(color: colors.border))),
+      decoration: BoxDecoration(
+        color: colors.surfaceElevated,
+        border: Border(top: BorderSide(color: colors.border)),
+      ),
       child: Row(
         children: [
           const SizedBox(width: 10),
-          Text('Ln $_line, Col $_col', style: const TextStyle(color: AppColors.textMuted, fontSize: 10)),
+          Text(
+            'Ln $_line, Col $_col',
+            style: const TextStyle(color: AppColors.textMuted, fontSize: 10),
+          ),
           _SBar(),
-          const Text('UTF-8', style: TextStyle(color: AppColors.textMuted, fontSize: 10)),
+          const Text(
+            'UTF-8',
+            style: TextStyle(color: AppColors.textMuted, fontSize: 10),
+          ),
           _SBar(),
-          const Text('LF', style: TextStyle(color: AppColors.textMuted, fontSize: 10)),
+          const Text(
+            'LF',
+            style: TextStyle(color: AppColors.textMuted, fontSize: 10),
+          ),
           _SBar(),
-          Text(widget.language, style: const TextStyle(color: AppColors.textMuted, fontSize: 10)),
+          Text(
+            widget.language,
+            style: const TextStyle(color: AppColors.textMuted, fontSize: 10),
+          ),
           const SizedBox(width: 8),
         ],
       ),
@@ -1829,14 +2183,23 @@ class _EditorStatusBarState extends State<_EditorStatusBar> {
 class _SBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
-    return Container(width: 1, height: 12, margin: const EdgeInsets.symmetric(horizontal: 8), color: const Color(0xFF2A2A4E));
+    return Container(
+      width: 1,
+      height: 12,
+      margin: const EdgeInsets.symmetric(horizontal: 8),
+      color: const Color(0xFF2A2A4E),
+    );
   }
 }
 
 // ── Symbol outline ───────────────────────────────────────────────────────────
 
 class _OutlineSymbol {
-  const _OutlineSymbol({required this.name, required this.line, required this.isClass});
+  const _OutlineSymbol({
+    required this.name,
+    required this.line,
+    required this.isClass,
+  });
   final String name;
   final int line;
   final bool isClass;
@@ -1851,33 +2214,86 @@ List<_OutlineSymbol> _parseSymbols(String content, String filePath) {
     final t = line.trim();
     switch (ext) {
       case 'dart':
-        if (RegExp(r'^(abstract\s+)?(?:class|enum|mixin|extension)\s+\w+').hasMatch(t)) {
-          final m = RegExp(r'(?:class|enum|mixin|extension)\s+(\w+)').firstMatch(t);
-          if (m != null) symbols.add(_OutlineSymbol(name: m.group(1)!, line: i + 1, isClass: true));
+        if (RegExp(
+          r'^(abstract\s+)?(?:class|enum|mixin|extension)\s+\w+',
+        ).hasMatch(t)) {
+          final m = RegExp(
+            r'(?:class|enum|mixin|extension)\s+(\w+)',
+          ).firstMatch(t);
+          if (m != null)
+            symbols.add(
+              _OutlineSymbol(name: m.group(1)!, line: i + 1, isClass: true),
+            );
         } else {
-          final m = RegExp(r'(?:Future(?:<[^>]*>)?|Widget|void|String|int|bool|double|List|Map|dynamic)\s+(\w+)\s*[\(<]').firstMatch(line);
-          if (m != null && !['if', 'for', 'while', 'switch', 'return'].contains(m.group(1))) {
-            symbols.add(_OutlineSymbol(name: '${m.group(1)!}()', line: i + 1, isClass: false));
+          final m = RegExp(
+            r'(?:Future(?:<[^>]*>)?|Widget|void|String|int|bool|double|List|Map|dynamic)\s+(\w+)\s*[\(<]',
+          ).firstMatch(line);
+          if (m != null &&
+              ![
+                'if',
+                'for',
+                'while',
+                'switch',
+                'return',
+              ].contains(m.group(1))) {
+            symbols.add(
+              _OutlineSymbol(
+                name: '${m.group(1)!}()',
+                line: i + 1,
+                isClass: false,
+              ),
+            );
           }
         }
       case 'js' || 'ts' || 'jsx' || 'tsx':
         if (t.startsWith('class ')) {
           final m = RegExp(r'class\s+(\w+)').firstMatch(t);
-          if (m != null) symbols.add(_OutlineSymbol(name: m.group(1)!, line: i + 1, isClass: true));
-        } else if (RegExp(r'^(?:export\s+)?(?:async\s+)?function\s+\w+').hasMatch(t)) {
+          if (m != null)
+            symbols.add(
+              _OutlineSymbol(name: m.group(1)!, line: i + 1, isClass: true),
+            );
+        } else if (RegExp(
+          r'^(?:export\s+)?(?:async\s+)?function\s+\w+',
+        ).hasMatch(t)) {
           final m = RegExp(r'function\s+(\w+)').firstMatch(t);
-          if (m != null) symbols.add(_OutlineSymbol(name: '${m.group(1)!}()', line: i + 1, isClass: false));
-        } else if (RegExp(r'^(?:const|let|var)\s+\w+\s*=\s*(?:async\s+)?\(').hasMatch(t)) {
+          if (m != null)
+            symbols.add(
+              _OutlineSymbol(
+                name: '${m.group(1)!}()',
+                line: i + 1,
+                isClass: false,
+              ),
+            );
+        } else if (RegExp(
+          r'^(?:const|let|var)\s+\w+\s*=\s*(?:async\s+)?\(',
+        ).hasMatch(t)) {
           final m = RegExp(r'(?:const|let|var)\s+(\w+)').firstMatch(t);
-          if (m != null) symbols.add(_OutlineSymbol(name: '${m.group(1)!}()', line: i + 1, isClass: false));
+          if (m != null)
+            symbols.add(
+              _OutlineSymbol(
+                name: '${m.group(1)!}()',
+                line: i + 1,
+                isClass: false,
+              ),
+            );
         }
       case 'py':
         if (t.startsWith('class ')) {
           final m = RegExp(r'class\s+(\w+)').firstMatch(t);
-          if (m != null) symbols.add(_OutlineSymbol(name: m.group(1)!, line: i + 1, isClass: true));
+          if (m != null)
+            symbols.add(
+              _OutlineSymbol(name: m.group(1)!, line: i + 1, isClass: true),
+            );
         } else if (t.startsWith('def ') || t.startsWith('async def ')) {
           final m = RegExp(r'def\s+(\w+)').firstMatch(t);
-          if (m != null) symbols.add(_OutlineSymbol(name: '${m.group(1)!}()', line: i + 1, isClass: false));
+          if (m != null)
+            symbols.add(
+              _OutlineSymbol(
+                name: '${m.group(1)!}()',
+                line: i + 1,
+                isClass: false,
+              ),
+            );
         }
     }
   }
@@ -1885,7 +2301,11 @@ List<_OutlineSymbol> _parseSymbols(String content, String filePath) {
 }
 
 class _SymbolOutline extends StatelessWidget {
-  const _SymbolOutline({required this.content, required this.filePath, required this.onJumpToLine});
+  const _SymbolOutline({
+    required this.content,
+    required this.filePath,
+    required this.onJumpToLine,
+  });
   final String content;
   final String filePath;
   final void Function(int line) onJumpToLine;
@@ -1896,19 +2316,42 @@ class _SymbolOutline extends StatelessWidget {
     final symbols = _parseSymbols(content, filePath);
     return Container(
       width: 185,
-      decoration: BoxDecoration(color: colors.surfaceElevated, border: Border(left: BorderSide(color: colors.border))),
+      decoration: BoxDecoration(
+        color: colors.surfaceElevated,
+        border: Border(left: BorderSide(color: colors.border)),
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Container(
             height: 28,
             padding: const EdgeInsets.symmetric(horizontal: 10),
-            decoration: BoxDecoration(border: Border(bottom: BorderSide(color: colors.border))),
-            child: const Align(alignment: Alignment.centerLeft, child: Text('Outline', style: TextStyle(color: AppColors.textMuted, fontSize: 11, fontWeight: FontWeight.w600))),
+            decoration: BoxDecoration(
+              border: Border(bottom: BorderSide(color: colors.border)),
+            ),
+            child: const Align(
+              alignment: Alignment.centerLeft,
+              child: Text(
+                'Outline',
+                style: TextStyle(
+                  color: AppColors.textMuted,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
           ),
           Expanded(
             child: symbols.isEmpty
-                ? const Center(child: Text('No symbols', style: TextStyle(color: AppColors.textMuted, fontSize: 11)))
+                ? const Center(
+                    child: Text(
+                      'No symbols',
+                      style: TextStyle(
+                        color: AppColors.textMuted,
+                        fontSize: 11,
+                      ),
+                    ),
+                  )
                 : ListView.builder(
                     itemCount: symbols.length,
                     itemBuilder: (_, i) {
@@ -1916,13 +2359,42 @@ class _SymbolOutline extends StatelessWidget {
                       return InkWell(
                         onTap: () => onJumpToLine(sym.line),
                         child: Padding(
-                          padding: EdgeInsets.only(left: sym.isClass ? 8 : 20, right: 8, top: 3, bottom: 3),
+                          padding: EdgeInsets.only(
+                            left: sym.isClass ? 8 : 20,
+                            right: 8,
+                            top: 3,
+                            bottom: 3,
+                          ),
                           child: Row(
                             children: [
-                              Icon(sym.isClass ? Icons.category_outlined : Icons.functions, size: 11, color: sym.isClass ? const Color(0xFFE5C07B) : const Color(0xFF61AFEF)),
+                              Icon(
+                                sym.isClass
+                                    ? Icons.category_outlined
+                                    : Icons.functions,
+                                size: 11,
+                                color: sym.isClass
+                                    ? const Color(0xFFE5C07B)
+                                    : const Color(0xFF61AFEF),
+                              ),
                               const SizedBox(width: 5),
-                              Expanded(child: Text(sym.name, style: const TextStyle(color: AppColors.textPrimary, fontSize: 11, fontFamily: 'monospace'), overflow: TextOverflow.ellipsis)),
-                              Text('${sym.line}', style: const TextStyle(color: AppColors.textMuted, fontSize: 9)),
+                              Expanded(
+                                child: Text(
+                                  sym.name,
+                                  style: const TextStyle(
+                                    color: AppColors.textPrimary,
+                                    fontSize: 11,
+                                    fontFamily: 'monospace',
+                                  ),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                              Text(
+                                '${sym.line}',
+                                style: const TextStyle(
+                                  color: AppColors.textMuted,
+                                  fontSize: 9,
+                                ),
+                              ),
                             ],
                           ),
                         ),
@@ -1936,8 +2408,6 @@ class _SymbolOutline extends StatelessWidget {
   }
 }
 
-
-
 class _DiffBody extends StatelessWidget {
   const _DiffBody({required this.tab});
   final EditorTab tab;
@@ -1950,7 +2420,11 @@ class _DiffBody extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.difference_outlined, size: 32, color: AppColors.textSecondary),
+            const Icon(
+              Icons.difference_outlined,
+              size: 32,
+              color: AppColors.textSecondary,
+            ),
             const SizedBox(height: 12),
             const Text(
               'No diff available',
@@ -2012,9 +2486,9 @@ class _DiffHunkWidget extends StatelessWidget {
               ),
             ),
           ),
-          ...hunk.lines.where((l) => l.type != DiffLineType.header).map(
-                (line) => _DiffLineWidget(line: line),
-              ),
+          ...hunk.lines
+              .where((l) => l.type != DiffLineType.header)
+              .map((line) => _DiffLineWidget(line: line)),
         ],
       ),
     );

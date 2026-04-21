@@ -1,18 +1,25 @@
-import 'dart:math' show max;
+import 'dart:math' as math show max, min;
 import 'dart:ui' as ui;
 
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:path/path.dart' as p;
+import 'package:yoloit/core/utils/git_init_prompt.dart';
 import 'package:yoloit/features/collaboration/ui/collaboration_button.dart';
+import 'package:yoloit/features/collaboration/bloc/collaboration_cubit.dart';
 import 'package:yoloit/features/editor/bloc/file_editor_cubit.dart';
 import 'package:yoloit/features/editor/bloc/file_editor_state.dart';
 import 'package:yoloit/features/mindmap/bloc/mindmap_cubit.dart';
 import 'package:yoloit/features/mindmap/bloc/mindmap_state.dart';
+import 'package:yoloit/features/mindmap/model/mindmap_graph_builder.dart';
 import 'package:yoloit/features/mindmap/model/mindmap_node_model.dart';
 import 'package:yoloit/features/mindmap/nodes/node_registry.dart';
 import 'package:yoloit/features/mindmap/plugin/mindmap_plugin_registry.dart';
+import 'package:yoloit/features/mindmap/sidebar/show_hide_sidebar.dart';
+import 'package:yoloit/features/mindmap/widgets/canvas_interaction_lock.dart';
 import 'package:yoloit/features/mindmap/widgets/mindmap_connector.dart';
 import 'package:yoloit/features/mindmap/widgets/mindmap_node.dart';
 import 'package:yoloit/features/review/bloc/review_cubit.dart';
@@ -22,7 +29,6 @@ import 'package:yoloit/features/runs/bloc/run_state.dart';
 import 'package:yoloit/features/runs/models/run_session.dart';
 import 'package:yoloit/features/terminal/bloc/terminal_cubit.dart';
 import 'package:yoloit/features/terminal/bloc/terminal_state.dart';
-import 'package:yoloit/features/terminal/models/agent_session.dart';
 import 'package:yoloit/features/workspaces/bloc/workspace_cubit.dart';
 import 'package:yoloit/features/workspaces/bloc/workspace_state.dart';
 
@@ -40,28 +46,47 @@ class _MindMapViewState extends State<MindMapView>
     with TickerProviderStateMixin {
   final _transformCtrl = TransformationController();
   late AnimationController _dashCtrl;
-  late Animation<double>   _dashAnim;
+  late Animation<double> _dashAnim;
 
   // ── Smooth pan animation ──────────────────────────────────────────────────
   late AnimationController _panCtrl;
   Animation<Matrix4>? _panAnim;
+
   /// Tracks which file path was last animated to — avoids re-animating on
   /// content-only updates when the same file is still active.
   String? _lastFocusedFilePath;
+
   /// Set to true after the first successful pan-to-content on open.
   bool _initialPanDone = false;
+
+  /// Viewport size supplied by the canvas LayoutBuilder once it is laid out.
+  Size? _viewportSize;
+
+  /// Called by _MindMapCanvas when its LayoutBuilder resolves the viewport.
+  void _onViewportSize(Size s) {
+    if (s == _viewportSize) return;
+    _viewportSize = s;
+    // If we haven't done the initial fit yet, try now that we have a size.
+    if (!_initialPanDone) {
+      final mm = context.read<MindMapCubit>();
+      if (mm.state.positions.isNotEmpty) {
+        _initialPanDone = true;
+        _fitAllNodes(mm.state.positions, mm.state.sizes);
+      }
+    }
+  }
 
   @override
   void initState() {
     super.initState();
     _dashCtrl = AnimationController(
-      vsync:    this,
+      vsync: this,
       duration: const Duration(milliseconds: 900),
     )..repeat();
     _dashAnim = Tween<double>(begin: 0.0, end: 1.0).animate(_dashCtrl);
 
     _panCtrl = AnimationController(
-      vsync:    this,
+      vsync: this,
       duration: const Duration(milliseconds: 480),
     );
 
@@ -72,11 +97,9 @@ class _MindMapViewState extends State<MindMapView>
       // the mindmap can render their terminals as idle cards.
       final wsState = context.read<WorkspaceCubit>().state;
       if (wsState is WorkspaceLoaded) {
-        await context
-            .read<TerminalCubit>()
-            .loadPersistedMetadataForWorkspaces(
-              wsState.workspaces.map((w) => w.id).toList(),
-            );
+        await context.read<TerminalCubit>().loadPersistedMetadataForWorkspaces(
+          wsState.workspaces.map((w) => w.id).toList(),
+        );
       }
     });
   }
@@ -99,7 +122,7 @@ class _MindMapViewState extends State<MindMapView>
     final screenSize = renderBox.size;
     const editorW = 460.0;
     const editorH = 348.0;
-    final targetX = pos.dx + editorW / 2 - screenSize.width  / 2;
+    final targetX = pos.dx + editorW / 2 - screenSize.width / 2;
     final targetY = pos.dy + editorH / 2 - screenSize.height / 2;
     final scale = _transformCtrl.value.getMaxScaleOnAxis();
     final targetMatrix = Matrix4.identity()
@@ -110,11 +133,14 @@ class _MindMapViewState extends State<MindMapView>
     _panCtrl.stop();
     _panAnim?.removeListener(_applyPanAnim);
 
-    _panAnim = Matrix4Tween(
-      begin: _transformCtrl.value.clone(),
-      end:   targetMatrix,
-    ).animate(CurvedAnimation(parent: _panCtrl, curve: Curves.easeInOutCubic))
-      ..addListener(_applyPanAnim);
+    _panAnim =
+        Matrix4Tween(
+            begin: _transformCtrl.value.clone(),
+            end: targetMatrix,
+          ).animate(
+            CurvedAnimation(parent: _panCtrl, curve: Curves.easeInOutCubic),
+          )
+          ..addListener(_applyPanAnim);
 
     _panCtrl.forward(from: 0.0);
   }
@@ -126,22 +152,23 @@ class _MindMapViewState extends State<MindMapView>
     }
   }
 
-  /// Smoothly reset the view to [Matrix4.identity].
-  /// Pan (and optionally scale) so all nodes are visible on first open.
+  /// Pan and zoom so all nodes are visible. Uses the viewport size from
+  /// [_viewportSize] (supplied by LayoutBuilder) to avoid depending on
+  /// RenderBox which may not be ready on the first frame.
   void _fitAllNodes(Map<String, Offset> positions, Map<String, Size> sizes) {
     if (positions.isEmpty) return;
-    final renderBox = context.findRenderObject() as RenderBox?;
-    if (renderBox == null) return;
-    final screen = renderBox.size;
+    // Use stored LayoutBuilder size; fall back to MediaQuery if not yet set.
+    final screen = _viewportSize ?? MediaQuery.sizeOf(context);
+    if (screen.isEmpty) return;
 
     double minX = double.infinity, minY = double.infinity;
     double maxX = -double.infinity, maxY = -double.infinity;
     for (final e in positions.entries) {
       final pos = e.value;
-      final sz  = sizes[e.key] ?? const Size(200, 150);
+      final sz = sizes[e.key] ?? const Size(220, 160);
       if (pos.dx < minX) minX = pos.dx;
       if (pos.dy < minY) minY = pos.dy;
-      if (pos.dx + sz.width  > maxX) maxX = pos.dx + sz.width;
+      if (pos.dx + sz.width > maxX) maxX = pos.dx + sz.width;
       if (pos.dy + sz.height > maxY) maxY = pos.dy + sz.height;
     }
 
@@ -149,15 +176,13 @@ class _MindMapViewState extends State<MindMapView>
     final spanW = (maxX - minX) + 2 * padding;
     final spanH = (maxY - minY) + 2 * padding;
 
-    // Choose a scale that fits everything; cap at 1.0 so we don't zoom in.
-    final scale = (screen.width / spanW).clamp(0.1, 1.0) <
-            (screen.height / spanH).clamp(0.1, 1.0)
-        ? (screen.width / spanW).clamp(0.1, 1.0)
-        : (screen.height / spanH).clamp(0.1, 1.0);
+    // Fit to the tighter dimension; allow zooming out as needed, cap at 0.85.
+    final scale = (math.min(screen.width / spanW, screen.height / spanH))
+        .clamp(0.08, 0.85);
 
     final centerX = (minX + maxX) / 2;
     final centerY = (minY + maxY) / 2;
-    final tx = centerX - screen.width  / (2 * scale);
+    final tx = centerX - screen.width / (2 * scale);
     final ty = centerY - screen.height / (2 * scale);
     final targetMatrix = Matrix4.identity()
       ..scale(scale)
@@ -165,22 +190,28 @@ class _MindMapViewState extends State<MindMapView>
 
     _panCtrl.stop();
     _panAnim?.removeListener(_applyPanAnim);
-    _panAnim = Matrix4Tween(
-      begin: _transformCtrl.value.clone(),
-      end:   targetMatrix,
-    ).animate(CurvedAnimation(parent: _panCtrl, curve: Curves.easeInOutCubic))
-      ..addListener(_applyPanAnim);
+    _panAnim =
+        Matrix4Tween(
+            begin: _transformCtrl.value.clone(),
+            end: targetMatrix,
+          ).animate(
+            CurvedAnimation(parent: _panCtrl, curve: Curves.easeInOutCubic),
+          )
+          ..addListener(_applyPanAnim);
     _panCtrl.forward(from: 0.0);
   }
 
   void _animateToIdentity() {
     _panCtrl.stop();
     _panAnim?.removeListener(_applyPanAnim);
-    _panAnim = Matrix4Tween(
-      begin: _transformCtrl.value.clone(),
-      end:   Matrix4.identity(),
-    ).animate(CurvedAnimation(parent: _panCtrl, curve: Curves.easeInOutCubic))
-      ..addListener(_applyPanAnim);
+    _panAnim =
+        Matrix4Tween(
+            begin: _transformCtrl.value.clone(),
+            end: Matrix4.identity(),
+          ).animate(
+            CurvedAnimation(parent: _panCtrl, curve: Curves.easeInOutCubic),
+          )
+          ..addListener(_applyPanAnim);
     _panCtrl.forward(from: 0.0);
   }
 
@@ -191,7 +222,7 @@ class _MindMapViewState extends State<MindMapView>
     if (renderBox == null) return;
     final screenSize = renderBox.size;
     final scale = _transformCtrl.value.getMaxScaleOnAxis();
-    final tx = canvasCenter.dx - screenSize.width  / (2 * scale);
+    final tx = canvasCenter.dx - screenSize.width / (2 * scale);
     final ty = canvasCenter.dy - screenSize.height / (2 * scale);
     final targetMatrix = Matrix4.identity()
       ..scale(scale)
@@ -199,334 +230,33 @@ class _MindMapViewState extends State<MindMapView>
 
     _panCtrl.stop();
     _panAnim?.removeListener(_applyPanAnim);
-    _panAnim = Matrix4Tween(
-      begin: _transformCtrl.value.clone(),
-      end:   targetMatrix,
-    ).animate(CurvedAnimation(parent: _panCtrl, curve: Curves.easeInOutCubic))
-      ..addListener(_applyPanAnim);
+    _panAnim =
+        Matrix4Tween(
+            begin: _transformCtrl.value.clone(),
+            end: targetMatrix,
+          ).animate(
+            CurvedAnimation(parent: _panCtrl, curve: Curves.easeInOutCubic),
+          )
+          ..addListener(_applyPanAnim);
     _panCtrl.forward(from: 0.0);
   }
 
-
   ({List<MindMapNodeData> nodes, List<MindMapConnection> conns}) _buildData(
     WorkspaceState wsState,
-    TerminalState  termState,
-    ReviewState    reviewState,
+    TerminalState termState,
+    ReviewState reviewState,
     FileEditorState editorState,
-    RunState       runState,
+    RunState runState,
   ) {
-    final nodes  = <MindMapNodeData>[];
-    final conns  = <MindMapConnection>[];
-
-    if (wsState is! WorkspaceLoaded) return (nodes: nodes, conns: conns);
-
-    for (final ws in wsState.workspaces) {
-      final wsNodeId = 'ws:${ws.id}';
-      nodes.add(WorkspaceNodeData(id: wsNodeId, workspace: ws));
-
-      // Sessions (terminal sessions) belonging to this workspace.
-      // Match by workspaceId when set; fall back to workspacePath prefix when
-      // workspaceId is null (older sessions may not have it populated).
-      final sessions = termState is TerminalLoaded
-          ? termState.allSessions.where((s) {
-              if (s.workspaceId != null) return s.workspaceId == ws.id;
-              return ws.paths.any((p2) => s.workspacePath.startsWith(p2));
-            }).toList()
-          : <AgentSession>[];
-
-      for (final session in sessions) {
-        // MERGED session+terminal card (single card per session, since sessions
-        // are 1:1 with terminals in our data model).
-        final agentNodeId = 'agent:${session.id}';
-        nodes.add(AgentNodeData(
-          id:               agentNodeId,
-          session:          session,
-          workspaceId:      ws.id,
-          workspacePaths:   ws.paths,
-          workspaceBranch:  ws.gitBranch,
-        ));
-
-        final isLive = session.status == AgentStatus.live;
-        final agentConnStyle = isLive ? ConnectorStyle.animated : ConnectorStyle.solid;
-        final agentColor     = isLive ? const Color(0xFF34D399) : const Color(0xFF60A5FA);
-
-        // Workspace → session/agent
-        conns.add(MindMapConnection(
-          fromId: wsNodeId,
-          toId:   agentNodeId,
-          style:  agentConnStyle,
-          color:  agentColor.withAlpha(100),
-        ));
-
-        // ── Repos & branches ──────────────────────────────────────────
-        // Prefer worktreeContexts; fall back to workspace paths.
-        final wt = session.worktreeContexts;
-        final repoPaths = <String, String>{}; // repoPath → branchPath (or gitBranch)
-
-        if (wt != null && wt.isNotEmpty) {
-          for (final e in wt.entries) {
-            repoPaths[e.key] = e.value;
-          }
-        } else {
-          for (final rp in ws.paths) {
-            repoPaths[rp] = ws.gitBranch ?? 'main';
-          }
-        }
-
-        final allBranchNodeIds = <String>[];
-        for (final entry in repoPaths.entries) {
-          final repoPath     = entry.key;
-          final branchRef    = entry.value;
-          final repoName     = p.basename(repoPath);
-          final repoNodeId   = 'repo:${ws.id}:$repoPath';
-          final branchNodeId = 'branch:${ws.id}:$repoPath';
-
-          if (!nodes.any((n) => n.id == repoNodeId)) {
-            nodes.add(RepoNodeData(
-              id:        repoNodeId,
-              sessionId: session.id,
-              repoPath:  repoPath,
-              repoName:  repoName,
-              branch:    p.basename(branchRef),
-            ));
-          }
-          conns.add(MindMapConnection(
-            fromId: agentNodeId,
-            toId:   repoNodeId,
-            style:  ConnectorStyle.solid,
-            color:  const Color(0x59C084FC),
-          ));
-
-          if (!nodes.any((n) => n.id == branchNodeId)) {
-            nodes.add(BranchNodeData(
-              id:         branchNodeId,
-              repoId:     repoNodeId,
-              repoName:   repoName,
-              branch:     p.basename(branchRef),
-              commitHash: '',
-            ));
-          }
-          conns.add(MindMapConnection(
-            fromId: repoNodeId,
-            toId:   branchNodeId,
-            style:  ConnectorStyle.dashed,
-            color:  const Color(0x597C6BFF),
-          ));
-
-          allBranchNodeIds.add(branchNodeId);
-        }
-      }
-
-      // No sessions → show only the workspace card, no repos/branches.
-    }
-
-    // Orphan sessions — sessions that don't match any known workspace by id
-    // or by any path prefix. Render them anyway so the user sees all terminals.
-    if (termState is TerminalLoaded) {
-      final existingAgents = nodes.whereType<AgentNodeData>().map((a) => a.session.id).toSet();
-      for (final session in termState.allSessions) {
-        if (existingAgents.contains(session.id)) continue;
-        final agentNodeId = 'agent:${session.id}';
-        // Try to match workspace for path fallback
-        final matchedWs = wsState.workspaces
-            .where((w) => w.id == session.workspaceId ||
-                w.paths.any((p2) => session.workspacePath.startsWith(p2)))
-            .firstOrNull;
-        nodes.add(AgentNodeData(
-          id:              agentNodeId,
-          session:         session,
-          workspaceId:     session.workspaceId ?? '',
-          workspacePaths:  matchedWs?.paths ?? const [],
-          workspaceBranch: matchedWs?.gitBranch,
-        ));
-
-        // Build repos/branches from worktreeContexts; fall back to workspace paths.
-        final wt = session.worktreeContexts?.isNotEmpty == true
-            ? session.worktreeContexts!
-            : (matchedWs != null && matchedWs.paths.isNotEmpty
-                ? {for (final rp in matchedWs.paths) rp: matchedWs.gitBranch ?? 'main'}
-                : {session.workspacePath: 'main'});
-        for (final e in wt.entries) {
-          final repoPath   = e.key;
-          final branchRef  = e.value;
-          final repoName   = p.basename(repoPath);
-          final repoNodeId = 'repo:orphan:$repoPath';
-          final brNodeId   = 'branch:orphan:$repoPath';
-          if (!nodes.any((n) => n.id == repoNodeId)) {
-            nodes.add(RepoNodeData(
-              id: repoNodeId, sessionId: session.id,
-              repoPath: repoPath, repoName: repoName,
-              branch: p.basename(branchRef),
-            ));
-          }
-          conns.add(MindMapConnection(
-            fromId: agentNodeId, toId: repoNodeId,
-            style: ConnectorStyle.solid, color: const Color(0x59C084FC),
-          ));
-          if (!nodes.any((n) => n.id == brNodeId)) {
-            nodes.add(BranchNodeData(
-              id: brNodeId, repoId: repoNodeId, repoName: repoName,
-              branch: p.basename(branchRef), commitHash: '',
-            ));
-          }
-          conns.add(MindMapConnection(
-            fromId: repoNodeId, toId: brNodeId,
-            style: ConnectorStyle.dashed, color: const Color(0x597C6BFF),
-          ));
-        }
-      }
-    }
-
-    // Changed files (from review state).
-    if (reviewState is ReviewLoaded && reviewState.changedFiles.isNotEmpty) {
-      final groupedByRepo = <String, List<dynamic>>{};
-      for (final f in reviewState.changedFiles) {
-        final repo = f.repoPath ?? 'unknown';
-        groupedByRepo.putIfAbsent(repo, () => []).add(f);
-      }
-      for (final entry in groupedByRepo.entries) {
-        final filesId = 'files:${entry.key}';
-        nodes.add(FilesNodeData(
-          id:           filesId,
-          sessionId:    '',
-          repoPath:     entry.key,
-          changedFiles: entry.value.cast(),
-        ));
-        // Connect from matching branch node if available.
-        final branchNode = nodes.whereType<BranchNodeData>()
-            .where((b) => b.repoName == p.basename(entry.key))
-            .firstOrNull;
-        if (branchNode != null) {
-          conns.add(MindMapConnection(
-            fromId: branchNode.id,
-            toId:   filesId,
-            style:  ConnectorStyle.dashed,
-            color:  const Color(0x406B7898),
-          ));
-        }
-      }
-    }
-
-    // File Tree — one card per repo (RepoNode), file browser only.
-    final repoNodes = nodes.whereType<RepoNodeData>().toList();
-    for (final repo in repoNodes) {
-      final treeId = 'tree:${repo.repoPath}';
-      final diffId  = 'diff:${repo.repoPath}';
-      if (nodes.any((n) => n.id == treeId)) continue;
-      nodes.add(FileTreeNodeData(
-        id:          treeId,
-        workspaceId: '',
-        repoPath:    repo.repoPath,
-        repoName:    repo.repoName,
-      ));
-      conns.add(MindMapConnection(
-        fromId: repo.id,
-        toId:   treeId,
-        style:  ConnectorStyle.dashed,
-        color:  const Color(0x6034D399),
-      ));
-      // Diff card — connected from File Tree.
-      if (!nodes.any((n) => n.id == diffId)) {
-        nodes.add(DiffNodeData(
-          id:          diffId,
-          workspaceId: '',
-          repoPath:    repo.repoPath,
-          repoName:    repo.repoName,
-        ));
-        conns.add(MindMapConnection(
-          fromId: treeId,
-          toId:   diffId,
-          style:  ConnectorStyle.dashed,
-          color:  const Color(0x607C6BFF),
-        ));
-      }
-    }
-    // Also add one tree+diff per standalone workspace path that has no sessions.
-    for (final ws in wsState.workspaces) {
-      for (final path in ws.paths) {
-        final treeId = 'tree:$path';
-        final diffId  = 'diff:$path';
-        if (nodes.any((n) => n.id == treeId)) continue;
-        nodes.add(FileTreeNodeData(
-          id:          treeId,
-          workspaceId: ws.id,
-          repoPath:    path,
-          repoName:    p.basename(path),
-        ));
-        conns.add(MindMapConnection(
-          fromId: 'ws:${ws.id}',
-          toId:   treeId,
-          style:  ConnectorStyle.dashed,
-          color:  const Color(0x5034D399),
-        ));
-        if (!nodes.any((n) => n.id == diffId)) {
-          nodes.add(DiffNodeData(
-            id:          diffId,
-            workspaceId: ws.id,
-            repoPath:    path,
-            repoName:    p.basename(path),
-          ));
-          conns.add(MindMapConnection(
-            fromId: treeId,
-            toId:   diffId,
-            style:  ConnectorStyle.dashed,
-            color:  const Color(0x507C6BFF),
-          ));
-        }
-      }
-    }
-
-    // File editor node (when a file is open).
-    if (editorState.isVisible && editorState.tabs.isNotEmpty) {
-      final idx       = editorState.activeIndex.clamp(0, editorState.tabs.length - 1);
-      final activeTab = editorState.tabs[idx];
-      const editorId  = 'editor:active';
-      nodes.add(EditorNodeData(
-        id:       editorId,
-        filePath: activeTab.filePath,
-        content:  activeTab.content ?? '',
-        language: _detectLanguage(activeTab.filePath),
-      ));
-      // Connect from the matching FileTree card (longest matching repoPath wins).
-      final filePath = activeTab.filePath;
-      final matchingTree = nodes.whereType<FileTreeNodeData>()
-          .where((t) => t.repoPath != null && filePath.startsWith(t.repoPath!))
-          .fold<FileTreeNodeData?>(null, (best, t) =>
-              best == null || (t.repoPath?.length ?? 0) > (best.repoPath?.length ?? 0) ? t : best);
-      if (matchingTree != null) {
-        conns.add(MindMapConnection(
-          fromId: matchingTree.id,
-          toId:   editorId,
-          style:  ConnectorStyle.dashed,
-          color:  const Color(0x7060A5FA),
-        ));
-      }
-    }
-
-    // Run sessions — connect from the matching session/agent card.
-    if (runState.sessions.isNotEmpty) {
-      for (final runSess in runState.sessions) {
-        final matchingWs = (wsState as WorkspaceLoaded? ?? wsState).workspaces
-            .where((ws) => ws.paths.any((p2) => runSess.workspacePath.startsWith(p2)))
-            .firstOrNull;
-        final runId = 'run:${runSess.id}';
-        nodes.add(RunNodeData(id: runId, session: runSess, workspaceId: matchingWs?.id ?? ''));
-        // Prefer connecting from the session/agent card in the matching ws.
-        final matchingAgent = nodes.whereType<AgentNodeData>()
-            .where((a) => a.workspaceId == (matchingWs?.id ?? ''))
-            .firstOrNull;
-        conns.add(MindMapConnection(
-          fromId: matchingAgent?.id ?? 'ws:${matchingWs?.id ?? ''}',
-          toId:   runId,
-          style:  runSess.status == RunStatus.running
-              ? ConnectorStyle.animated
-              : ConnectorStyle.solid,
-          color:  runSess.status == RunStatus.running
-              ? const Color(0xAA34D399)
-              : const Color(0x8060A5FA),
-        ));
-      }
-    }
+    final graph = buildMindMapGraph(
+      wsState: wsState,
+      termState: termState,
+      reviewState: reviewState,
+      editorState: editorState,
+      runState: runState,
+    );
+    final nodes = [...graph.nodes];
+    final conns = [...graph.conns];
 
     // ── Plugin-provided nodes ────────────────────────────────────────────────
     final pluginEntries = MindMapPluginRegistry.instance.collectNodes(context);
@@ -537,24 +267,6 @@ class _MindMapViewState extends State<MindMapView>
     }
 
     return (nodes: nodes, conns: conns);
-  }
-
-  String _detectLanguage(String path) {
-    final ext = p.extension(path).toLowerCase();
-    return switch (ext) {
-      '.dart'   => 'Dart',
-      '.ts'     => 'TypeScript',
-      '.tsx'    => 'TSX',
-      '.js'     => 'JavaScript',
-      '.py'     => 'Python',
-      '.go'     => 'Go',
-      '.rs'     => 'Rust',
-      '.yaml' || '.yml' => 'YAML',
-      '.json'   => 'JSON',
-      '.sql'    => 'SQL',
-      '.md'     => 'Markdown',
-      _         => ext.isNotEmpty ? ext.replaceFirst('.', '').toUpperCase() : 'TEXT',
-    };
   }
 
   @override
@@ -569,8 +281,13 @@ class _MindMapViewState extends State<MindMapView>
                   builder: (context, reviewState) {
                     return BlocBuilder<FileEditorCubit, FileEditorState>(
                       builder: (context, editorState) {
-                        final (:nodes, :conns) =
-                            _buildData(wsState, termState, reviewState, editorState, runState);
+                        final (:nodes, :conns) = _buildData(
+                          wsState,
+                          termState,
+                          reviewState,
+                          editorState,
+                          runState,
+                        );
 
                         // Update cubit with new nodes (triggers layout if needed).
                         WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -578,31 +295,42 @@ class _MindMapViewState extends State<MindMapView>
                           final mm = context.read<MindMapCubit>();
                           mm.updateNodes(nodes, conns);
                           // On first open, fit all nodes into view.
-                          if (!_initialPanDone && mm.state.positions.isNotEmpty) {
+                          // _onViewportSize also tries this — whichever fires last wins.
+                          if (!_initialPanDone &&
+                              mm.state.positions.isNotEmpty &&
+                              _viewportSize != null) {
                             _initialPanDone = true;
                             _fitAllNodes(mm.state.positions, mm.state.sizes);
                           }
                           // Animate to editor card only when the active file changes
                           // (not on every content update for the same file).
-                          if (editorState.isVisible && editorState.tabs.isNotEmpty) {
+                          // Skip auto-pan when triggered by a remote client action.
+                          if (editorState.isVisible &&
+                              editorState.tabs.isNotEmpty) {
                             mm.showNode('editor:active');
-                            final idx = editorState.activeIndex
-                                .clamp(0, editorState.tabs.length - 1);
+                            final idx = editorState.activeIndex.clamp(
+                              0,
+                              editorState.tabs.length - 1,
+                            );
                             final filePath = editorState.tabs[idx].filePath;
                             if (filePath != _lastFocusedFilePath) {
                               _lastFocusedFilePath = filePath;
-                              _animateToNode('editor:active', mm.state);
+                              final collab = context.read<CollaborationCubit>();
+                              if (!collab.isHandlingRemoteAction) {
+                                _animateToNode('editor:active', mm.state);
+                              }
                             }
                           }
                         });
 
                         return _MindMapCanvas(
-                          nodes:          nodes,
-                          conns:          conns,
-                          transformCtrl:  _transformCtrl,
-                          dashAnimation:  _dashAnim,
-                          onResetView:    _animateToIdentity,
-                          onPanToOffset:  _animateToCenterOffset,
+                          nodes: nodes,
+                          conns: conns,
+                          transformCtrl: _transformCtrl,
+                          dashAnimation: _dashAnim,
+                          onResetView: _animateToIdentity,
+                          onPanToOffset: _animateToCenterOffset,
+                          onViewportSize: _onViewportSize,
                         );
                       },
                     );
@@ -627,6 +355,7 @@ class _MindMapCanvas extends StatefulWidget {
     required this.dashAnimation,
     required this.onResetView,
     required this.onPanToOffset,
+    required this.onViewportSize,
   });
   final List<MindMapNodeData> nodes;
   final List<MindMapConnection> conns;
@@ -634,6 +363,7 @@ class _MindMapCanvas extends StatefulWidget {
   final Animation<double> dashAnimation;
   final VoidCallback onResetView;
   final void Function(Offset canvasCenter) onPanToOffset;
+  final void Function(Size) onViewportSize;
 
   @override
   State<_MindMapCanvas> createState() => _MindMapCanvasState();
@@ -648,7 +378,17 @@ class _MindMapCanvasState extends State<_MindMapCanvas> {
   static const _canvasH = 8000.0;
 
   // Column x positions mirrored from MindMapLayoutEngine, offset right for space.
-  static const _colX = [2040.0, 2260.0, 2680.0, 2900.0, 3100.0, 3360.0, 3860.0, 4240.0, 4580.0];
+  static const _colX = [
+    2040.0,
+    2260.0,
+    2680.0,
+    2900.0,
+    3100.0,
+    3360.0,
+    3860.0,
+    4240.0,
+    4580.0,
+  ];
 
   /// Returns a column-based fallback so nodes are never piled at (0,0).
   Offset _fallbackPos(MindMapNodeData node) {
@@ -663,134 +403,173 @@ class _MindMapCanvasState extends State<_MindMapCanvas> {
       color: const Color(0xFF0D0F14),
       child: LayoutBuilder(
         builder: (ctx, constraints) {
-          final viewportSize = Size(constraints.maxWidth, constraints.maxHeight);
+          final viewportSize = Size(
+            constraints.maxWidth,
+            constraints.maxHeight,
+          );
+          // Notify parent of viewport size so it can fit all nodes.
+          WidgetsBinding.instance.addPostFrameCallback(
+            (_) => widget.onViewportSize(viewportSize),
+          );
           return Stack(
             children: [
               // ── Canvas (pan + pinch zoom) ────────────────────────────────
-              InteractiveViewer(
-                transformationController: widget.transformCtrl,
-                // Infinite boundary — user can pan in any direction freely.
-                boundaryMargin: const EdgeInsets.all(double.infinity),
-                minScale: 0.1,
-                maxScale: 3.0,
-                panEnabled: !_nodeDragging,
-                scaleEnabled: true,
-                constrained: false,
-            child: SizedBox(
-              width:  _canvasW,
-              height: _canvasH,
-              child: BlocBuilder<MindMapCubit, MindMapState>(
-                builder: (context, mmState) {
-                  final defaultSizeMap = {
-                    for (final n in widget.nodes) n.id: n.defaultSize,
-                  };
-                  return Stack(
-                    clipBehavior: Clip.none,
-                    children: [
-                      // Dot-grid background — RepaintBoundary so dots
-                      // don't repaint when nodes move.
-                      const Positioned.fill(
-                        child: RepaintBoundary(child: _DotGrid()),
-                      ),
-
-                      // SVG connector layer (below nodes).
-                      Positioned.fill(
-                        child: RepaintBoundary(
-                          child: MindMapConnectorLayer(
-                          connections:  widget.conns
-                              .where((c) {
-                                if (mmState.hidden.contains(c.fromId)) return false;
-                                if (mmState.hidden.contains(c.toId))   return false;
-                                final fromTag = widget.nodes
-                                    .where((n) => n.id == c.fromId)
-                                    .firstOrNull?.typeTag;
-                                final toTag = widget.nodes
-                                    .where((n) => n.id == c.toId)
-                                    .firstOrNull?.typeTag;
-                                if (fromTag != null && mmState.hiddenTypes.contains(fromTag)) return false;
-                                if (toTag   != null && mmState.hiddenTypes.contains(toTag))   return false;
-                                return true;
-                              })
-                              .toList(),
-                          positions:    mmState.positions,
-                          sizes:        mmState.sizes,
-                          defaultSizes: defaultSizeMap,
-                          dashAnimation: widget.dashAnimation,
-                        ),
-                        ),   // RepaintBoundary
-                      ),
-
-                      // Node cards (skip hidden and hidden-type).
-                      for (final node in widget.nodes)
-                        if (!mmState.hidden.contains(node.id) &&
-                            !mmState.hiddenTypes.contains(node.typeTag))
-                          MindMapNode(
-                            key:              ValueKey(node.id),
-                            id:               node.id,
-                            defaultSize:      node.defaultSize,
-                            minResizeSize:    NodeRegistry.minResizeSize(node),
-                            fallbackPosition: _fallbackPos(node),
-                            onClose:          () => context.read<MindMapCubit>().hideNode(node.id),
-                            child:            NodeRegistry.build(node),
+              // On native, use InteractiveViewer (works fine — trackpad pan
+              // on macOS uses PointerPanZoom gestures that don't clash with
+              // the inner scrollables the same way as on web).
+              //
+              // On web, use _WebCanvas: a Listener-based canvas that hit-
+              // tests at the start of every pan / zoom gesture and skips
+              // canvas manipulation when the pointer is over a card. This
+              // is the only way to reliably isolate scroll/pan inside card
+              // content from canvas pan on Flutter Web, because
+              // InteractiveViewer's ScaleGestureRecognizer always wins the
+              // gesture arena over any descendant scrollable when it is an
+              // ancestor in the widget tree.
+              Builder(builder: (context) {
+                  final canvasChild = SizedBox(
+                      width: _canvasW,
+                      height: _canvasH,
+                      child: BlocBuilder<MindMapCubit, MindMapState>(
+                    builder: (context, mmState) {
+                      final defaultSizeMap = {
+                        for (final n in widget.nodes) n.id: n.defaultSize,
+                      };
+                      return Stack(
+                        clipBehavior: Clip.none,
+                        children: [
+                          // Dot-grid background — RepaintBoundary so dots
+                          // don't repaint when nodes move.
+                          const Positioned.fill(
+                            child: RepaintBoundary(child: _DotGrid()),
                           ),
-                    ],
+
+                          // SVG connector layer (below nodes).
+                          Positioned.fill(
+                            child: RepaintBoundary(
+                              child: MindMapConnectorLayer(
+                                connections: widget.conns.where((c) {
+                                  if (mmState.hidden.contains(c.fromId))
+                                    return false;
+                                  if (mmState.hidden.contains(c.toId))
+                                    return false;
+                                  final fromTag = widget.nodes
+                                      .where((n) => n.id == c.fromId)
+                                      .firstOrNull
+                                      ?.typeTag;
+                                  final toTag = widget.nodes
+                                      .where((n) => n.id == c.toId)
+                                      .firstOrNull
+                                      ?.typeTag;
+                                  if (fromTag != null &&
+                                      mmState.hiddenTypes.contains(fromTag))
+                                    return false;
+                                  if (toTag != null &&
+                                      mmState.hiddenTypes.contains(toTag))
+                                    return false;
+                                  return true;
+                                }).toList(),
+                                positions: mmState.positions,
+                                sizes: mmState.sizes,
+                                defaultSizes: defaultSizeMap,
+                                dashAnimation: widget.dashAnimation,
+                              ),
+                            ), // RepaintBoundary
+                          ),
+
+                           // Node cards (skip hidden and hidden-type).
+                           for (final node in widget.nodes)
+                             if (!mmState.hidden.contains(node.id) &&
+                                 !mmState.hiddenTypes.contains(node.typeTag))
+                               MindMapNode(
+                                 key: ValueKey(node.id),
+                                 id: node.id,
+                                 defaultSize: node.defaultSize,
+                                 minResizeSize: NodeRegistry.minResizeSize(node),
+                                 fallbackPosition: _fallbackPos(node),
+                                 onClose: () => context
+                                     .read<MindMapCubit>()
+                                     .hideNode(node.id),
+                                 child: NodeRegistry.build(node),
+                               ),
+                        ],
+                      );
+                    },
+                  ),
+                );
+                  if (kIsWeb) {
+                    return _WebCanvas(
+                      transformCtrl: widget.transformCtrl,
+                      child: canvasChild,
+                    );
+                  }
+                  return InteractiveViewer(
+                    transformationController: widget.transformCtrl,
+                    boundaryMargin: const EdgeInsets.all(double.infinity),
+                    minScale: 0.1,
+                    maxScale: 3.0,
+                    panEnabled: !_nodeDragging,
+                    scaleEnabled: true,
+                    constrained: false,
+                    child: canvasChild,
                   );
                 },
               ),
-            ),
-          ),
 
-          // ── Toolbar overlay ───────────────────────────────────────────
-          Positioned(
-            top: 8, right: 8,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                _CanvasToolbar(
-                  transformCtrl: widget.transformCtrl,
-                  onResetView:   widget.onResetView,
+              // ── Toolbar overlay ───────────────────────────────────────────
+              Positioned(
+                top: 8,
+                right: 8,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    _CanvasToolbar(
+                      transformCtrl: widget.transformCtrl,
+                      onResetView: widget.onResetView,
+                    ),
+                    const SizedBox(height: 8),
+                    // ── Mini-map ───────────────────────────────────────────
+                    BlocBuilder<MindMapCubit, MindMapState>(
+                      buildWhen: (prev, next) =>
+                          prev.positions != next.positions ||
+                          prev.sizes != next.sizes ||
+                          prev.hidden != next.hidden ||
+                          prev.hiddenTypes != next.hiddenTypes,
+                      builder: (ctx, mm) => _MiniMap(
+                        nodes: widget.nodes,
+                        positions: mm.positions,
+                        sizes: mm.sizes,
+                        hidden: mm.hidden,
+                        hiddenTypes: mm.hiddenTypes,
+                        transformCtrl: widget.transformCtrl,
+                        viewportSize: viewportSize,
+                        onPanTo: widget.onPanToOffset,
+                      ),
+                    ),
+                  ],
                 ),
-                const SizedBox(height: 8),
-                // ── Mini-map ───────────────────────────────────────────
-                BlocBuilder<MindMapCubit, MindMapState>(
-                  buildWhen: (prev, next) =>
-                      prev.positions   != next.positions   ||
-                      prev.sizes       != next.sizes       ||
-                      prev.hidden      != next.hidden      ||
-                      prev.hiddenTypes != next.hiddenTypes,
-                  builder: (ctx, mm) => _MiniMap(
-                    nodes:        widget.nodes,
-                    positions:    mm.positions,
-                    sizes:        mm.sizes,
-                    hidden:       mm.hidden,
-                    hiddenTypes:  mm.hiddenTypes,
-                    transformCtrl: widget.transformCtrl,
-                    viewportSize:  viewportSize,
-                    onPanTo:       widget.onPanToOffset,
-                  ),
-                ),
-              ],
-            ),
-          ),
+              ),
 
-          // ── Group sidebar (left) ──────────────────────────────────────
-          Positioned(
-            top: 8, left: 8, bottom: 8,
-            child: _GroupSidebar(
-              onFocusNode: (nodeId) {
-                final mm = context.read<MindMapCubit>().state;
-                final pos = mm.positions[nodeId];
-                if (pos == null) return;
-                // Reveal the node if it's hidden.
-                if (mm.hidden.contains(nodeId)) {
-                  context.read<MindMapCubit>().showNode(nodeId);
-                }
-                widget.onPanToOffset(pos);
-              },
-            ),
-          ),
-        ],
-      );
+              // ── Group sidebar (left) ──────────────────────────────────────
+              Positioned(
+                top: 8,
+                left: 8,
+                bottom: 8,
+                child: _GroupSidebar(
+                  onFocusNode: (nodeId) {
+                    final mm = context.read<MindMapCubit>().state;
+                    final pos = mm.positions[nodeId];
+                    if (pos == null) return;
+                    // Reveal the node if it's hidden.
+                    if (mm.hidden.contains(nodeId)) {
+                      context.read<MindMapCubit>().showNode(nodeId);
+                    }
+                    widget.onPanToOffset(pos);
+                  },
+                ),
+              ),
+            ],
+          );
         },
       ),
     );
@@ -817,14 +596,14 @@ class _DotGridState extends State<_DotGrid> {
     const spacing = 28.0;
     const tileSize = spacing;
     final recorder = ui.PictureRecorder();
-    final canvas   = Canvas(recorder);
+    final canvas = Canvas(recorder);
     canvas.drawCircle(
       const Offset(tileSize / 2, tileSize / 2),
       0.9,
       Paint()..color = const Color(0x8C3A4560),
     );
     final picture = recorder.endRecording();
-    final image   = await picture.toImage(tileSize.toInt(), tileSize.toInt());
+    final image = await picture.toImage(tileSize.toInt(), tileSize.toInt());
     if (mounted) setState(() => _tile = image);
   }
 
@@ -848,10 +627,7 @@ class _TiledDotPainter extends CustomPainter {
       TileMode.repeated,
       Matrix4.identity().storage,
     );
-    canvas.drawRect(
-      Offset.zero & size,
-      Paint()..shader = shader,
-    );
+    canvas.drawRect(Offset.zero & size, Paint()..shader = shader);
   }
 
   @override
@@ -861,7 +637,10 @@ class _TiledDotPainter extends CustomPainter {
 // ── Toolbar ────────────────────────────────────────────────────────────────
 
 class _CanvasToolbar extends StatelessWidget {
-  const _CanvasToolbar({required this.transformCtrl, required this.onResetView});
+  const _CanvasToolbar({
+    required this.transformCtrl,
+    required this.onResetView,
+  });
   final TransformationController transformCtrl;
   final VoidCallback onResetView;
 
@@ -946,22 +725,33 @@ class _ViewsButton extends StatelessWidget {
               height: 30,
               padding: const EdgeInsets.symmetric(horizontal: 8),
               decoration: BoxDecoration(
-                color: hasViews ? const Color(0xFF16192A) : const Color(0xFF12151C),
+                color: hasViews
+                    ? const Color(0xFF16192A)
+                    : const Color(0xFF12151C),
                 border: Border.all(
-                  color: hasViews ? const Color(0xFF7C6BFF) : const Color(0xFF2A3040),
+                  color: hasViews
+                      ? const Color(0xFF7C6BFF)
+                      : const Color(0xFF2A3040),
                 ),
                 borderRadius: BorderRadius.circular(6),
               ),
               child: Row(
                 children: [
-                  Icon(Icons.bookmarks_outlined, size: 13,
-                      color: hasViews ? const Color(0xFF7C6BFF) : const Color(0xFF6B7898)),
+                  Icon(
+                    Icons.bookmarks_outlined,
+                    size: 13,
+                    color: hasViews
+                        ? const Color(0xFF7C6BFF)
+                        : const Color(0xFF6B7898),
+                  ),
                   const SizedBox(width: 4),
                   Text(
                     state.activeViewName ?? 'Views',
                     style: TextStyle(
                       fontSize: 11,
-                      color: hasViews ? const Color(0xFF9D8FFF) : const Color(0xFF6B7898),
+                      color: hasViews
+                          ? const Color(0xFF9D8FFF)
+                          : const Color(0xFF6B7898),
                       fontWeight: FontWeight.w500,
                     ),
                   ),
@@ -1016,7 +806,9 @@ class _ViewsSheetState extends State<_ViewsSheet> {
           color: const Color(0xFF0F1218),
           border: Border.all(color: const Color(0xFF2A3040)),
           borderRadius: BorderRadius.circular(12),
-          boxShadow: const [BoxShadow(color: Color(0xA0000000), blurRadius: 24)],
+          boxShadow: const [
+            BoxShadow(color: Color(0xA0000000), blurRadius: 24),
+          ],
         ),
         child: BlocBuilder<MindMapCubit, MindMapState>(
           builder: (context, state) {
@@ -1027,16 +819,29 @@ class _ViewsSheetState extends State<_ViewsSheet> {
                   padding: const EdgeInsets.fromLTRB(14, 12, 14, 6),
                   child: Row(
                     children: [
-                      const Icon(Icons.bookmarks_outlined, size: 14, color: Color(0xFF7C6BFF)),
+                      const Icon(
+                        Icons.bookmarks_outlined,
+                        size: 14,
+                        color: Color(0xFF7C6BFF),
+                      ),
                       const SizedBox(width: 8),
                       const Expanded(
-                        child: Text('Saved Views',
-                            style: TextStyle(
-                                fontSize: 12, fontWeight: FontWeight.w700, color: Color(0xFFE8E8FF))),
+                        child: Text(
+                          'Saved Views',
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                            color: Color(0xFFE8E8FF),
+                          ),
+                        ),
                       ),
                       GestureDetector(
                         onTap: () => Navigator.pop(context),
-                        child: const Icon(Icons.close, size: 14, color: Color(0xFF6B7898)),
+                        child: const Icon(
+                          Icons.close,
+                          size: 14,
+                          color: Color(0xFF6B7898),
+                        ),
                       ),
                     ],
                   ),
@@ -1050,19 +855,32 @@ class _ViewsSheetState extends State<_ViewsSheet> {
                       Expanded(
                         child: TextField(
                           controller: _ctrl,
-                          style: const TextStyle(fontSize: 12, color: Color(0xFFE8E8FF)),
+                          style: const TextStyle(
+                            fontSize: 12,
+                            color: Color(0xFFE8E8FF),
+                          ),
                           decoration: InputDecoration(
                             hintText: state.activeViewName ?? 'View name…',
-                            hintStyle: const TextStyle(fontSize: 12, color: Color(0xFF4A5680)),
+                            hintStyle: const TextStyle(
+                              fontSize: 12,
+                              color: Color(0xFF4A5680),
+                            ),
                             isDense: true,
-                            contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                            contentPadding: const EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 6,
+                            ),
                             border: OutlineInputBorder(
                               borderRadius: BorderRadius.circular(6),
-                              borderSide: const BorderSide(color: Color(0xFF2A3040)),
+                              borderSide: const BorderSide(
+                                color: Color(0xFF2A3040),
+                              ),
                             ),
                             focusedBorder: OutlineInputBorder(
                               borderRadius: BorderRadius.circular(6),
-                              borderSide: const BorderSide(color: Color(0xFF7C6BFF)),
+                              borderSide: const BorderSide(
+                                color: Color(0xFF7C6BFF),
+                              ),
                             ),
                           ),
                         ),
@@ -1071,19 +889,30 @@ class _ViewsSheetState extends State<_ViewsSheet> {
                       GestureDetector(
                         onTap: () {
                           final name = _ctrl.text.trim().isEmpty
-                              ? (state.activeViewName ?? 'View ${state.savedViews.length + 1}')
+                              ? (state.activeViewName ??
+                                    'View ${state.savedViews.length + 1}')
                               : _ctrl.text.trim();
                           context.read<MindMapCubit>().saveView(name);
                           _ctrl.clear();
                           Navigator.pop(context);
                         },
                         child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 6,
+                          ),
                           decoration: BoxDecoration(
                             color: const Color(0xFF7C6BFF),
                             borderRadius: BorderRadius.circular(6),
                           ),
-                          child: const Text('Save', style: TextStyle(fontSize: 11, color: Colors.white, fontWeight: FontWeight.w600)),
+                          child: const Text(
+                            'Save',
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: Colors.white,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
                         ),
                       ),
                     ],
@@ -1092,8 +921,10 @@ class _ViewsSheetState extends State<_ViewsSheet> {
                 if (state.savedViews.isEmpty)
                   const Padding(
                     padding: EdgeInsets.fromLTRB(14, 6, 14, 14),
-                    child: Text('No saved views yet',
-                        style: TextStyle(fontSize: 11, color: Color(0xFF4A5680))),
+                    child: Text(
+                      'No saved views yet',
+                      style: TextStyle(fontSize: 11, color: Color(0xFF4A5680)),
+                    ),
                   )
                 else ...[
                   const Divider(height: 1, color: Color(0xFF1E2330)),
@@ -1111,8 +942,9 @@ class _ViewsSheetState extends State<_ViewsSheet> {
                               context.read<MindMapCubit>().loadView(entry.key);
                               Navigator.pop(context);
                             },
-                            onDelete: () =>
-                                context.read<MindMapCubit>().deleteView(entry.key),
+                            onDelete: () => context
+                                .read<MindMapCubit>()
+                                .deleteView(entry.key),
                           ),
                       ],
                     ),
@@ -1150,7 +982,9 @@ class _ViewRow extends StatelessWidget {
             Icon(
               isActive ? Icons.bookmark : Icons.bookmark_border,
               size: 13,
-              color: isActive ? const Color(0xFF7C6BFF) : const Color(0xFF4A5680),
+              color: isActive
+                  ? const Color(0xFF7C6BFF)
+                  : const Color(0xFF4A5680),
             ),
             const SizedBox(width: 8),
             Expanded(
@@ -1158,7 +992,9 @@ class _ViewRow extends StatelessWidget {
                 snapshot.name,
                 style: TextStyle(
                   fontSize: 12,
-                  color: isActive ? const Color(0xFFE8E8FF) : const Color(0xFF9BAACB),
+                  color: isActive
+                      ? const Color(0xFFE8E8FF)
+                      : const Color(0xFF9BAACB),
                   fontWeight: isActive ? FontWeight.w600 : FontWeight.w400,
                 ),
               ),
@@ -1171,7 +1007,11 @@ class _ViewRow extends StatelessWidget {
             GestureDetector(
               onTap: onDelete,
               behavior: HitTestBehavior.opaque,
-              child: const Icon(Icons.delete_outline, size: 13, color: Color(0xFF4A5680)),
+              child: const Icon(
+                Icons.delete_outline,
+                size: 13,
+                color: Color(0xFF4A5680),
+              ),
             ),
           ],
         ),
@@ -1181,7 +1021,11 @@ class _ViewRow extends StatelessWidget {
 }
 
 class _ToolBtn extends StatelessWidget {
-  const _ToolBtn({required this.icon, required this.tooltip, required this.onTap});
+  const _ToolBtn({
+    required this.icon,
+    required this.tooltip,
+    required this.onTap,
+  });
   final IconData icon;
   final String tooltip;
   final VoidCallback onTap;
@@ -1193,7 +1037,8 @@ class _ToolBtn extends StatelessWidget {
       child: GestureDetector(
         onTap: onTap,
         child: Container(
-          width: 30, height: 30,
+          width: 30,
+          height: 30,
           decoration: BoxDecoration(
             color: const Color(0xFF12151C),
             border: Border.all(color: const Color(0xFF2A3040)),
@@ -1221,252 +1066,22 @@ class _GroupSidebar extends StatefulWidget {
 }
 
 class _GroupSidebarState extends State<_GroupSidebar> {
-  bool _collapsed = false;
-  double _width = 220;
-  static const _minWidth = 160.0;
-  static const _maxWidth = 480.0;
-  // Set of node ids whose children are expanded in the tree.
-  final _expandedIds = <String>{};
-  // Tracks which workspace ids have been auto-expanded on first appearance.
-  final _autoExpandedIds = <String>{};
-
   @override
   Widget build(BuildContext context) {
     return BlocBuilder<MindMapCubit, MindMapState>(
       builder: (context, mm) {
-        if (_collapsed) {
-          return _SidebarToggle(
-            collapsed: true,
-            onTap: () => setState(() => _collapsed = false),
-          );
-        }
-
-        // ── Build adjacency from connections ──────────────────────────────
-        final nodeById = <String, MindMapNodeData>{
-          for (final n in mm.nodes) n.id: n,
-        };
-        final childMap = <String, List<String>>{};
-        for (final c in mm.connections) {
-          (childMap[c.fromId] ??= []).add(c.toId);
-        }
-
-        final workspaces = mm.nodes.whereType<WorkspaceNodeData>().toList();
-
-        // Auto-expand workspaces only the first time they appear.
-        for (final ws in workspaces) {
-          if (_autoExpandedIds.add(ws.id)) {
-            _expandedIds.add(ws.id);
-          }
-        }
-
-        // Nodes reachable from any workspace (excluding workspace itself).
-        final reachable = <String>{};
-        for (final ws in workspaces) {
-          _collectIds(ws.id, childMap, reachable);
-        }
-        // Orphans: not a workspace AND not reachable from any workspace.
-        final orphans = mm.nodes
-            .where((n) => n is! WorkspaceNodeData && !reachable.contains(n.id))
-            .toList();
-
         final cubit = context.read<MindMapCubit>();
-
-        return Stack(
-          clipBehavior: Clip.none,
-          children: [
-            Container(
-          width: _width,
-          decoration: BoxDecoration(
-            color: const Color(0xEE0F1218),
-            border: Border.all(color: const Color(0xFF1E2330)),
-            borderRadius: BorderRadius.circular(10),
-            boxShadow: const [BoxShadow(color: Color(0x80000000), blurRadius: 18)],
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              // ── Header ────────────────────────────────────────────────
-              Padding(
-                padding: const EdgeInsets.fromLTRB(10, 8, 4, 8),
-                child: Row(
-                  children: [
-                    const Icon(Icons.account_tree, size: 14, color: Color(0xFF7C6BFF)),
-                    const SizedBox(width: 6),
-                    const Expanded(
-                      child: Text(
-                        'Show / Hide',
-                        style: TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w700,
-                          color: Color(0xFFE8E8FF),
-                          letterSpacing: 0.3,
-                        ),
-                      ),
-                    ),
-                    if (mm.hidden.isNotEmpty || mm.hiddenTypes.isNotEmpty)
-                      InkWell(
-                        onTap: () => cubit.showAllNodes(),
-                        child: const Padding(
-                          padding: EdgeInsets.all(4),
-                          child: Text('Show all',
-                              style: TextStyle(fontSize: 9, color: Color(0xFF7C6BFF))),
-                        ),
-                      ),
-                    InkWell(
-                      onTap: () => setState(() => _collapsed = true),
-                      child: const Padding(
-                        padding: EdgeInsets.all(4),
-                        child: Icon(Icons.chevron_left, size: 14, color: Color(0xFF6B7898)),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const Divider(height: 1, color: Color(0xFF1E2330)),
-              // ── + Workspace action ────────────────────────────────────
-              Padding(
-                padding: const EdgeInsets.fromLTRB(8, 8, 8, 4),
-                child: _SidebarAction(
-                  icon: Icons.create_new_folder_outlined,
-                  label: '+ Workspace',
-                  onTap: () => _createWorkspace(context),
-                ),
-              ),
-              // ── Tree list ─────────────────────────────────────────────
-              Flexible(
-                child: ListView(
-                  padding: const EdgeInsets.only(bottom: 8),
-                  children: [
-                    for (final ws in workspaces) ...[
-                      _WsRow(
-                        ws:             ws,
-                        expanded:       _expandedIds.contains(ws.id),
-                        hidden:         mm.hidden.contains(ws.id) ||
-                                        mm.hiddenTypes.contains(ws.typeTag),
-                        onToggleExpand: () => setState(() {
-                          _expandedIds.contains(ws.id)
-                              ? _expandedIds.remove(ws.id)
-                              : _expandedIds.add(ws.id);
-                        }),
-                        onToggleHide: () => mm.hidden.contains(ws.id)
-                            ? cubit.showNode(ws.id)
-                            : cubit.hideNode(ws.id),
-                      ),
-                      if (_expandedIds.contains(ws.id))
-                        ..._buildSubtree(
-                          ws.id, childMap, nodeById, mm, cubit, depth: 1,
-                          visited: {ws.id},
-                          onFocus: widget.onFocusNode,
-                        ),
-                    ],
-                    // Orphan nodes (editor, plugin cards not linked to any ws).
-                    if (orphans.isNotEmpty) ...[
-                      const Padding(
-                        padding: EdgeInsets.fromLTRB(10, 8, 8, 2),
-                        child: Text(
-                          'OTHER',
-                          style: TextStyle(
-                            fontSize: 9,
-                            fontWeight: FontWeight.w700,
-                            color: Color(0xFF4A5680),
-                            letterSpacing: 1,
-                          ),
-                        ),
-                      ),
-                      for (final n in orphans)
-                        _TreeRow(
-                          node: n,
-                          depth: 1,
-                          hidden: mm.hidden.contains(n.id) ||
-                              mm.hiddenTypes.contains(n.typeTag),
-                          hasChildren: false,
-                          expanded: false,
-                          onToggle: () => mm.hidden.contains(n.id)
-                              ? cubit.showNode(n.id)
-                              : cubit.hideNode(n.id),
-                          onFocus: widget.onFocusNode != null
-                              ? () => widget.onFocusNode!(n.id)
-                              : null,
-                        ),
-                    ],
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ), // Container
-            // ── Resize handle (right edge) ──────────────────────────────
-            Positioned(
-              right: -4, top: 0, bottom: 0,
-              width: 8,
-              child: _SidebarResizeHandle(
-                onDrag: (dx) => setState(() {
-                  _width = (_width + dx).clamp(_minWidth, _maxWidth);
-                }),
-              ),
-            ),
-          ],
-        ); // Stack
+        return MindMapShowHideSidebar(
+          data: buildShowHideSidebarDataFromMindMapState(mm),
+          onToggleHide: (nodeId) => mm.hidden.contains(nodeId)
+              ? cubit.showNode(nodeId)
+              : cubit.hideNode(nodeId),
+          onFocusNode: widget.onFocusNode,
+          onShowAll: cubit.showAllNodes,
+          onCreateWorkspace: () => _createWorkspace(context),
+        );
       },
     );
-  }
-
-  /// DFS through the connection graph, building [_TreeRow] widgets.
-  List<Widget> _buildSubtree(
-    String parentId,
-    Map<String, List<String>> childMap,
-    Map<String, MindMapNodeData> nodeById,
-    MindMapState mm,
-    MindMapCubit cubit, {
-    required int depth,
-    required Set<String> visited,
-    void Function(String nodeId)? onFocus,
-  }) {
-    final widgets = <Widget>[];
-    for (final childId in (childMap[parentId] ?? <String>[])) {
-      if (!visited.add(childId)) continue;
-      final node = nodeById[childId];
-      if (node == null) continue;
-      final isHidden = mm.hidden.contains(node.id) ||
-          mm.hiddenTypes.contains(node.typeTag);
-      final hasChildren = (childMap[node.id] ?? [])
-          .any((id) => !visited.contains(id) && nodeById.containsKey(id));
-      final isExpanded = _expandedIds.contains(node.id);
-
-      widgets.add(_TreeRow(
-        node: node,
-        depth: depth,
-        hidden: isHidden,
-        hasChildren: hasChildren,
-        expanded: isExpanded,
-        onToggle: () => mm.hidden.contains(node.id)
-            ? cubit.showNode(node.id)
-            : cubit.hideNode(node.id),
-        onToggleExpand: hasChildren
-            ? () => setState(() => isExpanded
-                ? _expandedIds.remove(node.id)
-                : _expandedIds.add(node.id))
-            : null,
-        onFocus: onFocus != null ? () => onFocus(node.id) : null,
-      ));
-
-      if (hasChildren && isExpanded) {
-        widgets.addAll(_buildSubtree(
-          node.id, childMap, nodeById, mm, cubit,
-          depth: depth + 1,
-          visited: {...visited},
-          onFocus: onFocus,
-        ));
-      }
-    }
-    return widgets;
-  }
-
-  /// Collect all node ids reachable from [id] via [childMap].
-  void _collectIds(String id, Map<String, List<String>> childMap, Set<String> out) {
-    for (final child in (childMap[id] ?? <String>[])) {
-      if (out.add(child)) _collectIds(child, childMap, out);
-    }
   }
 }
 
@@ -1501,7 +1116,9 @@ class _WsRow extends StatelessWidget {
                 child: Icon(
                   hidden ? Icons.visibility_off : Icons.visibility,
                   size: 13,
-                  color: hidden ? const Color(0xFF4A5680) : const Color(0xFF7C6BFF),
+                  color: hidden
+                      ? const Color(0xFF4A5680)
+                      : const Color(0xFF7C6BFF),
                 ),
               ),
             ),
@@ -1519,7 +1136,9 @@ class _WsRow extends StatelessWidget {
                 style: TextStyle(
                   fontSize: 11,
                   fontWeight: FontWeight.w700,
-                  color: hidden ? const Color(0xFF4A5680) : const Color(0xFFE8E8FF),
+                  color: hidden
+                      ? const Color(0xFF4A5680)
+                      : const Color(0xFFE8E8FF),
                 ),
               ),
             ),
@@ -1555,47 +1174,68 @@ class _TreeRow extends StatelessWidget {
   final bool hasChildren;
   final bool expanded;
   final VoidCallback? onToggleExpand;
+
   /// Called when the row label is tapped — pans the canvas to this node.
   final VoidCallback? onFocus;
 
   ({String label, IconData icon, Color color}) get _meta => switch (node) {
-    AgentNodeData    d => (
-        label: d.session.displayName,
-        icon:  Icons.terminal,
-        color: d.isRunning ? const Color(0xFF34D399) : const Color(0xFF6B7898),
-      ),
-    RepoNodeData     d => (label: d.repoName, icon: Icons.source, color: const Color(0xFF9AA3BF)),
-    BranchNodeData   d => (label: d.branch, icon: Icons.alt_route, color: const Color(0xFF60A5FA)),
-    FilesNodeData    d => (
-        label: p.basename(d.repoPath),
-        icon:  Icons.insert_drive_file_outlined,
-        color: const Color(0xFFFFAA33),
-      ),
+    AgentNodeData d => (
+      label: d.session.displayName,
+      icon: Icons.terminal,
+      color: d.isRunning ? const Color(0xFF34D399) : const Color(0xFF6B7898),
+    ),
+    RepoNodeData d => (
+      label: d.repoName,
+      icon: Icons.source,
+      color: const Color(0xFF9AA3BF),
+    ),
+    BranchNodeData d => (
+      label: d.branch,
+      icon: Icons.alt_route,
+      color: const Color(0xFF60A5FA),
+    ),
+    FilesNodeData d => (
+      label: p.basename(d.repoPath),
+      icon: Icons.insert_drive_file_outlined,
+      color: const Color(0xFFFFAA33),
+    ),
     FileTreeNodeData d => (
-        label: d.repoName ?? 'Tree',
-        icon:  Icons.account_tree_outlined,
-        color: const Color(0xFF34D399),
-      ),
-    DiffNodeData     d => (
-        label: d.repoName ?? 'Diff',
-        icon:  Icons.compare_arrows_rounded,
-        color: const Color(0xFF7C6BFF),
-      ),
-    EditorNodeData   d => (
-        label: p.basename(d.filePath),
-        icon:  Icons.code,
-        color: const Color(0xFFFFCC44),
-      ),
-    RunNodeData      d => (
-        label: d.session.config.name,
-        icon:  Icons.play_circle_outline,
-        color: d.session.status == RunStatus.running
-            ? const Color(0xFFFF6B6B)
-            : const Color(0xFF6B7898),
-      ),
-    SessionNodeData  d => (label: d.session.displayName, icon: Icons.terminal, color: const Color(0xFF6B7898)),
-    MindMapPluginNodeData _ => (label: node.id, icon: Icons.extension_outlined, color: const Color(0xFF9AA3BF)),
-    WorkspaceNodeData  _   => (label: node.id, icon: Icons.folder_outlined, color: const Color(0xFF7C6BFF)),
+      label: d.repoName ?? 'Tree',
+      icon: Icons.account_tree_outlined,
+      color: const Color(0xFF34D399),
+    ),
+    DiffNodeData d => (
+      label: d.repoName ?? 'Diff',
+      icon: Icons.compare_arrows_rounded,
+      color: const Color(0xFF7C6BFF),
+    ),
+    EditorNodeData d => (
+      label: p.basename(d.filePath),
+      icon: Icons.code,
+      color: const Color(0xFFFFCC44),
+    ),
+    RunNodeData d => (
+      label: d.session.config.name,
+      icon: Icons.play_circle_outline,
+      color: d.session.status == RunStatus.running
+          ? const Color(0xFFFF6B6B)
+          : const Color(0xFF6B7898),
+    ),
+    SessionNodeData d => (
+      label: d.session.displayName,
+      icon: Icons.terminal,
+      color: const Color(0xFF6B7898),
+    ),
+    MindMapPluginNodeData _ => (
+      label: node.id,
+      icon: Icons.extension_outlined,
+      color: const Color(0xFF9AA3BF),
+    ),
+    WorkspaceNodeData _ => (
+      label: node.id,
+      icon: Icons.folder_outlined,
+      color: const Color(0xFF7C6BFF),
+    ),
   };
 
   @override
@@ -1625,7 +1265,9 @@ class _TreeRow extends StatelessWidget {
                 child: Icon(
                   hidden ? Icons.visibility_off : Icons.visibility,
                   size: 11,
-                  color: hidden ? const Color(0xFF4A5680) : const Color(0x997C6BFF),
+                  color: hidden
+                      ? const Color(0xFF4A5680)
+                      : const Color(0x997C6BFF),
                 ),
               ),
             ),
@@ -1642,7 +1284,9 @@ class _TreeRow extends StatelessWidget {
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(
                   fontSize: 10,
-                  color: hidden ? const Color(0xFF4A5680) : const Color(0xFFB0B8D0),
+                  color: hidden
+                      ? const Color(0xFF4A5680)
+                      : const Color(0xFFB0B8D0),
                 ),
               ),
             ),
@@ -1660,7 +1304,6 @@ class _TreeRow extends StatelessWidget {
     );
   }
 }
-
 
 // ── Sidebar resize handle ──────────────────────────────────────────────────
 
@@ -1680,14 +1323,14 @@ class _SidebarResizeHandleState extends State<_SidebarResizeHandle> {
     return MouseRegion(
       cursor: SystemMouseCursors.resizeColumn,
       onEnter: (_) => setState(() => _hovered = true),
-      onExit:  (_) => setState(() => _hovered = false),
+      onExit: (_) => setState(() => _hovered = false),
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
         onPanUpdate: (d) => widget.onDrag(d.delta.dx),
         child: Center(
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 120),
-            width:  _hovered ? 3 : 1,
+            width: _hovered ? 3 : 1,
             height: double.infinity,
             decoration: BoxDecoration(
               color: _hovered
@@ -1716,7 +1359,8 @@ class _SidebarToggle extends StatelessWidget {
       child: GestureDetector(
         onTap: onTap,
         child: Container(
-          width: 28, height: 48,
+          width: 28,
+          height: 48,
           decoration: BoxDecoration(
             color: const Color(0xEE0F1218),
             border: Border.all(color: const Color(0xFF1E2330)),
@@ -1725,7 +1369,11 @@ class _SidebarToggle extends StatelessWidget {
               bottomRight: Radius.circular(8),
             ),
           ),
-          child: const Icon(Icons.chevron_right, size: 16, color: Color(0xFF7C6BFF)),
+          child: const Icon(
+            Icons.chevron_right,
+            size: 16,
+            color: Color(0xFF7C6BFF),
+          ),
         ),
       ),
     );
@@ -1736,47 +1384,66 @@ class _SidebarToggle extends StatelessWidget {
 
 Future<void> _createWorkspace(BuildContext context) async {
   final controller = TextEditingController();
-  final name = await showDialog<String>(
-    context: context,
-    builder: (ctx) => AlertDialog(
-      backgroundColor: const Color(0xFF12151C),
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(10),
-        side: const BorderSide(color: Color(0xFF2A3040)),
+  final String? name;
+  try {
+    name = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF12151C),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(10),
+          side: const BorderSide(color: Color(0xFF2A3040)),
+        ),
+        title: const Text(
+          'New Workspace',
+          style: TextStyle(color: Color(0xFFE8E8FF), fontSize: 14),
+        ),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          style: const TextStyle(color: Color(0xFFE8E8FF)),
+          decoration: const InputDecoration(
+            hintText: 'Workspace name',
+            hintStyle: TextStyle(color: Color(0xFF6B7898)),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text(
+              'Cancel',
+              style: TextStyle(color: Color(0xFF6B7898)),
+            ),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, controller.text.trim()),
+            child: const Text(
+              'Pick folder →',
+              style: TextStyle(color: Color(0xFF7C6BFF)),
+            ),
+          ),
+        ],
       ),
-      title: const Text('New Workspace',
-          style: TextStyle(color: Color(0xFFE8E8FF), fontSize: 14)),
-      content: TextField(
-        controller: controller,
-        autofocus: true,
-        style: const TextStyle(color: Color(0xFFE8E8FF)),
-        decoration: const InputDecoration(
-          hintText: 'Workspace name',
-          hintStyle: TextStyle(color: Color(0xFF6B7898)),
-        ),
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(ctx),
-          child: const Text('Cancel', style: TextStyle(color: Color(0xFF6B7898))),
-        ),
-        TextButton(
-          onPressed: () => Navigator.pop(ctx, controller.text.trim()),
-          child: const Text('Pick folder →', style: TextStyle(color: Color(0xFF7C6BFF))),
-        ),
-      ],
-    ),
-  );
+    );
+  } finally {
+    controller.dispose();
+  }
   if (name == null || name.isEmpty || !context.mounted) return;
   final folder = await FilePicker.platform.getDirectoryPath(
     dialogTitle: 'Pick a folder for "$name"',
   );
   if (folder == null || !context.mounted) return;
+  await maybePromptGitInit(context, folder);
+  if (!context.mounted) return;
   await context.read<WorkspaceCubit>().addWorkspace(folder, customName: name);
 }
 
 class _SidebarAction extends StatefulWidget {
-  const _SidebarAction({required this.icon, required this.label, required this.onTap});
+  const _SidebarAction({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+  });
   final IconData icon;
   final String label;
   final VoidCallback onTap;
@@ -1792,7 +1459,7 @@ class _SidebarActionState extends State<_SidebarAction> {
     return MouseRegion(
       cursor: SystemMouseCursors.click,
       onEnter: (_) => setState(() => _hovered = true),
-      onExit:  (_) => setState(() => _hovered = false),
+      onExit: (_) => setState(() => _hovered = false),
       child: GestureDetector(
         onTap: widget.onTap,
         child: AnimatedContainer(
@@ -1800,21 +1467,33 @@ class _SidebarActionState extends State<_SidebarAction> {
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
           decoration: BoxDecoration(
             color: _hovered ? const Color(0xFF2A1E66) : const Color(0xFF1A1E2A),
-            border: Border.all(color: _hovered ? const Color(0xFF7C6BFF) : const Color(0xFF2A3040)),
+            border: Border.all(
+              color: _hovered
+                  ? const Color(0xFF7C6BFF)
+                  : const Color(0xFF2A3040),
+            ),
             borderRadius: BorderRadius.circular(6),
           ),
           child: Row(
             mainAxisSize: MainAxisSize.min,
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Icon(widget.icon, size: 12, color: _hovered ? const Color(0xFFC084FC) : const Color(0xFF9AA3BF)),
+              Icon(
+                widget.icon,
+                size: 12,
+                color: _hovered
+                    ? const Color(0xFFC084FC)
+                    : const Color(0xFF9AA3BF),
+              ),
               const SizedBox(width: 6),
               Text(
                 widget.label,
                 style: TextStyle(
                   fontSize: 10,
                   fontWeight: FontWeight.w600,
-                  color: _hovered ? const Color(0xFFE8E8FF) : const Color(0xFF9AA3BF),
+                  color: _hovered
+                      ? const Color(0xFFE8E8FF)
+                      : const Color(0xFF9AA3BF),
                 ),
               ),
             ],
@@ -1848,8 +1527,8 @@ class _MiniMap extends StatelessWidget {
   final Size viewportSize;
   final void Function(Offset canvasCenter) onPanTo;
 
-  static const double _mapW    = 210.0;
-  static const double _mapH    = 130.0;
+  static const double _mapW = 210.0;
+  static const double _mapH = 130.0;
   static const double _padding = 240.0;
 
   bool _isVisible(MindMapNodeData n) =>
@@ -1858,28 +1537,33 @@ class _MiniMap extends StatelessWidget {
   Rect _canvasBounds() {
     final visiblePositions = {
       for (final n in nodes)
-        if (_isVisible(n) && positions.containsKey(n.id)) n.id: positions[n.id]!,
+        if (_isVisible(n) && positions.containsKey(n.id))
+          n.id: positions[n.id]!,
     };
     if (visiblePositions.isEmpty) {
       return const Rect.fromLTWH(1800.0, 1800.0, 3500.0, 2000.0);
     }
-    double minX = double.infinity,  minY = double.infinity;
+    double minX = double.infinity, minY = double.infinity;
     double maxX = -double.infinity, maxY = -double.infinity;
     for (final e in visiblePositions.entries) {
       final pos = e.value;
-      final sz  = sizes[e.key] ?? const Size(200, 150);
+      final sz = sizes[e.key] ?? const Size(200, 150);
       if (pos.dx < minX) minX = pos.dx;
       if (pos.dy < minY) minY = pos.dy;
-      if (pos.dx + sz.width  > maxX) maxX = pos.dx + sz.width;
+      if (pos.dx + sz.width > maxX) maxX = pos.dx + sz.width;
       if (pos.dy + sz.height > maxY) maxY = pos.dy + sz.height;
     }
-    return Rect.fromLTRB(minX - _padding, minY - _padding,
-                         maxX + _padding, maxY + _padding);
+    return Rect.fromLTRB(
+      minX - _padding,
+      minY - _padding,
+      maxX + _padding,
+      maxY + _padding,
+    );
   }
 
   void _handleGesture(Offset local, Rect bounds) {
     final cx = bounds.left + local.dx / _mapW * bounds.width;
-    final cy = bounds.top  + local.dy / _mapH * bounds.height;
+    final cy = bounds.top + local.dy / _mapH * bounds.height;
     onPanTo(Offset(cx, cy));
   }
 
@@ -1891,12 +1575,12 @@ class _MiniMap extends StatelessWidget {
         final bounds = _canvasBounds();
         final vpTL = transformCtrl.toScene(Offset.zero);
         final vpBR = transformCtrl.toScene(
-            Offset(viewportSize.width, viewportSize.height));
-        final viewportRect =
-            Rect.fromLTRB(vpTL.dx, vpTL.dy, vpBR.dx, vpBR.dy);
+          Offset(viewportSize.width, viewportSize.height),
+        );
+        final viewportRect = Rect.fromLTRB(vpTL.dx, vpTL.dy, vpBR.dx, vpBR.dy);
 
         return GestureDetector(
-          onTapDown:   (d) => _handleGesture(d.localPosition, bounds),
+          onTapDown: (d) => _handleGesture(d.localPosition, bounds),
           onPanUpdate: (d) => _handleGesture(d.localPosition, bounds),
           child: Container(
             width: _mapW,
@@ -1913,10 +1597,10 @@ class _MiniMap extends StatelessWidget {
               borderRadius: BorderRadius.circular(7),
               child: CustomPaint(
                 painter: _MiniMapPainter(
-                  nodes:        nodes.where(_isVisible).toList(),
-                  positions:    positions,
-                  sizes:        sizes,
-                  bounds:       bounds,
+                  nodes: nodes.where(_isVisible).toList(),
+                  positions: positions,
+                  sizes: sizes,
+                  bounds: bounds,
                   viewportRect: viewportRect,
                 ),
               ),
@@ -1946,7 +1630,7 @@ class _MiniMapPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     if (bounds.isEmpty) return;
-    final scaleX = size.width  / bounds.width;
+    final scaleX = size.width / bounds.width;
     final scaleY = size.height / bounds.height;
 
     // ── Node rectangles ────────────────────────────────────────────────────
@@ -1955,9 +1639,9 @@ class _MiniMapPainter extends CustomPainter {
       if (pos == null) continue;
       final nodeSize = sizes[node.id] ?? node.defaultSize;
       final mx = (pos.dx - bounds.left) * scaleX;
-      final my = (pos.dy - bounds.top)  * scaleY;
-      final mw = max(3.0, nodeSize.width  * scaleX);
-      final mh = max(2.0, nodeSize.height * scaleY);
+      final my = (pos.dy - bounds.top) * scaleY;
+      final mw = math.max(3.0, nodeSize.width * scaleX);
+      final mh = math.max(2.0, nodeSize.height * scaleY);
 
       canvas.drawRRect(
         RRect.fromRectAndRadius(
@@ -1970,9 +1654,9 @@ class _MiniMapPainter extends CustomPainter {
 
     // ── Viewport rectangle ─────────────────────────────────────────────────
     final vx = (viewportRect.left - bounds.left) * scaleX;
-    final vy = (viewportRect.top  - bounds.top)  * scaleY;
-    final vw = max(8.0, viewportRect.width  * scaleX);
-    final vh = max(8.0, viewportRect.height * scaleY);
+    final vy = (viewportRect.top - bounds.top) * scaleY;
+    final vw = math.max(8.0, viewportRect.width * scaleX);
+    final vh = math.max(8.0, viewportRect.height * scaleY);
 
     final vpRRect = RRect.fromRectAndRadius(
       Rect.fromLTWH(vx, vy, vw, vh),
@@ -1989,23 +1673,125 @@ class _MiniMapPainter extends CustomPainter {
   }
 
   static Color _colorForType(String typeTag) => switch (typeTag) {
-    'ws'      => const Color(0xCC7C3AED),
-    'agent'   => const Color(0xCC34D399),
-    'branch'  => const Color(0xCC60A5FA),
-    'tree'    => const Color(0xCC10B981),
-    'diff'    => const Color(0xCC7C6BFF),
-    'files'   => const Color(0xCCF59E0B),
-    'run'     => const Color(0xCCF87171),
-    'editor'  => const Color(0xCCE879F9),
+    'ws' => const Color(0xCC7C3AED),
+    'agent' => const Color(0xCC34D399),
+    'branch' => const Color(0xCC60A5FA),
+    'tree' => const Color(0xCC10B981),
+    'diff' => const Color(0xCC7C6BFF),
+    'files' => const Color(0xCCF59E0B),
+    'run' => const Color(0xCCF87171),
+    'editor' => const Color(0xCCE879F9),
     'session' => const Color(0xCC93C5FD),
-    'repo'    => const Color(0xCC94A3B8),
-    _         => const Color(0xCC64748B),
+    'repo' => const Color(0xCC94A3B8),
+    _ => const Color(0xCC64748B),
   };
 
   @override
   bool shouldRepaint(_MiniMapPainter old) =>
       old.viewportRect != viewportRect ||
-      old.positions    != positions    ||
+      old.positions != positions ||
       old.nodes.length != nodes.length ||
-      old.bounds       != bounds;
+      old.bounds != bounds;
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// _WebCanvas — web-only replacement for InteractiveViewer.
+// ────────────────────────────────────────────────────────────────────────────
+//
+// Why: on Flutter Web, InteractiveViewer's ScaleGestureRecognizer wins the
+// gesture arena over any descendant Scrollable (terminal, editor, file tree)
+// whenever it is an ancestor in the widget tree. Worse, its Listener-based
+// PointerSignal handling also clashes with inner scrollables on trackpad.
+// The net effect: every two-finger scroll over a card pans the whole canvas.
+//
+// Fix: replace InteractiveViewer with a Listener + manual transform. Before
+// starting any canvas pan/zoom, hit-test the pointer position and, if any
+// RenderScrollableCardMarker is in the hit path, skip — the card's inner
+// content handles the gesture as usual.
+class _WebCanvas extends StatefulWidget {
+  const _WebCanvas({required this.transformCtrl, required this.child});
+  final TransformationController transformCtrl;
+  final Widget child;
+
+  @override
+  State<_WebCanvas> createState() => _WebCanvasState();
+}
+
+class _WebCanvasState extends State<_WebCanvas> {
+  bool _panning = false;
+
+  bool _pointerOverCard(Offset globalPos) {
+    final result = HitTestResult();
+    final view = View.of(context);
+    WidgetsBinding.instance.hitTestInView(result, globalPos, view.viewId);
+    for (final entry in result.path) {
+      if (entry.target is RenderScrollableCardMarker) return true;
+    }
+    return false;
+  }
+
+  void _applyTranslation(double dx, double dy) {
+    final m = widget.transformCtrl.value.clone();
+    final translated = Matrix4.identity()..translate(dx, dy);
+    widget.transformCtrl.value = translated..multiply(m);
+  }
+
+  void _applyZoomAroundFocal(Offset focal, double factor) {
+    final m = widget.transformCtrl.value.clone();
+    final around = Matrix4.identity()
+      ..translate(focal.dx, focal.dy)
+      ..scale(factor, factor)
+      ..translate(-focal.dx, -focal.dy);
+    widget.transformCtrl.value = around..multiply(m);
+  }
+
+  void _onPanZoomStart(PointerPanZoomStartEvent e) {
+    _panning = !_pointerOverCard(e.position);
+  }
+
+  void _onPanZoomUpdate(PointerPanZoomUpdateEvent e) {
+    if (!_panning) return;
+    if (e.panDelta != Offset.zero) {
+      _applyTranslation(e.panDelta.dx, e.panDelta.dy);
+    }
+  }
+
+  void _onPanZoomEnd(PointerPanZoomEndEvent e) {
+    _panning = false;
+  }
+
+  void _onPointerSignal(PointerSignalEvent event) {
+    if (event is! PointerScrollEvent) return;
+    // Skip if pointer is currently over a card — inner scrollable handles it
+    // through its own PointerSignalResolver registration.
+    if (_pointerOverCard(event.position)) return;
+    GestureBinding.instance.pointerSignalResolver.register(event, (e) {
+      final ev = e as PointerScrollEvent;
+      // Trackpad two-finger scroll delivers signed scrollDelta. Translate
+      // the canvas so that scrolling "down" visually moves the canvas up
+      // (i.e. we see content further down). Matches native scroll feel.
+      _applyTranslation(-ev.scrollDelta.dx, -ev.scrollDelta.dy);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Listener(
+      behavior: HitTestBehavior.opaque,
+      onPointerPanZoomStart: _onPanZoomStart,
+      onPointerPanZoomUpdate: _onPanZoomUpdate,
+      onPointerPanZoomEnd: _onPanZoomEnd,
+      onPointerSignal: _onPointerSignal,
+      child: ClipRect(
+        child: AnimatedBuilder(
+          animation: widget.transformCtrl,
+          builder: (_, child) => Transform(
+            transform: widget.transformCtrl.value,
+            child: child,
+          ),
+          child: widget.child,
+        ),
+      ),
+    );
+  }
 }

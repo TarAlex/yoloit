@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'package:yoloit/features/collaboration/ui/guest_terminal_view.dart';
 import 'package:yoloit/features/mindmap/nodes/presentation/presentation.dart';
 
 /// Callback bundle for events that web guests can send back to the host.
@@ -17,6 +18,7 @@ class CardEventCallbacks {
     this.onTreeSelect,
     this.onEditorSwitchTab,
     this.onEditorSave,
+    this.onEditorContentUpdate,
   });
   final void Function(String nodeId, String data)? onTerminalInput;
   final void Function(String nodeId)? onSessionStart;
@@ -30,6 +32,7 @@ class CardEventCallbacks {
   final void Function(String nodeId, String path)? onTreeSelect;
   final void Function(String nodeId, int tabIndex)? onEditorSwitchTab;
   final void Function(String nodeId)? onEditorSave;
+  final void Function(String nodeId, String content)? onEditorContentUpdate;
 }
 
 /// Maps a `nodeContent` JSON map to the matching presentation card widget.
@@ -46,6 +49,17 @@ Widget buildCardFromContent(
   return switch (type) {
     'agent' => AgentCard(
         props: AgentCardProps.fromJson(content),
+        // Live xterm view backed by the guest registry — raw PTY bytes arrive
+        // over WebSocket and are piped straight into xterm.dart so rendering
+        // (colors, box-drawing, scrollback, cursor) matches the native client.
+        body: AgentCardProps.fromJson(content).isIdle
+            ? null
+            : GuestTerminalView(
+                nodeId: nodeId,
+                onInput: callbacks.onTerminalInput != null
+                    ? (data) => callbacks.onTerminalInput!(nodeId, data)
+                    : null,
+              ),
         onTerminalInput: callbacks.onTerminalInput != null
             ? (data) => callbacks.onTerminalInput!(nodeId, data)
             : null,
@@ -83,6 +97,9 @@ Widget buildCardFromContent(
             : null,
         onSave: callbacks.onEditorSave != null
             ? () => callbacks.onEditorSave!(nodeId)
+            : null,
+        onContentUpdate: callbacks.onEditorContentUpdate != null
+            ? (text) => callbacks.onEditorContentUpdate!(nodeId, text)
             : null,
       ),
     'files' => FilesCard(
