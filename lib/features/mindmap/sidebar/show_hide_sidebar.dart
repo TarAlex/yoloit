@@ -517,6 +517,10 @@ void _collectReachableIds(
       type: 'editor',
       label: p.basename(data.filePath),
     ),
+    FilePanelNodeData data => (
+      type: 'panel',
+      label: p.basename(data.filePath),
+    ),
     RunNodeData data => (
       type: 'run',
       label: data.session.config.name,
@@ -571,6 +575,10 @@ Map<String, dynamic> _snapshotContentFromNode(MindMapNodeData node) {
     },
     EditorNodeData data => {
       'type': 'editor',
+      'filePath': data.filePath,
+    },
+    FilePanelNodeData data => {
+      'type': 'panel',
       'filePath': data.filePath,
     },
     RunNodeData data => {

@@ -372,6 +372,10 @@ class CollaborationCubit extends Cubit<CollaborationState> {
         'commitHash': d.commitHash,
       },
       EditorNodeData d => _serializeEditor(d),
+      FilePanelNodeData d => {
+        'type': 'panel',
+        'filePath': d.filePath,
+      },
       FilesNodeData d => {
         'type': 'files',
         'repoPath': d.repoPath,

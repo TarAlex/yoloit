@@ -4,7 +4,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:yoloit/features/collaboration/desktop/repo_directory_listing.dart';
 import 'package:yoloit/features/editor/bloc/file_editor_cubit.dart';
-import 'package:yoloit/features/editor/utils/file_type_utils.dart';
 import 'package:yoloit/features/mindmap/bloc/mindmap_cubit.dart';
 import 'package:yoloit/features/mindmap/model/mindmap_node_model.dart';
 import 'package:yoloit/features/mindmap/nodes/presentation/file_tree_card.dart';
@@ -41,17 +40,12 @@ class FileTreeNode extends StatelessWidget {
     );
   }
 
-  void _openInPanel(BuildContext context, String path) async {
-    final content =
-        await File(path).readAsString().catchError((_) => '');
-    final lang = FileTypeUtils.languageFor(path) ?? '';
-    final nodeId = 'editor:${path.hashCode}';
+  void _openInPanel(BuildContext context, String path) {
+    final nodeId = 'panel:${path.hashCode}';
     if (!context.mounted) return;
     context.read<MindMapCubit>().openFileAsPanel(
       id: nodeId,
       filePath: path,
-      content: content,
-      language: lang,
     );
   }
 }

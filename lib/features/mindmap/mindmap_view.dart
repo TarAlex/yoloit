@@ -1281,6 +1281,11 @@ class _TreeRow extends StatelessWidget {
       icon: Icons.code,
       color: const Color(0xFFFFCC44),
     ),
+    FilePanelNodeData d => (
+      label: p.basename(d.filePath),
+      icon: Icons.insert_drive_file_outlined,
+      color: const Color(0xFFFFCC44),
+    ),
     RunNodeData d => (
       label: d.session.config.name,
       icon: Icons.play_circle_outline,

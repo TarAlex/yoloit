@@ -823,12 +823,10 @@ class _TabBar extends StatelessWidget {
   }
 
   void _popOutTab(BuildContext context, EditorTab tab) {
-    final nodeId = 'editor:${tab.filePath.hashCode}';
+    final nodeId = 'panel:${tab.filePath.hashCode}';
     context.read<MindMapCubit>().openFileAsPanel(
       id: nodeId,
       filePath: tab.filePath,
-      content: tab.content ?? '',
-      language: FileTypeUtils.languageFor(tab.filePath) ?? '',
     );
   }
 }

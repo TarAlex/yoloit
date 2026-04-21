@@ -146,12 +146,29 @@ class MindMapCubit extends Cubit<MindMapState> {
     List<MindMapNodeData> nodes,
     List<MindMapConnection> connections,
   ) {
+    // Preserve EditorNodeData panels that were manually opened via
+    // openFileAsPanel() — they are NOT produced by the graph builder
+    // (which only emits 'editor:active') and must survive rebuild cycles.
+    // Also preserve FilePanelNodeData nodes (the new standalone panel type).
+    final panelEditors = state.nodes
+        .where((n) =>
+            (n is EditorNodeData && n.id != 'editor:active' ||
+             n is FilePanelNodeData) &&
+            !nodes.any((m) => m.id == n.id))
+        .toList();
+    final panelConns = state.connections
+        .where((c) => panelEditors.any((n) => n.id == c.fromId || n.id == c.toId))
+        .toList();
+
+    final mergedNodes = [...nodes, ...panelEditors];
+    final mergedConns = [...connections, ...panelConns];
+
     final newPositions = _engine.compute(
-      nodes:       nodes,
+      nodes:       mergedNodes,
       existing:    state.positions,
       sizes:       state.sizes,
       locked:      state.locked,
-      connections: connections,
+      connections: mergedConns,
     );
 
     // Auto-reveal any live/active agent sessions.  A session becoming live
@@ -166,8 +183,8 @@ class MindMapCubit extends Cubit<MindMapState> {
         : ({...state.hidden}..removeAll(liveAgentIds));
 
     emit(state.copyWith(
-      nodes:       nodes,
-      connections: connections,
+      nodes:       mergedNodes,
+      connections: mergedConns,
       positions:   newPositions,
       hidden:      newHidden,
     ));
@@ -322,22 +339,17 @@ class MindMapCubit extends Cubit<MindMapState> {
   void openFileAsPanel({
     required String id,
     required String filePath,
-    required String content,
-    required String language,
   }) {
     if (state.nodes.any((n) => n.id == id)) {
+      // Already on canvas — just unhide it.
       final newHidden = {...state.hidden}..remove(id);
       emit(state.copyWith(hidden: newHidden));
       _saveHidden(newHidden);
       return;
     }
-    final newNode = EditorNodeData(
-      id: id,
-      filePath: filePath,
-      content: content,
-      language: language,
-    );
-    // Find a matching file tree node to connect from.
+    final newNode = FilePanelNodeData(id: id, filePath: filePath);
+
+    // Connect from the matching file tree node (if any).
     final treeNode = state.nodes.whereType<FileTreeNodeData>().where(
       (n) => n.repoPath != null && filePath.startsWith(n.repoPath!),
     ).firstOrNull;

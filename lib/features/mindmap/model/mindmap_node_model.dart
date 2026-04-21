@@ -233,6 +233,29 @@ class EditorNodeData extends MindMapNodeData {
   String get typeTag => 'editor';
 }
 
+// ── Standalone file panel (own FileEditorCubit) ───────────────────────────
+
+/// A file opened as an independent canvas card via "Open in Panel".
+/// Unlike [EditorNodeData] (which binds to the shared FileEditorCubit),
+/// this node carries its own file path and spawns a private cubit so
+/// multiple panels can coexist.
+class FilePanelNodeData extends MindMapNodeData {
+  const FilePanelNodeData({
+    required super.id,
+    required this.filePath,
+  });
+  final String filePath;
+
+  @override
+  Size get defaultSize => const Size(460, 348);
+
+  @override
+  int get columnIndex => 5;
+
+  @override
+  String get typeTag => 'panel';
+}
+
 // ── Run Session ────────────────────────────────────────────────────────────
 
 class RunNodeData extends MindMapNodeData {
