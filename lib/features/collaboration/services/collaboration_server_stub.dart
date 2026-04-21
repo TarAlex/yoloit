@@ -1,11 +1,12 @@
+import '../collaboration_ports.dart';
 import '../model/sync_message.dart';
 
 /// Web stub — the browser cannot host a WebSocket server.
 class CollaborationServer {
   CollaborationServer({
     required void Function(String, SyncMessage) onClientMessage,
-    this.port = 40401,
-    this.httpPort = 40400,
+    this.port = kDefaultWsPort,
+    this.httpPort = kDefaultHttpPort,
   });
 
   final int port;

@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
@@ -15,6 +14,7 @@ import '../../mindmap/nodes/presentation/review_card_props_builder.dart';
 import '../../terminal/data/terminal_output_bus.dart';
 import '../../terminal/models/agent_session.dart';
 import '../../runs/models/run_session.dart';
+import '../collaboration_ports.dart';
 import '../model/sync_message.dart';
 import '../services/collaboration_client.dart';
 import '../services/collaboration_server_platform.dart';
@@ -106,7 +106,7 @@ class CollaborationCubit extends Cubit<CollaborationState> {
 
   // ── Host ─────────────────────────────────────────────────────────────────
 
-  Future<void> startHosting({int port = 40401}) async {
+  Future<void> startHosting({int port = kDefaultWsPort}) async {
     if (!state.isIdle) return;
     if (_server != null) {
       await stopHosting();
@@ -219,7 +219,7 @@ class CollaborationCubit extends Cubit<CollaborationState> {
 
   // ── Guest ────────────────────────────────────────────────────────────────
 
-  Future<void> connect(String host, {int port = 40401}) async {
+  Future<void> connect(String host, {int port = kDefaultWsPort}) async {
     if (!state.isIdle) return;
     emit(state.copyWith(error: ''));
     try {

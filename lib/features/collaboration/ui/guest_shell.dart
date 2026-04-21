@@ -3,6 +3,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../bloc/collaboration_cubit.dart';
 import '../bloc/collaboration_state.dart';
+import '../collaboration_ports.dart';
 import 'web_mindmap_canvas.dart';
 
 /// Full-screen shell shown when the app runs in browser / non-desktop mode.
@@ -48,9 +49,9 @@ class _GuestShellState extends State<GuestShell> {
   static int _inferWsPort() {
     try {
       final rawPort = Uri.base.queryParameters['wsPort'] ?? '';
-      return int.tryParse(rawPort) ?? 40401;
+      return int.tryParse(rawPort) ?? kDefaultWsPort;
     } catch (_) {
-      return 40401;
+      return kDefaultWsPort;
     }
   }
 
@@ -64,7 +65,7 @@ class _GuestShellState extends State<GuestShell> {
 
   Future<void> _connect(CollaborationCubit cubit) async {
     final host = _hostCtrl.text.trim();
-    final port = int.tryParse(_portCtrl.text.trim()) ?? 40401;
+    final port = int.tryParse(_portCtrl.text.trim()) ?? kDefaultWsPort;
     if (host.isEmpty) return;
     await cubit.connect(host, port: port);
   }
@@ -165,7 +166,7 @@ class _GuestShellState extends State<GuestShell> {
               const SizedBox(height: 16),
               _label('Port'),
               const SizedBox(height: 6),
-              _field(_portCtrl, '40401', number: true),
+              _field(_portCtrl, '$kDefaultWsPort', number: true),
               const SizedBox(height: 16),
               _label('Your name'),
               const SizedBox(height: 6),
