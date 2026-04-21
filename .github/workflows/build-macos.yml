@@ -168,6 +168,23 @@ jobs:
           echo "Architectures in binary:"
           lipo -info "$MAIN_BIN" || file "$MAIN_BIN"
 
+      # ── Build & bundle web client ─────────────────────────────────────────────
+      - name: Build web client
+        env:
+          BUILD_NUMBER: ${{ github.run_number }}
+          BUILD_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          flutter build web --release \
+            --target lib/main_web.dart \
+            --build-name=$BUILD_VERSION \
+            --build-number=$BUILD_NUMBER
+          # Bundle into the .app Resources so the HTTP server can serve it
+          WEB_DEST="build/macos/Build/Products/Release/YoLoIT.app/Contents/Resources/web_client"
+          mkdir -p "$WEB_DEST"
+          cp -R build/web/. "$WEB_DEST/"
+          echo "Web client bundled → $WEB_DEST"
+          ls "$WEB_DEST" | head -10
+
       # ── Package as DMG ───────────────────────────────────────────────────────
       - name: Package as DMG
         id: package
