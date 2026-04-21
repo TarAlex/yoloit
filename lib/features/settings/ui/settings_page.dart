@@ -1037,12 +1037,17 @@ class _AboutSectionState extends State<_AboutSection> {
   bool _autoCheck = true;
   UpdateInfo? _updateInfo;
   String? _upToDateMsg;
+  bool _installing = false;
+  double? _installProgress;
+  String _installStatus = '';
 
   @override
   void initState() {
     super.initState();
     SessionPrefs.isAutoUpdateCheckEnabled()
         .then((v) { if (mounted) setState(() => _autoCheck = v); });
+    // Eagerly load the real version from Info.plist so the UI shows it.
+    UpdateService.getAppVersion().then((_) { if (mounted) setState(() {}); });
   }
 
   Future<void> _checkNow() async {
@@ -1054,6 +1059,26 @@ class _AboutSectionState extends State<_AboutSection> {
       _updateInfo = info;
       if (info == null) _upToDateMsg = 'You are on the latest version (${UpdateService.currentVersion}).';
     });
+  }
+
+  Future<void> _installUpdate(UpdateInfo info) async {
+    setState(() { _installing = true; _installProgress = null; _installStatus = 'Preparing…'; });
+    try {
+      await UpdateService.downloadAndInstall(
+        info,
+        onProgress: (progress, status) {
+          if (mounted) setState(() { _installProgress = progress; _installStatus = status; });
+        },
+      );
+      // If we get here without exit(), the installer opened browser fallback.
+    } catch (e) {
+      if (mounted) {
+        setState(() { _installing = false; });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Update failed: $e'), backgroundColor: AppColors.neonRed),
+        );
+      }
+    }
   }
 
   @override
@@ -1192,14 +1217,33 @@ class _AboutSectionState extends State<_AboutSection> {
 
               if (_updateInfo != null) ...[
                 const SizedBox(height: 10),
-                _UpdateAvailableCard(
-                  info: _updateInfo!,
-                  onDownload: () => UpdateService.openRelease(_updateInfo!),
-                  onSkip: () async {
-                    await UpdateService.skipVersion(_updateInfo!.version);
-                    if (mounted) setState(() => _updateInfo = null);
-                  },
-                ),
+                if (_installing) ...[
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(_installStatus,
+                          style: const TextStyle(color: AppColors.textSecondary, fontSize: 11)),
+                      const SizedBox(height: 6),
+                      LinearProgressIndicator(
+                        value: _installProgress,
+                        backgroundColor: AppColors.neonBlue.withAlpha(30),
+                        color: AppColors.neonBlue,
+                        minHeight: 3,
+                      ),
+                      const SizedBox(height: 4),
+                      const Text('App will restart automatically after install.',
+                          style: TextStyle(color: AppColors.textMuted, fontSize: 10)),
+                    ],
+                  ),
+                ] else
+                  _UpdateAvailableCard(
+                    info: _updateInfo!,
+                    onDownload: () => _installUpdate(_updateInfo!),
+                    onSkip: () async {
+                      await UpdateService.skipVersion(_updateInfo!.version);
+                      if (mounted) setState(() => _updateInfo = null);
+                    },
+                  ),
               ],
             ],
           ),

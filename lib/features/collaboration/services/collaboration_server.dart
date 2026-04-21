@@ -161,7 +161,10 @@ class CollaborationServer {
               '\r\n'
               'YoLoIT collaboration server',
             );
-            socket.close();
+            // flush/close can throw on LAN sockets (macOS EINVAL); swallow.
+            socket.flush().catchError((_) {}).whenComplete(() {
+              try { socket.destroy(); } catch (_) {}
+            });
             return;
           }
 
@@ -239,8 +242,6 @@ class CollaborationServer {
   Future<void> _startStaticServer() async {
     final webDir = await _findWebClientDir();
     if (webDir == null) return;
-    // Use plain ServerSocket (same as WS server) — never calls setOption on
-    // accepted sockets, so no EINVAL on macOS LAN sockets.
     _staticServerSocket = await ServerSocket.bind(
       InternetAddress.anyIPv4,
       httpPort,
@@ -251,6 +252,31 @@ class CollaborationServer {
       }),
       onError: (_) {},
     );
+    // Trigger macOS "Local Network" privacy dialog.  On macOS 12+ the OS
+    // silently kills accepted sockets from LAN IPs until the user grants
+    // Local Network access.  The dialog ONLY appears when the app makes an
+    // OUTGOING connection to a LAN address.  We do a fire-and-forget connect
+    // to ourselves via the LAN IP (not localhost) so the OS shows the prompt
+    // on first launch; subsequent launches are already approved and succeed.
+    unawaited(_triggerLocalNetworkPermission());
+  }
+
+  /// Fire-and-forget: connect to our own HTTP port via the LAN IP so macOS
+  /// shows the Local Network privacy alert.  Errors are expected and silently
+  /// swallowed; the only purpose is to trigger the OS permission dialog.
+  Future<void> _triggerLocalNetworkPermission() async {
+    await Future<void>.delayed(const Duration(milliseconds: 500));
+    final ip = _resolvedIp;
+    if (ip == null || ip == 'localhost' || ip == '127.0.0.1') return;
+    try {
+      final s = await Socket.connect(
+        ip, httpPort,
+        timeout: const Duration(seconds: 3),
+      );
+      await s.close();
+    } catch (_) {
+      // Expected on first launch; the dialog will have been shown.
+    }
   }
 
   /// Serves one HTTP request on [socket] using the same stream-listener pattern
@@ -296,8 +322,14 @@ class CollaborationServer {
         'Connection: close\r\n'
         '\r\n',
       );
-      await socket.flush();
-      await socket.close();
+      bool optFlushed = false;
+      try { await socket.flush(); optFlushed = true; } catch (_) {}
+      try {
+        await socket.close();
+      } catch (_) {
+        if (optFlushed) await Future<void>.delayed(const Duration(milliseconds: 400));
+        try { socket.destroy(); } catch (_) {}
+      }
       return;
     }
 
@@ -323,8 +355,24 @@ class CollaborationServer {
       '\r\n',
     );
     try { socket.add(bytes); } catch (_) {}
-    await socket.flush();
-    await socket.close();
+
+    // On macOS, socket.close() internally calls shutdown(SHUT_WR) which throws
+    // EINVAL (errno=22) for sockets accepted on a non-loopback interface.
+    // Fix: flush first, then attempt graceful close; if close() throws, delay
+    // before destroy() so the kernel has time to deliver the already-flushed
+    // data to the client before RST is sent.
+    bool flushed = false;
+    try { await socket.flush(); flushed = true; } catch (_) {}
+    try {
+      await socket.close();
+    } catch (_) {
+      if (flushed) {
+        // Data was flushed to the kernel — give the client time to read it
+        // before RST terminates the connection.
+        await Future<void>.delayed(const Duration(milliseconds: 400));
+      }
+      try { socket.destroy(); } catch (_) {}
+    }
   }
 
   // ── Helpers ────────────────────────────────────────────────────────────────

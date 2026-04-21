@@ -44,7 +44,7 @@ class UpdateService {
   /// Current app version — read from Info.plist at runtime.
   /// Falls back to pubspec version if plist read fails.
   static String? _cachedVersion;
-  static const _fallbackVersion = '0.0.11';
+  static const _fallbackVersion = '0.0.0';
 
   static Future<String> getAppVersion() async {
     if (_cachedVersion != null) return _cachedVersion!;
