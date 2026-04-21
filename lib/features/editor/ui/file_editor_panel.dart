@@ -904,53 +904,65 @@ class _TabState extends State<_Tab> {
         ? '${widget.tab.filePath.replaceFirst('diff:', '').split('/').last} (diff)'
         : widget.tab.fileName;
 
+    // Close button is placed OUTSIDE the tap-to-switch GestureDetector so
+    // clicking × closes the tab instead of switching to it.
     return GestureDetector(
       onSecondaryTapDown: (d) => _showTabMenu(context, d.globalPosition),
-      child: GestureDetector(
-        onTap: widget.onTap,
-        child: Container(
-          constraints: const BoxConstraints(maxWidth: 200, minWidth: 80),
-          padding: const EdgeInsets.symmetric(horizontal: 10),
-          decoration: BoxDecoration(
-            color: widget.isActive ? colors.background : Colors.transparent,
-            border: Border(
-              bottom: BorderSide(
-                color: widget.isActive ? colors.primary : Colors.transparent,
-                width: 2,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          GestureDetector(
+            onTap: widget.onTap,
+            child: Container(
+              constraints:
+                  const BoxConstraints(maxWidth: 170, minWidth: 60),
+              padding: const EdgeInsets.only(left: 10, right: 4, top: 0, bottom: 0),
+              decoration: BoxDecoration(
+                color:
+                    widget.isActive ? colors.background : Colors.transparent,
+                border: Border(
+                  bottom: BorderSide(
+                    color: widget.isActive
+                        ? colors.primary
+                        : Colors.transparent,
+                    width: 2,
+                  ),
+                ),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    widget.tab.isDiff ? Icons.difference : fileInfo!.icon,
+                    size: 12,
+                    color: widget.tab.isDiff
+                        ? AppColors.textMuted
+                        : fileInfo!.color,
+                  ),
+                  const SizedBox(width: 5),
+                  Flexible(
+                    child: Text(
+                      displayName,
+                      style: TextStyle(
+                        color: widget.isActive
+                            ? colors.primaryLight
+                            : AppColors.textMuted,
+                        fontSize: 12,
+                        fontWeight: widget.isActive
+                            ? FontWeight.w600
+                            : FontWeight.normal,
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
               ),
             ),
           ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(
-                widget.tab.isDiff ? Icons.difference : fileInfo!.icon,
-                size: 12,
-                color: widget.tab.isDiff
-                    ? AppColors.textMuted
-                    : fileInfo!.color,
-              ),
-              const SizedBox(width: 5),
-              Flexible(
-                child: Text(
-                  displayName,
-                  style: TextStyle(
-                    color: widget.isActive
-                        ? colors.primaryLight
-                        : AppColors.textMuted,
-                    fontSize: 12,
-                    fontWeight: widget.isActive
-                        ? FontWeight.w600
-                        : FontWeight.normal,
-                  ),
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-              const SizedBox(width: 4),
-              _TabCloseButton(onClose: widget.onClose),
-            ],
-          ),
-        ),
+          // × button lives OUTSIDE the switch-tab detector so it always fires.
+          _TabCloseButton(onClose: widget.onClose),
+          const SizedBox(width: 6),
+        ],
       ),
     );
   }
