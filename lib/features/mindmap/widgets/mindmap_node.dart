@@ -94,7 +94,7 @@ class _MindMapNodeState extends State<MindMapNode> {
 
                   // Right edge strip (inset top/bottom so it doesn't span full height)
                   Positioned(
-                    right: -6, top: 40, bottom: 40,
+                    right: -6, top: 20, bottom: 20,
                     width: 12,
                     child: _ResizeEdge(
                       axis: Axis.vertical,
@@ -104,7 +104,7 @@ class _MindMapNodeState extends State<MindMapNode> {
                   ),
                   // Left edge strip
                   Positioned(
-                    left: -6, top: 40, bottom: 40,
+                    left: -6, top: 20, bottom: 20,
                     width: 12,
                     child: _ResizeEdge(
                       axis: Axis.vertical,
