@@ -181,6 +181,9 @@ class ReviewCubit extends Cubit<ReviewState> {
   Future<void> createFolder(String parentDirPath, String folderName) async {
     final newDir = Directory(p.join(parentDirPath, folderName));
     await newDir.create(recursive: true);
+    // Add .gitkeep so git tracks the empty directory.
+    final gitkeep = File(p.join(newDir.path, '.gitkeep'));
+    await gitkeep.writeAsString('');
     await refresh();
   }
 
