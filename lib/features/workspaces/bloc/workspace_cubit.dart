@@ -1,10 +1,10 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:path/path.dart' as p;
-import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:yoloit/core/config/app_config.dart';
 import 'package:yoloit/core/session/session_prefs.dart';
@@ -20,10 +20,14 @@ class WorkspaceCubit extends Cubit<WorkspaceState> {
   // Production bundle ID — used for cross-build migration only.
   static const _kProductionBundleId = 'com.yoloit.yoloit';
 
-  // Shared file path comes from AppConfig (user-configurable, default ~/.yoloit/workspaces.json).
+  // Debug and release builds use separate files so that running a debug build
+  // never overwrites the production workspace list.
   static Future<File> get _sharedFile async {
     await AppConfig.instance.load();
-    final path = AppConfig.instance.workspacesFilePath;
+    final basePath = AppConfig.instance.workspacesFilePath;
+    final path = kDebugMode
+        ? basePath.replaceFirst('.json', '.debug.json')
+        : basePath;
     final dir = Directory(p.dirname(path));
     if (!dir.existsSync()) dir.createSync(recursive: true);
     return File(path);
