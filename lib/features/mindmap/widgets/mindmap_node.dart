@@ -92,9 +92,9 @@ class _MindMapNodeState extends State<MindMapNode> {
 
                   // ── Resize handles — only show on direct-edge hover ──────
 
-                  // Right edge strip
+                  // Right edge strip (inset top/bottom so it doesn't span full height)
                   Positioned(
-                    right: -6, top: 22, bottom: 12,
+                    right: -6, top: 60, bottom: 60,
                     width: 12,
                     child: _ResizeEdge(
                       axis: Axis.vertical,
@@ -104,7 +104,7 @@ class _MindMapNodeState extends State<MindMapNode> {
                   ),
                   // Left edge strip
                   Positioned(
-                    left: -6, top: 22, bottom: 12,
+                    left: -6, top: 60, bottom: 60,
                     width: 12,
                     child: _ResizeEdge(
                       axis: Axis.vertical,
