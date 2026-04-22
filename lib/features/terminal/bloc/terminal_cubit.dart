@@ -467,8 +467,13 @@ class TerminalCubit extends Cubit<TerminalState> {
   void _onPtyActivity(AgentSession session, String data, AgentPtyConfig config) {
     final sessionId = session.id;
 
+    // Always look up CURRENT session state — the captured `session` is stale.
+    final i = _allSessions.indexWhere((s) => s.id == sessionId);
+    if (i < 0) return;
+    final current = _allSessions[i];
+
     // Done-prompt detected while thinking → transition to done.
-    if (session.hookPhase is ThinkingPhase && config.containsDonePrompt(data)) {
+    if (current.hookPhase is ThinkingPhase && config.containsDonePrompt(data)) {
       _onCopilotPromptDetected(sessionId);
       return;
     }
@@ -479,9 +484,9 @@ class TerminalCubit extends Cubit<TerminalState> {
     _ptyIdleTimers[sessionId]?.cancel();
     _ptyIdleTimers[sessionId] = Timer(config.idleTimeout, () {
       _ptyIdleTimers.remove(sessionId);
-      final i = _allSessions.indexWhere((s) => s.id == sessionId);
-      if (i >= 0 && _allSessions[i].hookPhase is ThinkingPhase) {
-        _allSessions[i] = _allSessions[i].copyWith(clearHookPhase: true);
+      final j = _allSessions.indexWhere((s) => s.id == sessionId);
+      if (j >= 0 && _allSessions[j].hookPhase is ThinkingPhase) {
+        _allSessions[j] = _allSessions[j].copyWith(clearHookPhase: true);
         final cur = _loaded;
         if (cur != null && !isClosed) {
           emit(cur.copyWith(sessions: _workspaceSessions, allSessions: List.unmodifiable(_allSessions)));
@@ -490,10 +495,9 @@ class TerminalCubit extends Cubit<TerminalState> {
     });
 
     // Only set ThinkingPhase if no hook phase is already active.
-    final i = _allSessions.indexWhere((s) => s.id == sessionId);
-    if (i < 0 || _allSessions[i].hookPhase != null) return;
+    if (current.hookPhase != null) return;
 
-    _allSessions[i] = _allSessions[i].copyWith(hookPhase: const ThinkingPhase());
+    _allSessions[i] = current.copyWith(hookPhase: const ThinkingPhase());
     final cur = _loaded;
     if (cur != null && !isClosed) {
       emit(cur.copyWith(sessions: _workspaceSessions, allSessions: List.unmodifiable(_allSessions)));

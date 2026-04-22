@@ -40,8 +40,13 @@ extension AgentTypePtyConfig on AgentType {
     switch (this) {
       case AgentType.copilot:
         return const AgentPtyConfig(
-          // Filled/empty circle used in Copilot's status spinner.
-          spinnerChars: {'\u25CF', '\u25CB'},
+          // Copilot spinner cycles through: ○ ◎ ◉ ● (U+25CB, U+25CE, U+25C9, U+25CF)
+          // Response bullets use only ● — so we detect the OTHER 3 as spinner-only chars.
+          spinnerChars: {
+            '\u25CB', // ○ outline circle
+            '\u25CE', // ◎ bullseye
+            '\u25C9', // ◉ fisheye
+          },
           // '› ' — Copilot interactive prompt (U+203A + space).
           donePrompts: {'\u203A '},
         );
