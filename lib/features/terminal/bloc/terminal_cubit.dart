@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
@@ -420,11 +421,45 @@ class TerminalCubit extends Cubit<TerminalState> {
             session.terminal.write(data);
             _logging.write(session.id, data);
             session.appendOutput(data); // capture for browser streaming
+
+            // Detect Copilot interactive prompt '› ' (U+203A + space).
+            // When Copilot finishes responding, it shows this prompt.
+            // Use it to clear 'thinking' phase and play done sound.
+            if (session.hookPhase == 'thinking' && data.contains('\u203A ')) {
+              _onCopilotPromptDetected(session.id);
+            }
           },
           onDone: () => _onSessionDone(session.id),
           // ignore: avoid_types_on_closure_parameters
           onError: (Object e) => _onSessionDone(session.id),
         );
+  }
+
+  void _onCopilotPromptDetected(String sessionId) {
+    final current = _loaded;
+    if (current == null || isClosed) return;
+    final i = _allSessions.indexWhere((s) => s.id == sessionId);
+    if (i < 0) return;
+    if (_allSessions[i].hookPhase != 'thinking') return;
+
+    // Flash 'done' briefly then clear.
+    _allSessions[i] = _allSessions[i].copyWith(hookPhase: 'done');
+    final visible = _workspaceSessions;
+    emit(current.copyWith(sessions: visible, allSessions: List.unmodifiable(_allSessions)));
+
+    // Play completion sound (interactive mode micro-completion).
+    Process.run('afplay', ['/System/Library/Sounds/Glass.aiff']);
+
+    Future.delayed(const Duration(seconds: 3), () {
+      final i2 = _allSessions.indexWhere((s) => s.id == sessionId);
+      if (i2 >= 0 && _allSessions[i2].hookPhase == 'done') {
+        _allSessions[i2] = _allSessions[i2].copyWith(clearHookPhase: true);
+        final cur = _loaded;
+        if (cur != null && !isClosed) {
+          emit(cur.copyWith(sessions: _workspaceSessions, allSessions: List.unmodifiable(_allSessions)));
+        }
+      }
+    });
   }
 
   void _onSessionDone(String sessionId) {

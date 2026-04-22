@@ -308,9 +308,14 @@ TMP_FILE="${STATUS_FILE}.tmp.$$"
 printf '%s\n' "$STATUS_JSON" > "$TMP_FILE"
 mv -f "$TMP_FILE" "$STATUS_FILE"
 
+REASON=$(extract_field "reason")
 case "$EVENT" in
   sessionEnd)
-    [ "$(uname)" = "Darwin" ] && afplay "/System/Library/Sounds/Glass.aiff" 2>/dev/null &
+    # Play sound only for non-interactive exits (one-shot mode = "complete").
+    # In interactive mode, reason is "user_exit" — sound plays via PTY detection.
+    if [ "$REASON" = "complete" ]; then
+      [ "$(uname)" = "Darwin" ] && afplay "/System/Library/Sounds/Glass.aiff" 2>/dev/null &
+    fi
     ;;
   errorOccurred)
     [ "$(uname)" = "Darwin" ] && afplay "/System/Library/Sounds/Basso.aiff" 2>/dev/null &
