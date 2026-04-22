@@ -83,9 +83,6 @@ class AgentHookService {
 
   Timer? _timer;
 
-  /// Tracks the last-seen timestamp per workspace hash to avoid re-emitting.
-  final _lastTs = <String, int>{};
-
   Directory get _hooksDir =>
       Directory('${Platform.environment['HOME']}/.yoloit/hooks');
 
@@ -107,38 +104,47 @@ class AgentHookService {
     if (!await dir.exists()) return;
 
     try {
+      // Collect all event files, sort by timestamp embedded in filename.
+      final files = <File>[];
       await for (final entity in dir.list()) {
         if (entity is! File) continue;
         final name = entity.uri.pathSegments.last;
-        if (!name.endsWith('.json') || name.endsWith('.tmp')) continue;
-        final hash = name.replaceAll('.json', '');
-        await _processFile(entity, hash);
+        if (!name.endsWith('.json') || name.contains('.tmp')) continue;
+        files.add(entity);
+      }
+
+      // Sort by filename so earlier events (lower ts in name) are processed first.
+      files.sort((a, b) => a.path.compareTo(b.path));
+
+      for (final file in files) {
+        await _processFile(file);
       }
     } catch (e) {
       debugPrint('[HookService] poll error: $e');
     }
   }
 
-  Future<void> _processFile(File file, String hash) async {
+  Future<void> _processFile(File file) async {
     try {
       final raw = await file.readAsString();
+      // Delete immediately after reading to avoid re-processing on next poll.
+      await file.delete();
+
       final Map<String, dynamic> json =
           jsonDecode(raw) as Map<String, dynamic>;
-
-      final ts = (json['ts'] as num?)?.toInt() ?? 0;
-      if ((_lastTs[hash] ?? 0) >= ts) return; // already processed
-      _lastTs[hash] = ts;
 
       final event = json['event'] as String? ?? 'unknown';
       final cwd = json['cwd'] as String? ?? '';
       final tool = json['tool'] as String?;
+      final ts = (json['ts'] as num?)?.toInt() ?? 0;
+      final cwdHash = json['cwdHash'] as String? ?? '';
 
       debugPrint('[HookService] NEW EVENT: $event  cwd=$cwd  tool=$tool  ts=$ts');
 
       _controller.add(HookEvent(
         event: event,
         workspacePath: cwd,
-        workspaceHash: hash,
+        workspaceHash: cwdHash,
         tool: tool,
         timestamp: ts,
       ));
@@ -277,10 +283,6 @@ fi
 
 HOOKS_DIR="${HOME}/.yoloit/hooks"
 mkdir -p "$HOOKS_DIR"
-STATUS_FILE="${HOOKS_DIR}/${CWD_HASH}.json"
-
-# Debug log
-printf '[%s] EVENT=%s CWD=%s\n' "$(date '+%H:%M:%S')" "$EVENT" "$CWD" >> "${HOOKS_DIR}/debug.log" 2>/dev/null || true
 
 extract_field() {
   printf '%s' "$INPUT" | grep -o "\"${1}\"[[:space:]]*:[[:space:]]*\"[^\"]*\"" | \
@@ -290,7 +292,15 @@ extract_field() {
 TOOL_NAME=$(extract_field "toolName")
 TIMESTAMP=$(python3 -c "import time; print(int(time.time()*1000))" 2>/dev/null || printf '%s000' "$(date +%s)")
 
-STATUS_JSON="{\"event\":\"${EVENT}\",\"cwd\":\"${CWD}\",\"ts\":${TIMESTAMP}"
+# Each event gets its own file: {cwdHash}_{timestamp}_{event}.json
+# This ensures rapid back-to-back events (e.g. userPromptSubmitted + sessionStart)
+# are never overwritten before Flutter reads them.
+STATUS_FILE="${HOOKS_DIR}/${CWD_HASH}_${TIMESTAMP}_${EVENT}.json"
+
+# Debug log
+printf '[%s] EVENT=%s CWD=%s\n' "$(date '+%H:%M:%S')" "$EVENT" "$CWD" >> "${HOOKS_DIR}/debug.log" 2>/dev/null || true
+
+STATUS_JSON="{\"event\":\"${EVENT}\",\"cwd\":\"${CWD}\",\"cwdHash\":\"${CWD_HASH}\",\"ts\":${TIMESTAMP}"
 [ -n "$TOOL_NAME" ] && STATUS_JSON="${STATUS_JSON},\"tool\":\"${TOOL_NAME}\""
 STATUS_JSON="${STATUS_JSON}}"
 
