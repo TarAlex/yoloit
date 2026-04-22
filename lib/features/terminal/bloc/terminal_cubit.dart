@@ -399,7 +399,12 @@ class TerminalCubit extends Cubit<TerminalState> {
 
     _allSessions[idx] = _allSessions[idx].copyWith(
       hookPhase: newPhase,
-      clearHookPhase: newPhase == null,
+      // Don't clear AwaitingApprovalPhase via postToolUse (newPhase == null):
+      // it must persist until the user explicitly responds in the terminal.
+      // It will be cleared when: userPromptSubmitted fires (new user request)
+      // or explicitly via another hook event with a non-null phase.
+      clearHookPhase: newPhase == null &&
+          _allSessions[idx].hookPhase is! AwaitingApprovalPhase,
     );
 
     final cur = _loaded;
@@ -446,7 +451,9 @@ class TerminalCubit extends Cubit<TerminalState> {
     emit(current.copyWith(sessions: visible, allSessions: List.unmodifiable(_allSessions)));
 
     // Play completion sound (interactive mode micro-completion).
-    Process.run('afplay', ['/System/Library/Sounds/Glass.aiff']);
+    SessionPrefs.isCompletionSoundEnabled().then((enabled) {
+      if (enabled) Process.run('afplay', ['/System/Library/Sounds/Glass.aiff']);
+    });
 
     Future.delayed(const Duration(seconds: 3), () {
       final i2 = _allSessions.indexWhere((s) => s.id == sessionId);
@@ -485,7 +492,9 @@ class TerminalCubit extends Cubit<TerminalState> {
             allSessions: List.unmodifiable(_allSessions)));
       }
       // Urgent sound — different from completion sound.
-      Process.run('afplay', ['/System/Library/Sounds/Sosumi.aiff']);
+      SessionPrefs.isApprovalSoundEnabled().then((enabled) {
+        if (enabled) Process.run('afplay', ['/System/Library/Sounds/Sosumi.aiff']);
+      });
       return;
     }
 
