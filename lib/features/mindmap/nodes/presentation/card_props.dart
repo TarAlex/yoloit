@@ -293,17 +293,58 @@ class FileTreeCardProps {
       );
 }
 
+class ChangedFileEntry {
+  const ChangedFileEntry({
+    required this.path,
+    required this.name,
+    required this.status,
+    this.addedLines = 0,
+    this.removedLines = 0,
+  });
+  final String path;
+  final String name;
+  final String status; // 'modified' | 'added' | 'deleted' | 'renamed' | 'untracked'
+  final int addedLines;
+  final int removedLines;
+
+  factory ChangedFileEntry.fromJson(Map<String, dynamic> j) => ChangedFileEntry(
+        path: j['path'] as String? ?? '',
+        name: j['name'] as String? ?? '',
+        status: j['status'] as String? ?? 'modified',
+        addedLines: j['addedLines'] as int? ?? 0,
+        removedLines: j['removedLines'] as int? ?? 0,
+      );
+
+  Map<String, dynamic> toJson() => {
+        'path': path,
+        'name': name,
+        'status': status,
+        'addedLines': addedLines,
+        'removedLines': removedLines,
+      };
+}
+
 class DiffCardProps {
-  const DiffCardProps({this.repoName, this.repoPath, this.hunks = const []});
+  const DiffCardProps({
+    this.repoName,
+    this.repoPath,
+    this.hunks = const [],
+    this.changedFiles = const [],
+  });
   final String? repoName;
   final String? repoPath;
   final List<DiffHunk> hunks;
+  final List<ChangedFileEntry> changedFiles;
 
   factory DiffCardProps.fromJson(Map<String, dynamic> j) => DiffCardProps(
         repoName: j['repoName'] as String?,
         repoPath: j['repoPath'] as String?,
         hunks: (j['hunks'] as List?)
                 ?.map((h) => DiffHunk.fromJson(h as Map<String, dynamic>))
+                .toList() ??
+            const [],
+        changedFiles: (j['changedFiles'] as List?)
+                ?.map((f) => ChangedFileEntry.fromJson(f as Map<String, dynamic>))
                 .toList() ??
             const [],
       );

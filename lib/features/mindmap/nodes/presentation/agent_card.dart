@@ -564,40 +564,48 @@ class RepoBranchPill extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-      decoration: BoxDecoration(
-        color: const Color(0xFF1A1E2A),
-        border: Border.all(color: const Color(0xFF2A3040), width: 1),
-        borderRadius: BorderRadius.circular(10),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
+    return ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: 180),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+        decoration: BoxDecoration(
+          color: const Color(0xFF1A1E2A),
+          border: Border.all(color: const Color(0xFF2A3040), width: 1),
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: Row(
+          children: [
           const Icon(Icons.folder_outlined, size: 9, color: Color(0xFFC084FC)),
           const SizedBox(width: 3),
-          Text(
-            repo,
-            style: const TextStyle(
-              fontSize: 9,
-              fontWeight: FontWeight.w600,
-              color: Color(0xFFCECEEE),
-              fontFamily: 'monospace',
+          Flexible(
+            child: Text(
+              repo,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                fontSize: 9,
+                fontWeight: FontWeight.w600,
+                color: Color(0xFFCECEEE),
+                fontFamily: 'monospace',
+              ),
             ),
           ),
           const SizedBox(width: 5),
           const Icon(Icons.alt_route, size: 9, color: Color(0xFF7C6BFF)),
           const SizedBox(width: 2),
-          Text(
-            branch,
-            style: const TextStyle(
-              fontSize: 9,
-              color: Color(0xFF9AA3BF),
-              fontFamily: 'monospace',
+          Flexible(
+            child: Text(
+              branch,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                fontSize: 9,
+                color: Color(0xFF9AA3BF),
+                fontFamily: 'monospace',
+              ),
             ),
           ),
         ],
       ),
+    ),
     );
   }
 }

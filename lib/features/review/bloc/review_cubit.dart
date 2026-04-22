@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter_bloc/flutter_bloc.dart';
@@ -14,6 +15,7 @@ class ReviewCubit extends Cubit<ReviewState> {
 
   List<String> _workspacePaths = [];
   String? _workspaceId;
+  Timer? _changedFilesTimer;
 
   /// Primary path used for git operations (first path in the list).
   String? get _primaryPath => _workspacePaths.isEmpty ? null : _workspacePaths.first;
@@ -23,6 +25,7 @@ class ReviewCubit extends Cubit<ReviewState> {
     _workspaceId = workspaceId;
     emit(const ReviewLoaded(fileTree: [], changedFiles: []));
     await refresh();
+    _startChangedFilesTimer();
   }
 
   /// Reloads the file tree with [paths] scoped to [sessionId].
@@ -235,5 +238,27 @@ class ReviewCubit extends Cubit<ReviewState> {
   ReviewLoaded? get _loaded {
     final s = state;
     return s is ReviewLoaded ? s : null;
+  }
+
+  void _startChangedFilesTimer() {
+    _changedFilesTimer?.cancel();
+    _changedFilesTimer = Timer.periodic(const Duration(seconds: 4), (_) async {
+      if (isClosed || _workspacePaths.isEmpty) return;
+      final current = _loaded;
+      if (current == null) return;
+      final List<FileChange> allChanged = [];
+      for (final path in _workspacePaths) {
+        try {
+          allChanged.addAll(await DiffService.instance.getChangedFiles(path));
+        } catch (_) {}
+      }
+      if (!isClosed) emit(current.copyWith(changedFiles: allChanged));
+    });
+  }
+
+  @override
+  Future<void> close() {
+    _changedFilesTimer?.cancel();
+    return super.close();
   }
 }

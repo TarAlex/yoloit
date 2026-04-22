@@ -30,26 +30,30 @@ FileTreeCardProps buildFileTreeCardProps({
   return FileTreeCardProps(repoName: repoName, repoPath: repoPath);
 }
 
-/// Builds diff-card props from the current review state when it matches the
-/// requested repo. Non-active repos intentionally show an empty card for now.
+/// Builds diff-card props from the current review state.
+/// Always shows the list of changed files; adds hunks for the selected file.
 DiffCardProps buildDiffCardProps({
   required String repoPath,
   String? repoName,
   dynamic reviewState,
 }) {
+  final rawChanged = _readList(reviewState, 'changedFiles');
+  final changedFiles = rawChanged
+      .where((f) => repoPath.isEmpty || _fileChangeRepoPath(f) == repoPath)
+      .map(_mapChangedFileEntry)
+      .toList();
+
   final selectedFilePath = _readString(reviewState, 'selectedFilePath');
   if (!_pathIsWithinRepo(selectedFilePath, repoPath)) {
-    return DiffCardProps(repoName: repoName, repoPath: repoPath);
+    return DiffCardProps(
+        repoName: repoName, repoPath: repoPath, changedFiles: changedFiles);
   }
 
   final rawHunks = _readList(reviewState, 'diffHunks');
-  if (rawHunks.isEmpty) {
-    return DiffCardProps(repoName: repoName, repoPath: repoPath);
-  }
-
   return DiffCardProps(
     repoName: repoName,
     repoPath: repoPath,
+    changedFiles: changedFiles,
     hunks: rawHunks.map(_mapReviewDiffHunk).toList(),
   );
 }
@@ -125,6 +129,7 @@ List<dynamic> _readList(dynamic object, String field) {
     final value = switch (field) {
       'fileTree' => object.fileTree,
       'diffHunks' => object.diffHunks,
+      'changedFiles' => object.changedFiles,
       _ => null,
     };
     return value is List ? value.cast<dynamic>() : const [];
@@ -193,4 +198,38 @@ List<dynamic> _readNodeChildren(dynamic node) {
 bool _pathIsWithinRepo(String filePath, String repoPath) {
   if (filePath.isEmpty || repoPath.isEmpty) return false;
   return filePath == repoPath || filePath.startsWith('$repoPath/');
+}
+
+String _fileChangeRepoPath(dynamic fc) {
+  if (fc is Map<String, dynamic>) return fc['repoPath'] as String? ?? '';
+  try {
+    return fc.repoPath as String? ?? '';
+  } catch (_) {
+    return '';
+  }
+}
+
+ChangedFileEntry _mapChangedFileEntry(dynamic fc) {
+  if (fc is Map<String, dynamic>) {
+    return ChangedFileEntry(
+      path: fc['path'] as String? ?? '',
+      name: fc['name'] as String? ?? (fc['path'] as String? ?? '').split('/').last,
+      status: fc['status']?.toString() ?? 'modified',
+      addedLines: fc['addedLines'] as int? ?? 0,
+      removedLines: fc['removedLines'] as int? ?? 0,
+    );
+  }
+  try {
+    final path = fc.path as String? ?? '';
+    final statusStr = fc.status?.toString() ?? 'modified';
+    return ChangedFileEntry(
+      path: path,
+      name: path.split('/').last,
+      status: statusStr.contains('.') ? statusStr.split('.').last : statusStr,
+      addedLines: fc.addedLines as int? ?? 0,
+      removedLines: fc.removedLines as int? ?? 0,
+    );
+  } catch (_) {
+    return const ChangedFileEntry(path: '', name: '', status: 'modified');
+  }
 }
