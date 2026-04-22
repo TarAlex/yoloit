@@ -28,16 +28,73 @@ class FileTreeNode extends StatelessWidget {
         ),
         onToggle: (path) => context.read<ReviewCubit>().toggleNode(path),
         onSelect: (path) => context.read<FileEditorCubit>().openFile(path),
-        onNewFolder: (path) async {
-          await Directory(path).create(recursive: true);
-          if (context.mounted) {
-            context.read<ReviewCubit>().toggleNode(path);
-          }
-        },
+        onNewFolder: (parentPath) => _createNewFolder(context, parentPath),
         onShowInFinder: (path) => Process.run('open', ['-R', path]),
         onOpenInPanel: (path) => _openInPanel(context, path),
       ),
     );
+  }
+
+  Future<void> _createNewFolder(BuildContext context, String parentPath) async {
+    // Ask user for the new folder name.
+    final navigator = Navigator.of(context, rootNavigator: true);
+    final reviewCubit = context.read<ReviewCubit>();
+    final ctrl = TextEditingController();
+
+    final name = await showDialog<String>(
+      context: navigator.context,
+      builder: (dialogCtx) => AlertDialog(
+        backgroundColor: const Color(0xFF1A1E2A),
+        title: const Text('New Folder',
+            style: TextStyle(color: Color(0xFFCECEEE), fontSize: 14)),
+        content: TextField(
+          controller: ctrl,
+          autofocus: true,
+          style: const TextStyle(color: Color(0xFFCECEEE), fontSize: 13),
+          decoration: InputDecoration(
+            hintText: 'Folder name',
+            hintStyle: const TextStyle(color: Color(0xFF6B7898), fontSize: 13),
+            isDense: true,
+            contentPadding:
+                const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+            filled: true,
+            fillColor: const Color(0xFF0F1117),
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(6),
+              borderSide: const BorderSide(color: Color(0xFF2A3040)),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(6),
+              borderSide: const BorderSide(color: Color(0xFF7C3AED)),
+            ),
+          ),
+          onSubmitted: (v) => Navigator.of(dialogCtx).pop(v.trim()),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogCtx).pop(),
+            child: const Text('Cancel',
+                style: TextStyle(color: Color(0xFF6B7898), fontSize: 12)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(dialogCtx).pop(ctrl.text.trim()),
+            child: const Text('Create',
+                style: TextStyle(color: Color(0xFF7C3AED), fontSize: 12)),
+          ),
+        ],
+      ),
+    );
+
+    ctrl.dispose();
+    if (name == null || name.isEmpty) return;
+
+    final newPath = '$parentPath/$name';
+    await Directory(newPath).create(recursive: true);
+
+    // Expand the parent so the new folder is visible.
+    if (!reviewCubit.isClosed) {
+      reviewCubit.toggleNode(parentPath);   // expand (or re-expand)
+    }
   }
 
   void _openInPanel(BuildContext context, String path) {
