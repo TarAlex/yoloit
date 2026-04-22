@@ -1,10 +1,10 @@
 import 'package:equatable/equatable.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:path/path.dart' as p;
 import 'package:yoloit/features/mindmap/bloc/mindmap_state.dart';
 import 'package:yoloit/features/mindmap/model/mindmap_node_model.dart';
-import 'package:yoloit/features/runs/models/run_session.dart';
-import 'package:yoloit/features/terminal/models/agent_session.dart';
+import 'package:yoloit/features/terminal/bloc/terminal_cubit.dart';
 
 class ShowHideSidebarNode extends Equatable {
   const ShowHideSidebarNode({
@@ -687,9 +687,12 @@ class _SidebarTreeRow extends StatelessWidget {
     final icon = _typeIcons[node.type] ?? Icons.circle;
     final color = _typeColors[node.type] ?? const Color(0xFF64748B);
     final hasChildren = node.children.isNotEmpty;
+    final isAgent = node.type == 'agent';
+
+    Widget row;
 
     if (isWorkspace) {
-      return InkWell(
+      row = InkWell(
         onTap: onToggleExpand,
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
@@ -737,66 +740,107 @@ class _SidebarTreeRow extends StatelessWidget {
           ),
         ),
       );
+    } else {
+      final indent = 10.0 + depth * 14.0;
+      row = InkWell(
+        onTap: hasChildren ? onToggleExpand : onFocus,
+        child: Padding(
+          padding: EdgeInsets.fromLTRB(indent, 3, 8, 3),
+          child: Row(
+            children: [
+              Container(
+                width: 1,
+                height: 16,
+                margin: const EdgeInsets.only(right: 5),
+                color: const Color(0xFF2A3040),
+              ),
+              GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: onToggleHide,
+                child: Padding(
+                  padding: const EdgeInsets.all(2),
+                  child: Icon(
+                    node.hidden ? Icons.visibility_off : Icons.visibility,
+                    size: 11,
+                    color: node.hidden
+                        ? const Color(0xFF4A5680)
+                        : const Color(0x997C6BFF),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 4),
+              Icon(
+                icon,
+                size: 11,
+                color: node.hidden ? const Color(0xFF3D475E) : color,
+              ),
+              const SizedBox(width: 5),
+              Expanded(
+                child: Text(
+                  node.label,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 10,
+                    color: node.hidden
+                        ? const Color(0xFF4A5680)
+                        : const Color(0xFFB0B8D0),
+                  ),
+                ),
+              ),
+              if (hasChildren) ...[
+                const SizedBox(width: 2),
+                Icon(
+                  expanded ? Icons.expand_less : Icons.expand_more,
+                  size: 11,
+                  color: const Color(0xFF6B7898),
+                ),
+              ],
+            ],
+          ),
+        ),
+      );
     }
 
-    final indent = 10.0 + depth * 14.0;
-    return InkWell(
-      onTap: hasChildren ? onToggleExpand : onFocus,
-      child: Padding(
-        padding: EdgeInsets.fromLTRB(indent, 3, 8, 3),
-        child: Row(
-          children: [
-            Container(
-              width: 1,
-              height: 16,
-              margin: const EdgeInsets.only(right: 5),
-              color: const Color(0xFF2A3040),
-            ),
-            GestureDetector(
-              behavior: HitTestBehavior.opaque,
-              onTap: onToggleHide,
-              child: Padding(
-                padding: const EdgeInsets.all(2),
-                child: Icon(
-                  node.hidden ? Icons.visibility_off : Icons.visibility,
-                  size: 11,
-                  color: node.hidden
-                      ? const Color(0xFF4A5680)
-                      : const Color(0x997C6BFF),
-                ),
-              ),
-            ),
-            const SizedBox(width: 4),
-            Icon(
-              icon,
-              size: 11,
-              color: node.hidden ? const Color(0xFF3D475E) : color,
-            ),
-            const SizedBox(width: 5),
-            Expanded(
-              child: Text(
-                node.label,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  fontSize: 10,
-                  color: node.hidden
-                      ? const Color(0xFF4A5680)
-                      : const Color(0xFFB0B8D0),
-                ),
-              ),
-            ),
-            if (hasChildren) ...[
-              const SizedBox(width: 2),
-              Icon(
-                expanded ? Icons.expand_less : Icons.expand_more,
-                size: 11,
-                color: const Color(0xFF6B7898),
-              ),
-            ],
-          ],
-        ),
+    // For agent nodes, wrap with a right-click context menu to allow deletion.
+    if (isAgent) {
+      return GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onSecondaryTapDown: (details) => _showAgentMenu(context, details.globalPosition),
+        child: row,
+      );
+    }
+    return row;
+  }
+
+  void _showAgentMenu(BuildContext context, Offset position) {
+    // node.id = 'agent:{sessionId}'
+    final sessionId = node.id.startsWith('agent:') ? node.id.substring(6) : node.id;
+    final terminalCubit = context.read<TerminalCubit>();
+    showMenu<String>(
+      context: context,
+      position: RelativeRect.fromLTRB(
+        position.dx, position.dy, position.dx + 1, position.dy + 1,
       ),
-    );
+      color: const Color(0xFF1A1E2A),
+      items: [
+        PopupMenuItem<String>(
+          value: 'delete',
+          height: 32,
+          child: Row(
+            children: const [
+              Icon(Icons.delete_outline, size: 14, color: Color(0xFFFF6B6B)),
+              SizedBox(width: 8),
+              Text('Delete Session',
+                  style: TextStyle(fontSize: 12, color: Color(0xFFFF6B6B))),
+            ],
+          ),
+        ),
+      ],
+    ).then((value) {
+      if (value == 'delete') {
+        terminalCubit.closeSession(sessionId);
+      }
+    });
   }
 }
 
