@@ -1,0 +1,260 @@
+import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
+
+/// A single hook event emitted from a workspace's hook script.
+class HookEvent {
+  const HookEvent({
+    required this.event,
+    required this.workspacePath,
+    required this.workspaceHash,
+    this.tool,
+    required this.timestamp,
+  });
+
+  /// The hook event name (e.g. "preToolUse", "sessionEnd").
+  final String event;
+
+  /// The workspace CWD (from the JSON "cwd" field).
+  final String workspacePath;
+
+  /// The short hash derived from [workspacePath] — same as the filename key.
+  final String workspaceHash;
+
+  /// Tool name for preToolUse / postToolUse events.
+  final String? tool;
+
+  /// Unix epoch milliseconds.
+  final int timestamp;
+
+  /// Human-readable "phase" used by [AgentCard] for animation.
+  ///
+  /// - `thinking`       → userPromptSubmitted
+  /// - `tool:<name>`    → preToolUse (e.g. "tool:bash")
+  /// - `running`        → postToolUse (back to general running)
+  /// - `done`           → sessionEnd
+  /// - `error`          → errorOccurred
+  /// - `live`           → sessionStart
+  /// - `idle`           → unknown / stale
+  String get phase {
+    switch (event) {
+      case 'sessionStart':
+        return 'live';
+      case 'userPromptSubmitted':
+        return 'thinking';
+      case 'preToolUse':
+        return tool != null ? 'tool:$tool' : 'tool';
+      case 'postToolUse':
+        return 'running';
+      case 'sessionEnd':
+        return 'done';
+      case 'errorOccurred':
+        return 'error';
+      default:
+        return 'live';
+    }
+  }
+
+  @override
+  String toString() =>
+      'HookEvent($event, ws=$workspacePath, tool=$tool, ts=$timestamp)';
+}
+
+/// Polls `~/.yoloit/hooks/` every [pollInterval] and emits [HookEvent]s.
+///
+/// Each workspace that has the YoLoIT hook script installed writes a small
+/// JSON file keyed by a hash of its CWD path.  This service reads those
+/// files and broadcasts events so the UI can update node animations.
+class AgentHookService {
+  AgentHookService({this.pollInterval = const Duration(seconds: 2)});
+
+  final Duration pollInterval;
+
+  static AgentHookService? _instance;
+  static AgentHookService get instance =>
+      _instance ??= AgentHookService();
+
+  final _controller = StreamController<HookEvent>.broadcast();
+
+  /// Stream of hook events as they arrive from workspace hook scripts.
+  Stream<HookEvent> get events => _controller.stream;
+
+  Timer? _timer;
+
+  /// Tracks the last-seen timestamp per workspace hash to avoid re-emitting.
+  final _lastTs = <String, int>{};
+
+  Directory get _hooksDir =>
+      Directory('${Platform.environment['HOME']}/.yoloit/hooks');
+
+  void start() {
+    _timer?.cancel();
+    _timer = Timer.periodic(pollInterval, (_) => _poll());
+    _poll(); // immediate first poll
+  }
+
+  void stop() {
+    _timer?.cancel();
+    _timer = null;
+  }
+
+  Future<void> _poll() async {
+    final dir = _hooksDir;
+    if (!await dir.exists()) return;
+
+    try {
+      await for (final entity in dir.list()) {
+        if (entity is! File) continue;
+        final name = entity.uri.pathSegments.last;
+        if (!name.endsWith('.json') || name.endsWith('.tmp')) continue;
+        final hash = name.replaceAll('.json', '');
+        await _processFile(entity, hash);
+      }
+    } catch (_) {
+      // Silently ignore transient file-system errors.
+    }
+  }
+
+  Future<void> _processFile(File file, String hash) async {
+    try {
+      final raw = await file.readAsString();
+      final Map<String, dynamic> json =
+          jsonDecode(raw) as Map<String, dynamic>;
+
+      final ts = (json['ts'] as num?)?.toInt() ?? 0;
+      if ((_lastTs[hash] ?? 0) >= ts) return; // already processed
+      _lastTs[hash] = ts;
+
+      final event = json['event'] as String? ?? 'unknown';
+      final cwd = json['cwd'] as String? ?? '';
+      final tool = json['tool'] as String?;
+
+      _controller.add(HookEvent(
+        event: event,
+        workspacePath: cwd,
+        workspaceHash: hash,
+        tool: tool,
+        timestamp: ts,
+      ));
+    } catch (_) {
+      // Malformed or in-flight file — ignore.
+    }
+  }
+
+  /// Installs the YoLoIT hooks (hooks.json + yoloit-hook.sh) into [workspacePath]
+  /// under `.github/hooks/`.  Idempotent — only writes when content differs.
+  static Future<void> installHooks(String workspacePath) async {
+    final hooksDir = Directory('$workspacePath/.github/hooks');
+    await hooksDir.create(recursive: true);
+
+    await _writeIfChanged(
+      File('${hooksDir.path}/hooks.json'),
+      _hooksJsonContent,
+    );
+
+    final scriptFile = File('${hooksDir.path}/yoloit-hook.sh');
+    await _writeIfChanged(scriptFile, _hookScriptContent);
+
+    // Ensure the script is executable.
+    try {
+      await Process.run('chmod', ['+x', scriptFile.path]);
+    } catch (_) {}
+  }
+
+  static Future<void> _writeIfChanged(File file, String content) async {
+    try {
+      if (await file.exists()) {
+        final existing = await file.readAsString();
+        if (existing == content) return;
+      }
+      await file.writeAsString(content);
+    } catch (_) {}
+  }
+
+  // ---------------------------------------------------------------------------
+  // Embedded hook file contents (written to each workspace on session start).
+  // ---------------------------------------------------------------------------
+
+  static const String _hooksJsonContent = r'''{
+  "version": 1,
+  "hooks": {
+    "sessionStart": [
+      { "type": "command", "bash": ".github/hooks/yoloit-hook.sh sessionStart", "cwd": ".", "timeoutSec": 5 }
+    ],
+    "sessionEnd": [
+      { "type": "command", "bash": ".github/hooks/yoloit-hook.sh sessionEnd", "cwd": ".", "timeoutSec": 10 }
+    ],
+    "userPromptSubmitted": [
+      { "type": "command", "bash": ".github/hooks/yoloit-hook.sh userPromptSubmitted", "cwd": ".", "timeoutSec": 5 }
+    ],
+    "preToolUse": [
+      { "type": "command", "bash": ".github/hooks/yoloit-hook.sh preToolUse", "cwd": ".", "timeoutSec": 5 }
+    ],
+    "postToolUse": [
+      { "type": "command", "bash": ".github/hooks/yoloit-hook.sh postToolUse", "cwd": ".", "timeoutSec": 5 }
+    ],
+    "errorOccurred": [
+      { "type": "command", "bash": ".github/hooks/yoloit-hook.sh errorOccurred", "cwd": ".", "timeoutSec": 5 }
+    ]
+  }
+}
+''';
+
+  static const String _hookScriptContent =
+      r'''#!/usr/bin/env bash
+# YoLoIT Agent Hook — universal (macOS / Linux).
+# Writes a compact JSON status file to ~/.yoloit/hooks/ so the
+# YoLoIT desktop app can update node animations / play sounds.
+set -euo pipefail
+
+EVENT="${1:-unknown}"
+
+INPUT=""
+if [ ! -t 0 ]; then
+  INPUT=$(cat 2>/dev/null || echo "{}")
+else
+  INPUT="{}"
+fi
+
+CWD="$(pwd)"
+
+if command -v shasum >/dev/null 2>&1; then
+  CWD_HASH=$(printf '%s' "$CWD" | shasum -a 256 | cut -c1-16)
+elif command -v sha256sum >/dev/null 2>&1; then
+  CWD_HASH=$(printf '%s' "$CWD" | sha256sum | cut -c1-16)
+else
+  CWD_HASH=$(printf '%s' "$CWD" | tr '/' '_' | tr -dc 'a-zA-Z0-9_-' | tail -c 16)
+fi
+
+HOOKS_DIR="${HOME}/.yoloit/hooks"
+mkdir -p "$HOOKS_DIR"
+STATUS_FILE="${HOOKS_DIR}/${CWD_HASH}.json"
+
+extract_field() {
+  printf '%s' "$INPUT" | grep -o "\"${1}\"[[:space:]]*:[[:space:]]*\"[^\"]*\"" | \
+    sed 's/.*"[^"]*"[[:space:]]*:[[:space:]]*"//' | sed 's/"$//' | head -1 2>/dev/null || true
+}
+
+TOOL_NAME=$(extract_field "toolName")
+TIMESTAMP=$(python3 -c "import time; print(int(time.time()*1000))" 2>/dev/null || printf '%s000' "$(date +%s)")
+
+STATUS_JSON="{\"event\":\"${EVENT}\",\"cwd\":\"${CWD}\",\"ts\":${TIMESTAMP}"
+[ -n "$TOOL_NAME" ] && STATUS_JSON="${STATUS_JSON},\"tool\":\"${TOOL_NAME}\""
+STATUS_JSON="${STATUS_JSON}}"
+
+TMP_FILE="${STATUS_FILE}.tmp.$$"
+printf '%s\n' "$STATUS_JSON" > "$TMP_FILE"
+mv -f "$TMP_FILE" "$STATUS_FILE"
+
+case "$EVENT" in
+  sessionEnd)
+    [ "$(uname)" = "Darwin" ] && afplay "/System/Library/Sounds/Glass.aiff" 2>/dev/null &
+    ;;
+  errorOccurred)
+    [ "$(uname)" = "Darwin" ] && afplay "/System/Library/Sounds/Basso.aiff" 2>/dev/null &
+    ;;
+esac
+
+exit 0
+''';
+}
