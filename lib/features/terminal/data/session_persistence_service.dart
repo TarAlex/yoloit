@@ -21,6 +21,9 @@ class SessionPersistenceService {
               'type': s.type.name,
               'workspacePath': s.workspacePath,
               'workspaceId': s.workspaceId ?? workspaceId,
+              if (s.customName != null) 'customName': s.customName,
+              if (s.worktreeContexts != null && s.worktreeContexts!.isNotEmpty)
+                'worktreeContexts': s.worktreeContexts,
             })
         .toList();
     await prefs.setString(_key(workspaceId), jsonEncode(data));
@@ -42,11 +45,26 @@ class SessionPersistenceService {
         if (type == null) continue;
         final path = map['workspacePath'] as String? ?? '';
         if (!Directory(path).existsSync()) continue;
+
+        // Restore worktreeContexts if saved.
+        Map<String, String>? worktreeContexts;
+        final wtRaw = map['worktreeContexts'];
+        if (wtRaw is Map) {
+          worktreeContexts = Map<String, String>.from(
+            wtRaw.map((k, v) => MapEntry(k.toString(), v.toString())),
+          );
+          // Filter out stale entries where the worktree path no longer exists.
+          worktreeContexts.removeWhere((_, v) => !Directory(v).existsSync());
+          if (worktreeContexts.isEmpty) worktreeContexts = null;
+        }
+
         results.add(SavedSession(
           id: map['id'] as String? ?? '',
           type: type,
           workspacePath: path,
           workspaceId: map['workspaceId'] as String? ?? workspaceId,
+          customName: map['customName'] as String?,
+          worktreeContexts: worktreeContexts,
         ));
       }
       return results;
@@ -67,10 +85,14 @@ class SavedSession {
     required this.type,
     required this.workspacePath,
     this.workspaceId,
+    this.customName,
+    this.worktreeContexts,
   });
 
   final String id;
   final AgentType type;
   final String workspacePath;
   final String? workspaceId;
+  final String? customName;
+  final Map<String, String>? worktreeContexts;
 }

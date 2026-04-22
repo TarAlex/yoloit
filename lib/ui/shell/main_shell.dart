@@ -726,6 +726,7 @@ class _AgentsContent extends StatelessWidget {
             context.read<TerminalCubit>().setActiveWorkspace(
               workspaceId: wsId,
               workspacePath: ws.workspaceDir,
+              workspacePaths: ws.paths,
             );
             context.read<RunCubit>().loadForWorkspace(ws.path);
             context.read<ReviewCubit>().loadWorkspace(ws.paths, workspaceId: wsId);

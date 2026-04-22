@@ -40,4 +40,35 @@ class AgentWorkspaceDirService {
     final dir = Directory(dirForAgent(workspaceId, agentId));
     if (await dir.exists()) await dir.delete(recursive: true);
   }
+
+  /// Reconstructs worktreeContexts by inspecting symlinks in the agent dir.
+  /// Used to recover context after app restart when it wasn't persisted.
+  /// Returns null if no worktree symlinks are found.
+  Future<Map<String, String>?> readWorktreeContexts(
+    String workspaceId,
+    String agentId,
+    List<String> workspacePaths,
+  ) async {
+    final dir = Directory(dirForAgent(workspaceId, agentId));
+    if (!await dir.exists()) return null;
+
+    final result = <String, String>{};
+    for (final entity in await dir.list().toList()) {
+      if (entity is Link) {
+        final target = await entity.resolveSymbolicLinks();
+        // Find the original workspace path whose basename matches the link name.
+        final linkName = p.basename(entity.path);
+        final originalPath = workspacePaths
+            .where((wp) => p.basename(wp) == linkName)
+            .firstOrNull;
+        if (originalPath != null && target != originalPath) {
+          // Symlink points somewhere different → it's a worktree.
+          if (Directory(target).existsSync()) {
+            result[originalPath] = target;
+          }
+        }
+      }
+    }
+    return result.isEmpty ? null : result;
+  }
 }

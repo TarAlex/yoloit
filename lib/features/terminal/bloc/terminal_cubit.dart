@@ -89,6 +89,7 @@ class TerminalCubit extends Cubit<TerminalState> {
   Future<void> setActiveWorkspace({
     required String workspaceId,
     required String workspacePath,
+    List<String>? workspacePaths,
   }) async {
     // Save current workspace's active index before switching
     final prevWsId = _activeWorkspaceId;
@@ -112,16 +113,28 @@ class TerminalCubit extends Cubit<TerminalState> {
 
     // Restore persisted sessions for this workspace.
     final saved = await _persistence.load(workspaceId);
+    final allWsPaths = workspacePaths ?? [workspacePath];
     if (saved.isNotEmpty) {
       for (var i = 0; i < saved.length; i++) {
         if (i > 0) await Future<void>.delayed(const Duration(milliseconds: 200));
         final s = saved[i];
+
+        // Recover worktreeContexts from symlinks if not persisted (old format).
+        var worktreeContexts = s.worktreeContexts;
+        if (worktreeContexts == null) {
+          worktreeContexts = await AgentWorkspaceDirService.instance
+              .readWorktreeContexts(
+                  s.workspaceId ?? workspaceId, s.id, allWsPaths);
+        }
+
         await spawnSession(
           type: s.type,
           workspacePath: s.workspacePath,
           workspaceId: s.workspaceId ?? workspaceId,
           savedSessionId: s.id,
           isRestore: true,
+          worktreeContexts: worktreeContexts,
+          customName: s.customName,
         );
       }
     } else {
@@ -143,6 +156,7 @@ class TerminalCubit extends Cubit<TerminalState> {
     bool isRestore = false,
     Map<String, String>? worktreeContexts,
     List<String> enabledSkills = const [],
+    String? customName,
   }) async {
     if (state is! TerminalLoaded) return;
 
@@ -169,6 +183,7 @@ class TerminalCubit extends Cubit<TerminalState> {
       status: AgentStatus.live,
       sessionId: _generateSessionId(),
       worktreeContexts: worktreeContexts,
+      customName: customName,
     );
 
     final secrets = workspaceId != null
