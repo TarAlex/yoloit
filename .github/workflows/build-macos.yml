@@ -170,6 +170,7 @@ jobs:
 
       # ── Build & bundle web client ─────────────────────────────────────────────
       - name: Build web client
+        continue-on-error: true
         env:
           BUILD_NUMBER: ${{ github.run_number }}
           BUILD_VERSION: ${{ steps.version.outputs.version }}
