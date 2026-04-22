@@ -176,7 +176,11 @@ class _NewAgentSessionDialogState extends State<NewAgentSessionDialog> {
     final contexts = <String, String>{};
     for (final repoPath in widget.worktrees.keys) {
       final path = _resolvedPath(repoPath);
-      if (path != null) contexts[repoPath] = path;
+      // Only include if the session is on a DIFFERENT (worktree) path.
+      // When path == repoPath the session is on the main checkout – no agent
+      // dir needed; worktreeContexts stays null so the graph builder falls back
+      // to ws.paths which is simpler and unambiguous.
+      if (path != null && path != repoPath) contexts[repoPath] = path;
     }
 
     await cubit.spawnSession(
