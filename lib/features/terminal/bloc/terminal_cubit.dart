@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_pty/flutter_pty.dart';
 import 'package:yoloit/core/services/agent_hook_service.dart';
@@ -342,18 +343,49 @@ class TerminalCubit extends Cubit<TerminalState> {
   }
 
   void _onHookEvent(HookEvent event) {
+    debugPrint('[HookEvent] event=${event.event} phase=${event.phase} cwd=${event.workspacePath}');
+
     // Match the event's workspace path to a session with the same workspacePath.
     final idx = _allSessions.indexWhere(
       (s) => s.workspacePath == event.workspacePath,
     );
-    if (idx < 0) return;
+    if (idx < 0) {
+      debugPrint('[HookEvent] NO MATCH for cwd=${event.workspacePath}  '
+          'sessions: ${_allSessions.map((s) => s.workspacePath).toList()}');
+      return;
+    }
 
     final phase = event.phase;
-    String? newPhase = phase == 'live' || phase == 'running' ? null : phase;
 
-    // 'done' should clear itself after a short delay.
+    // sessionStart only tells us the process is running — which AgentStatus.live
+    // already tracks.  Don't let it override an active hook phase (e.g. thinking).
+    if (phase == 'live') {
+      debugPrint('[HookEvent] sessionStart ignored for hookPhase (already live)');
+      return;
+    }
+
+    // postToolUse and generic running → clear phase (back to normal running state).
+    String? newPhase = phase == 'running' ? null : phase;
+
+    debugPrint('[HookEvent] MATCHED session[${_allSessions[idx].id}] → newPhase=$newPhase');
+
+    // 'thinking' auto-clears after 60s if nothing else fires (e.g. simple text response).
+    if (phase == 'thinking') {
+      Future.delayed(const Duration(seconds: 60), () {
+        final i = _allSessions.indexWhere((s) => s.workspacePath == event.workspacePath);
+        if (i >= 0 && _allSessions[i].hookPhase == 'thinking') {
+          _allSessions[i] = _allSessions[i].copyWith(clearHookPhase: true);
+          final cur = _loaded;
+          if (cur != null && !isClosed) {
+            final visible = _workspaceSessions;
+            emit(cur.copyWith(sessions: visible, allSessions: List.unmodifiable(_allSessions)));
+          }
+        }
+      });
+    }
+
+    // 'done' auto-clears itself after a short delay.
     if (phase == 'done') {
-      newPhase = 'done';
       Future.delayed(const Duration(seconds: 3), () {
         final i = _allSessions.indexWhere((s) => s.workspacePath == event.workspacePath);
         if (i >= 0 && _allSessions[i].hookPhase == 'done') {

@@ -2,6 +2,8 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
+
 /// A single hook event emitted from a workspace's hook script.
 class HookEvent {
   const HookEvent({
@@ -91,11 +93,13 @@ class AgentHookService {
     _timer?.cancel();
     _timer = Timer.periodic(pollInterval, (_) => _poll());
     _poll(); // immediate first poll
+    debugPrint('[HookService] started polling ${_hooksDir.path}');
   }
 
   void stop() {
     _timer?.cancel();
     _timer = null;
+    debugPrint('[HookService] stopped');
   }
 
   Future<void> _poll() async {
@@ -110,8 +114,8 @@ class AgentHookService {
         final hash = name.replaceAll('.json', '');
         await _processFile(entity, hash);
       }
-    } catch (_) {
-      // Silently ignore transient file-system errors.
+    } catch (e) {
+      debugPrint('[HookService] poll error: $e');
     }
   }
 
@@ -129,6 +133,8 @@ class AgentHookService {
       final cwd = json['cwd'] as String? ?? '';
       final tool = json['tool'] as String?;
 
+      debugPrint('[HookService] NEW EVENT: $event  cwd=$cwd  tool=$tool  ts=$ts');
+
       _controller.add(HookEvent(
         event: event,
         workspacePath: cwd,
@@ -136,8 +142,8 @@ class AgentHookService {
         tool: tool,
         timestamp: ts,
       ));
-    } catch (_) {
-      // Malformed or in-flight file — ignore.
+    } catch (e) {
+      debugPrint('[HookService] processFile error for $file: $e');
     }
   }
 
@@ -272,6 +278,9 @@ fi
 HOOKS_DIR="${HOME}/.yoloit/hooks"
 mkdir -p "$HOOKS_DIR"
 STATUS_FILE="${HOOKS_DIR}/${CWD_HASH}.json"
+
+# Debug log
+printf '[%s] EVENT=%s CWD=%s\n' "$(date '+%H:%M:%S')" "$EVENT" "$CWD" >> "${HOOKS_DIR}/debug.log" 2>/dev/null || true
 
 extract_field() {
   printf '%s' "$INPUT" | grep -o "\"${1}\"[[:space:]]*:[[:space:]]*\"[^\"]*\"" | \

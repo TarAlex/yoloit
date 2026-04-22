@@ -1,15 +1,5 @@
 #!/usr/bin/env bash
 # YoLoIT Agent Hook — universal, works on macOS/Linux.
-# Called by Copilot CLI (and future orchestrators like ClaudeCode) for all
-# hook events. Writes a compact JSON status file to ~/.yoloit/hooks/ so the
-# YoLoIT desktop app can poll it and update node animations / play sounds.
-#
-# Usage: yoloit-hook.sh <event>
-#   Events: sessionStart, sessionEnd, userPromptSubmitted,
-#           preToolUse, postToolUse, errorOccurred
-#
-# Stdin: JSON payload supplied by the hook runner (varies per event).
-
 set -euo pipefail
 
 EVENT="${1:-unknown}"
@@ -22,7 +12,6 @@ else
   INPUT=$(cat 2>/dev/null || echo "{}")
 fi
 
-# Determine workspace from CWD (hooks always run in the workspace dir).
 CWD="$(pwd)"
 
 # Create stable short hash of the CWD to use as filename key.
@@ -31,13 +20,15 @@ if command -v shasum >/dev/null 2>&1; then
 elif command -v sha256sum >/dev/null 2>&1; then
   CWD_HASH=$(printf '%s' "$CWD" | sha256sum | cut -c1-16)
 else
-  # Fallback: sanitise path into a safe filename.
   CWD_HASH=$(printf '%s' "$CWD" | tr '/' '_' | tr -dc 'a-zA-Z0-9_-' | tail -c 16)
 fi
 
-# Ensure output directory exists.
 HOOKS_DIR="${HOME}/.yoloit/hooks"
 mkdir -p "$HOOKS_DIR"
+
+# Debug log — always write so we can see what fired and when.
+LOG_FILE="${HOOKS_DIR}/debug.log"
+printf '[%s] EVENT=%s CWD=%s INPUT=%s\n' "$(date '+%H:%M:%S')" "$EVENT" "$CWD" "$INPUT" >> "$LOG_FILE" 2>/dev/null || true
 
 STATUS_FILE="${HOOKS_DIR}/${CWD_HASH}.json"
 
