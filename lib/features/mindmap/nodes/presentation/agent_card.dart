@@ -140,17 +140,29 @@ class _AgentCardState extends State<AgentCard>
             color: color,
             isRunning: isRunning,
           ),
-          if (phase != null)
-            _HookPhaseBar(phase: phase, color: color, animation: _glowAnim),
           Expanded(
-            child:
-                widget.body ??
-                (widget.props.isIdle
-                    ? _IdlePlaceholder(onStart: widget.onSessionStart)
-                    : _TerminalPane(
-                        lines: widget.props.lastLines,
-                        onInput: widget.onTerminalInput,
-                      )),
+            child: Stack(
+              children: [
+                // Terminal / idle / text pane fills all space.
+                Positioned.fill(
+                  child: widget.body ??
+                      (widget.props.isIdle
+                          ? _IdlePlaceholder(onStart: widget.onSessionStart)
+                          : _TerminalPane(
+                              lines: widget.props.lastLines,
+                              onInput: widget.onTerminalInput,
+                            )),
+                ),
+                // Phase bar overlays the top of the terminal — does NOT shift layout.
+                if (phase != null)
+                  Positioned(
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    child: _HookPhaseBar(phase: phase, color: color, animation: _glowAnim),
+                  ),
+              ],
+            ),
           ),
           // Stripes only when actively processing (not just idle-running).
           if (isActive)

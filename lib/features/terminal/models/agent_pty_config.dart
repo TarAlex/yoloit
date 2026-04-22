@@ -47,8 +47,12 @@ extension AgentTypePtyConfig on AgentType {
             '\u25CE', // ◎ bullseye
             '\u25C9', // ◉ fisheye
           },
-          // '› ' — Copilot interactive prompt (U+203A + space).
+          // '› ' — Copilot interactive prompt. NOTE: this is drawn via ANSI cursor
+          // positioning in Copilot's status bar; may not reliably appear in stream.
+          // Primary clearing mechanism is the 5s idle timeout after spinner stops.
           donePrompts: {'\u203A '},
+          // 5s after spinner stops → agent is done responding.
+          idleTimeout: Duration(seconds: 5),
         );
 
       case AgentType.claude:

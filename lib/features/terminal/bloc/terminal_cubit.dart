@@ -366,9 +366,10 @@ class TerminalCubit extends Cubit<TerminalState> {
 
     debugPrint('[HookEvent] MATCHED session[${_allSessions[idx].id}] → newPhase=$newPhase');
 
-    // ThinkingPhase auto-clears after 60s if no other event fires.
+    // ThinkingPhase auto-clears after 15s if no other event fires.
+    // PTY idle-timer (5s) will usually clear it sooner via spinner detection.
     if (newPhase is ThinkingPhase) {
-      Future.delayed(const Duration(seconds: 60), () {
+      Future.delayed(const Duration(seconds: 15), () {
         final i = _allSessions.indexWhere((s) => s.workspacePath == event.workspacePath);
         if (i >= 0 && _allSessions[i].hookPhase is ThinkingPhase) {
           _allSessions[i] = _allSessions[i].copyWith(clearHookPhase: true);
@@ -419,8 +420,6 @@ class TerminalCubit extends Cubit<TerminalState> {
             session.appendOutput(data); // capture for browser streaming
 
             // ── PTY activity detection (backup when hooks don't fire) ──────
-            // Use per-agent config: each agent type declares its own spinner
-            // chars and done-prompt patterns.
             final ptyConfig = session.type.ptyConfig;
             if (ptyConfig.hasDetection) {
               _onPtyActivity(session, data, ptyConfig);
