@@ -113,6 +113,7 @@ class _AgentCardState extends State<AgentCard>
             ? ((_glowAnim.value * 100 + 40).round()).clamp(40, 140)
             : 60; // static dim border when idle
         return Container(
+          clipBehavior: Clip.antiAlias,
           decoration: BoxDecoration(
             color: const Color(0xFF0A0C10),
             border: Border.all(color: color.withAlpha(glowAlpha), width: 1.5),
