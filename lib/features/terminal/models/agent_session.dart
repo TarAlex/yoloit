@@ -148,5 +148,5 @@ class AgentSession extends Equatable {
   String get displayName => customName?.isNotEmpty == true ? customName! : type.displayName;
 
   @override
-  List<Object?> get props => [id, type.name, workspacePath, status, sessionId, customName, worktreeContexts];
+  List<Object?> get props => [id, type.name, workspacePath, status, sessionId, customName, worktreeContexts, hookPhase];
 }
