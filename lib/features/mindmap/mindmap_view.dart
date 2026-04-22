@@ -4,6 +4,8 @@ import 'dart:ui' as ui;
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart' show debugPrint, kIsWeb;
 import 'package:flutter/gestures.dart';
+import 'package:flutter/services.dart';
+import 'package:yoloit/features/search/ui/file_search_overlay.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:path/path.dart' as p;
@@ -304,8 +306,32 @@ class _MindMapViewState extends State<MindMapView>
     return (nodes: nodes, conns: conns);
   }
 
+  void _openFileInPanel() {
+    final mindMapCubit = context.read<MindMapCubit>();
+    showFileSearch(
+      context,
+      onFileOpened: () {},
+      onFileSelected: (filePath) {
+        final nodeId = 'panel:${filePath.hashCode}';
+        mindMapCubit.openFileAsPanel(id: nodeId, filePath: filePath);
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    return CallbackShortcuts(
+      bindings: {
+        const SingleActivator(LogicalKeyboardKey.keyO, meta: true): _openFileInPanel,
+      },
+      child: Focus(
+        autofocus: false,
+        child: _buildInner(context),
+      ),
+    );
+  }
+
+  Widget _buildInner(BuildContext context) {
     return BlocBuilder<RunCubit, RunState>(
       builder: (context, runState) {
         return BlocBuilder<WorkspaceCubit, WorkspaceState>(

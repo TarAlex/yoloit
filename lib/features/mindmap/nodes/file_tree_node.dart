@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:path/path.dart' as p;
 import 'package:yoloit/features/collaboration/desktop/repo_directory_listing.dart';
 import 'package:yoloit/features/mindmap/bloc/mindmap_cubit.dart';
 import 'package:yoloit/features/mindmap/model/mindmap_node_model.dart';
@@ -31,6 +32,8 @@ class FileTreeNode extends StatelessWidget {
         onNewFolder: (parentPath) => _createNewFolder(context, parentPath),
         onShowInFinder: (path) => Process.run('open', ['-R', path]),
         onOpenInPanel: (path) => _openInPanel(context, path),
+        onRename: (path, currentName) => _renameEntry(context, path, currentName),
+        onCreateFile: (dirPath) => _createFile(context, dirPath),
       ),
     );
   }
@@ -92,6 +95,125 @@ class FileTreeNode extends StatelessWidget {
     if (!reviewCubit.isClosed) {
       await reviewCubit.createFolder(parentPath, name);
     }
+  }
+
+  Future<void> _renameEntry(BuildContext context, String path, String currentName) async {
+    final navigator = Navigator.of(context, rootNavigator: true);
+    final reviewCubit = context.read<ReviewCubit>();
+    final ctrl = TextEditingController(text: currentName);
+    // Select name without extension for files
+    final dotIdx = currentName.lastIndexOf('.');
+    final selectEnd = (dotIdx > 0) ? dotIdx : currentName.length;
+
+    final newName = await showDialog<String>(
+      context: navigator.context,
+      builder: (dialogCtx) => AlertDialog(
+        backgroundColor: const Color(0xFF1A1E2A),
+        title: const Text('Rename',
+            style: TextStyle(color: Color(0xFFCECEEE), fontSize: 14)),
+        content: TextField(
+          controller: ctrl,
+          autofocus: true,
+          style: const TextStyle(color: Color(0xFFCECEEE), fontSize: 13),
+          decoration: InputDecoration(
+            hintText: 'New name',
+            hintStyle: const TextStyle(color: Color(0xFF6B7898), fontSize: 13),
+            isDense: true,
+            contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+            filled: true,
+            fillColor: const Color(0xFF0F1117),
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(6),
+              borderSide: const BorderSide(color: Color(0xFF2A3040)),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(6),
+              borderSide: const BorderSide(color: Color(0xFF7C3AED)),
+            ),
+          ),
+          onTap: () => ctrl.selection = TextSelection(
+            baseOffset: 0, extentOffset: selectEnd),
+          onSubmitted: (v) => Navigator.of(dialogCtx).pop(v.trim()),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogCtx).pop(),
+            child: const Text('Cancel',
+                style: TextStyle(color: Color(0xFF6B7898), fontSize: 12)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(dialogCtx).pop(ctrl.text.trim()),
+            child: const Text('Rename',
+                style: TextStyle(color: Color(0xFF7C3AED), fontSize: 12)),
+          ),
+        ],
+      ),
+    );
+
+    ctrl.dispose();
+    if (newName == null || newName.isEmpty || newName == currentName) return;
+    if (!reviewCubit.isClosed) {
+      await reviewCubit.renameEntry(path, newName);
+    }
+  }
+
+  Future<void> _createFile(BuildContext context, String dirPath) async {
+    final navigator = Navigator.of(context, rootNavigator: true);
+    final reviewCubit = context.read<ReviewCubit>();
+    final mindMapCubit = context.read<MindMapCubit>();
+    final ctrl = TextEditingController();
+
+    final fileName = await showDialog<String>(
+      context: navigator.context,
+      builder: (dialogCtx) => AlertDialog(
+        backgroundColor: const Color(0xFF1A1E2A),
+        title: const Text('New File',
+            style: TextStyle(color: Color(0xFFCECEEE), fontSize: 14)),
+        content: TextField(
+          controller: ctrl,
+          autofocus: true,
+          style: const TextStyle(color: Color(0xFFCECEEE), fontSize: 13),
+          decoration: InputDecoration(
+            hintText: 'filename.dart',
+            hintStyle: const TextStyle(color: Color(0xFF6B7898), fontSize: 13),
+            isDense: true,
+            contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+            filled: true,
+            fillColor: const Color(0xFF0F1117),
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(6),
+              borderSide: const BorderSide(color: Color(0xFF2A3040)),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(6),
+              borderSide: const BorderSide(color: Color(0xFF7C3AED)),
+            ),
+          ),
+          onSubmitted: (v) => Navigator.of(dialogCtx).pop(v.trim()),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogCtx).pop(),
+            child: const Text('Cancel',
+                style: TextStyle(color: Color(0xFF6B7898), fontSize: 12)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(dialogCtx).pop(ctrl.text.trim()),
+            child: const Text('Create',
+                style: TextStyle(color: Color(0xFF7C3AED), fontSize: 12)),
+          ),
+        ],
+      ),
+    );
+
+    ctrl.dispose();
+    if (fileName == null || fileName.isEmpty) return;
+    if (!reviewCubit.isClosed) {
+      await reviewCubit.createFile(dirPath, fileName);
+    }
+    // Open the new file in a mindmap panel
+    final newPath = p.join(dirPath, fileName);
+    _openInPanel(context, newPath);
   }
 
   void _openInPanel(BuildContext context, String path) {

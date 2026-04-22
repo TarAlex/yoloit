@@ -16,6 +16,8 @@ class FileTreeCard extends StatelessWidget {
     this.onCopyPath,
     this.onShowInFinder,
     this.onOpenInPanel,
+    this.onRename,
+    this.onCreateFile,
   });
   final FileTreeCardProps props;
   final void Function(String path)? onToggle;
@@ -24,6 +26,8 @@ class FileTreeCard extends StatelessWidget {
   final void Function(String path)? onCopyPath;
   final void Function(String path)? onShowInFinder;
   final void Function(String path)? onOpenInPanel;
+  final void Function(String path, String newName)? onRename;
+  final void Function(String dirPath)? onCreateFile;
 
   @override
   Widget build(BuildContext context) {
@@ -109,6 +113,8 @@ class FileTreeCard extends StatelessWidget {
                           onCopyPath: onCopyPath,
                           onShowInFinder: onShowInFinder,
                           onOpenInPanel: onOpenInPanel,
+                          onRename: onRename,
+                          onCreateFile: onCreateFile,
                         );
                       },
                     ),
@@ -129,6 +135,8 @@ class _TreeRow extends StatefulWidget {
     this.onCopyPath,
     this.onShowInFinder,
     this.onOpenInPanel,
+    this.onRename,
+    this.onCreateFile,
   });
   final TreeEntry entry;
   final VoidCallback? onToggle;
@@ -137,6 +145,8 @@ class _TreeRow extends StatefulWidget {
   final void Function(String path)? onCopyPath;
   final void Function(String path)? onShowInFinder;
   final void Function(String path)? onOpenInPanel;
+  final void Function(String path, String newName)? onRename;
+  final void Function(String dirPath)? onCreateFile;
 
   @override
   State<_TreeRow> createState() => _TreeRowState();
@@ -160,6 +170,11 @@ class _TreeRowState extends State<_TreeRow> {
         if (e.isDir)
           const PopupMenuItem(value: 'new_folder', child: Text('📁 New Folder',
               style: TextStyle(fontSize: 12, color: Color(0xFFCECEEE)))),
+        if (e.isDir && widget.onCreateFile != null)
+          const PopupMenuItem(value: 'create_file', child: Text('📄 New File',
+              style: TextStyle(fontSize: 12, color: Color(0xFFCECEEE)))),
+        const PopupMenuItem(value: 'rename', child: Text('✏️ Rename',
+            style: TextStyle(fontSize: 12, color: Color(0xFFCECEEE)))),
         const PopupMenuItem(value: 'copy_path', child: Text('📋 Copy path',
             style: TextStyle(fontSize: 12, color: Color(0xFFCECEEE)))),
         const PopupMenuItem(value: 'copy_name', child: Text('📄 Copy filename',
@@ -175,6 +190,10 @@ class _TreeRowState extends State<_TreeRow> {
     switch (result) {
       case 'new_folder':
         widget.onNewFolder?.call(e.path);
+      case 'create_file':
+        widget.onCreateFile?.call(e.path);
+      case 'rename':
+        widget.onRename?.call(e.path, e.name);
       case 'copy_path':
         await Clipboard.setData(ClipboardData(text: e.path));
       case 'copy_name':

@@ -13,7 +13,14 @@ import 'package:yoloit/features/workspaces/bloc/workspace_state.dart';
 import 'package:yoloit/core/theme/app_color_scheme.dart';
 
 /// Shows the quick file search overlay.
-Future<void> showFileSearch(BuildContext context, {required VoidCallback onFileOpened}) async {
+/// If [onFileSelected] is provided, it is called with the selected file path
+/// instead of the default ReviewCubit/FileEditorCubit open behavior (e.g. for
+/// opening files as mindmap panels).
+Future<void> showFileSearch(
+  BuildContext context, {
+  required VoidCallback onFileOpened,
+  void Function(String filePath)? onFileSelected,
+}) async {
   await showDialog<void>(
     context: context,
     barrierColor: Colors.black54,
@@ -25,15 +32,24 @@ Future<void> showFileSearch(BuildContext context, {required VoidCallback onFileO
           BlocProvider.value(value: context.read<ReviewCubit>()),
           BlocProvider.value(value: context.read<FileEditorCubit>()),
         ],
-        child: FileSearchOverlay(onFileOpened: onFileOpened),
+        child: FileSearchOverlay(
+          onFileOpened: onFileOpened,
+          onFileSelected: onFileSelected,
+        ),
       ),
     ),
   );
 }
 
 class FileSearchOverlay extends StatefulWidget {
-  const FileSearchOverlay({super.key, required this.onFileOpened});
+  const FileSearchOverlay({
+    super.key,
+    required this.onFileOpened,
+    this.onFileSelected,
+  });
   final VoidCallback onFileOpened;
+  /// When provided, replaces the default ReviewCubit+FileEditorCubit open.
+  final void Function(String filePath)? onFileSelected;
 
   @override
   State<FileSearchOverlay> createState() => _FileSearchOverlayState();
@@ -114,10 +130,13 @@ class _FileSearchOverlayState extends State<FileSearchOverlay> {
   void _openSelected() {
     if (_results.isEmpty) return;
     final result = _results[_selectedIndex];
-    context.read<ReviewCubit>().selectFile(result.filePath);
-    // Open in the code editor panel
-    context.read<FileEditorCubit>().openFile(result.filePath);
     Navigator.of(context).pop();
+    if (widget.onFileSelected != null) {
+      widget.onFileSelected!(result.filePath);
+    } else {
+      context.read<ReviewCubit>().selectFile(result.filePath);
+      context.read<FileEditorCubit>().openFile(result.filePath);
+    }
     widget.onFileOpened();
   }
 

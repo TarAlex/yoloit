@@ -178,8 +178,33 @@ class ReviewCubit extends Cubit<ReviewState> {
     return null;
   }
 
-  Future<void> createFolder(String parentDirPath, String folderName) async {
-    final newDir = Directory(p.join(parentDirPath, folderName));
+  Future<void> renameEntry(String oldPath, String newName) async {
+    final parent = p.dirname(oldPath);
+    final newPath = p.join(parent, newName);
+    try {
+      final isDir = await FileSystemEntity.isDirectory(oldPath);
+      if (isDir) {
+        await Directory(oldPath).rename(newPath);
+      } else {
+        await File(oldPath).rename(newPath);
+      }
+      await refresh();
+    } catch (e) {
+      debugPrint('[ReviewCubit] renameEntry error: $e');
+    }
+  }
+
+  Future<void> createFile(String parentDirPath, String fileName) async {
+    final newPath = p.join(parentDirPath, fileName);
+    try {
+      await File(newPath).create(recursive: true);
+      await refresh();
+    } catch (e) {
+      debugPrint('[ReviewCubit] createFile error: $e');
+    }
+  }
+
+  Future<void> createFolder(String parentDirPath, String folderName) async {    final newDir = Directory(p.join(parentDirPath, folderName));
     await newDir.create(recursive: true);
     // Add .gitkeep so git tracks the empty directory.
     final gitkeep = File(p.join(newDir.path, '.gitkeep'));
