@@ -23,6 +23,7 @@ import 'package:yoloit/features/workspaces/bloc/workspace_cubit.dart';
 const _kCategories = [
   'Appearance',
   'AI Agents',
+  'Notifications',
   'Sessions',
   'Shortcuts',
   'Skills',
@@ -162,7 +163,7 @@ class _SettingsPageState extends State<SettingsPage> {
 
   Widget _buildContent() {
     // Skills panel needs full height, not scrollable wrapper
-    if (_selectedCategory == 4) {
+    if (_selectedCategory == 5) {
       return const SkillsPanel();
     }
     return SingleChildScrollView(
@@ -187,12 +188,20 @@ class _SettingsPageState extends State<SettingsPage> {
         2 => Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              const _SectionHeader(title: 'Notifications'),
+              const SizedBox(height: 12),
+              const _NotificationsSection(),
+            ],
+          ),
+        3 => Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
               const _SectionHeader(title: 'Sessions'),
               const SizedBox(height: 12),
               _SessionSettings(),
             ],
           ),
-        3 => Column(
+        4 => Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               const _SectionHeader(title: 'Keyboard Shortcuts'),
@@ -200,7 +209,7 @@ class _SettingsPageState extends State<SettingsPage> {
               _ShortcutsTable(),
             ],
           ),
-        5 => const SetupGuideEmbedded(),
+        6 => const SetupGuideEmbedded(),
         _ => Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -1869,6 +1878,150 @@ class _WorkspaceStorageRowState extends State<_WorkspaceStorageRow> {
                 style: TextStyle(fontSize: 12, color: AppColors.textSecondary),
               ),
             ),
+        ],
+      ),
+    );
+  }
+}
+
+// ─── Notifications Settings ───────────────────────────────────────────────────
+
+class _NotificationsSection extends StatefulWidget {
+  const _NotificationsSection();
+
+  @override
+  State<_NotificationsSection> createState() => _NotificationsSectionState();
+}
+
+class _NotificationsSectionState extends State<_NotificationsSection> {
+  bool _agentSoundsEnabled = true;
+  bool _approvalSoundEnabled = true;
+  bool _completionSoundEnabled = true;
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    final agent = await SessionPrefs.isAgentSoundsEnabled();
+    final approval = await SessionPrefs.isApprovalSoundEnabled();
+    final completion = await SessionPrefs.isCompletionSoundEnabled();
+    if (mounted) {
+      setState(() {
+        _agentSoundsEnabled = agent;
+        _approvalSoundEnabled = approval;
+        _completionSoundEnabled = completion;
+        _loading = false;
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_loading) return const SizedBox(height: 48, child: Center(child: CircularProgressIndicator()));
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Sound alerts when AI agents change state.',
+          style: TextStyle(color: AppColors.textMuted, fontSize: 11),
+        ),
+        const SizedBox(height: 16),
+        _SettingsToggle(
+          title: 'Enable agent sounds',
+          subtitle: 'Master switch — disables all agent sound alerts',
+          value: _agentSoundsEnabled,
+          onChanged: (v) {
+            setState(() => _agentSoundsEnabled = v);
+            SessionPrefs.saveAgentSoundsEnabled(v);
+          },
+        ),
+        const SizedBox(height: 8),
+        _SettingsToggle(
+          title: 'Approval request sound (Sosumi)',
+          subtitle: 'Plays when agent is waiting for tool approval',
+          value: _approvalSoundEnabled && _agentSoundsEnabled,
+          enabled: _agentSoundsEnabled,
+          onChanged: _agentSoundsEnabled
+              ? (v) {
+                  setState(() => _approvalSoundEnabled = v);
+                  SessionPrefs.saveApprovalSoundEnabled(v);
+                }
+              : null,
+        ),
+        const SizedBox(height: 8),
+        _SettingsToggle(
+          title: 'Completion sound (Glass)',
+          subtitle: 'Plays when agent finishes responding',
+          value: _completionSoundEnabled && _agentSoundsEnabled,
+          enabled: _agentSoundsEnabled,
+          onChanged: _agentSoundsEnabled
+              ? (v) {
+                  setState(() => _completionSoundEnabled = v);
+                  SessionPrefs.saveCompletionSoundEnabled(v);
+                }
+              : null,
+        ),
+      ],
+    );
+  }
+}
+
+class _SettingsToggle extends StatelessWidget {
+  const _SettingsToggle({
+    required this.title,
+    required this.subtitle,
+    required this.value,
+    required this.onChanged,
+    this.enabled = true,
+  });
+
+  final String title;
+  final String subtitle;
+  final bool value;
+  final bool enabled;
+  final ValueChanged<bool>? onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.appColors;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      decoration: BoxDecoration(
+        color: colors.surface,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: colors.border),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: TextStyle(
+                    color: enabled ? AppColors.textPrimary : AppColors.textMuted,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  subtitle,
+                  style: const TextStyle(color: AppColors.textMuted, fontSize: 11),
+                ),
+              ],
+            ),
+          ),
+          Switch(
+            value: value,
+            onChanged: onChanged,
+            activeColor: colors.primary,
+          ),
         ],
       ),
     );

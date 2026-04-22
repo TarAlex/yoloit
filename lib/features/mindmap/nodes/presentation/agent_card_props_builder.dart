@@ -31,5 +31,6 @@ AgentCardProps buildAgentCardProps(AgentNodeData data) {
         )
         .toList(),
     isIdle: session.status == AgentStatus.idle && session.sessionId == null,
+    hookPhase: session.hookPhase,
   );
 }

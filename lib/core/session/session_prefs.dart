@@ -36,6 +36,11 @@ class SessionPrefs {
   static const _kLastUpdateCheckMs = 'updates.lastCheckMs';
   static const _kSkippedVersion    = 'updates.skippedVersion';
 
+  // Notifications / sounds
+  static const _kAgentSoundsEnabled    = 'notifications.agentSounds';
+  static const _kApprovalSoundEnabled  = 'notifications.approvalSound';
+  static const _kCompletionSoundEnabled = 'notifications.completionSound';
+
   // ── Load ─────────────────────────────────────────────────────────────────
   static Future<SessionSnapshot> load() async {
     final p = await SharedPreferences.getInstance();
@@ -114,6 +119,23 @@ class SessionPrefs {
 
   static Future<void> saveSkippedVersion(String v) async =>
       (await _p()).setString(_kSkippedVersion, v);
+
+  // ── Notification / sound prefs ────────────────────────────────────────────
+
+  static Future<bool> isAgentSoundsEnabled() async =>
+      (await _p()).getBool(_kAgentSoundsEnabled) ?? true;
+  static Future<void> saveAgentSoundsEnabled(bool v) async =>
+      (await _p()).setBool(_kAgentSoundsEnabled, v);
+
+  static Future<bool> isApprovalSoundEnabled() async =>
+      (await _p()).getBool(_kApprovalSoundEnabled) ?? true;
+  static Future<void> saveApprovalSoundEnabled(bool v) async =>
+      (await _p()).setBool(_kApprovalSoundEnabled, v);
+
+  static Future<bool> isCompletionSoundEnabled() async =>
+      (await _p()).getBool(_kCompletionSoundEnabled) ?? true;
+  static Future<void> saveCompletionSoundEnabled(bool v) async =>
+      (await _p()).setBool(_kCompletionSoundEnabled, v);
 
   // ── Editor tabs (per workspace) ───────────────────────────────────────────
 

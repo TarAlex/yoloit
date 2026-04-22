@@ -1,6 +1,7 @@
 import 'package:equatable/equatable.dart';
 import 'package:xterm/xterm.dart';
 import 'package:yoloit/features/terminal/data/terminal_output_bus.dart';
+import 'package:yoloit/features/terminal/models/agent_phase.dart';
 import 'package:yoloit/features/terminal/models/agent_type.dart';
 
 enum AgentStatus { idle, live, error }
@@ -15,6 +16,7 @@ class AgentSession extends Equatable {
     this.sessionId,
     this.customName,
     this.worktreeContexts,
+    this.hookPhase,
   }) : terminal = Terminal(maxLines: 10000);
 
   // Private constructor that preserves an existing terminal instance.
@@ -28,6 +30,7 @@ class AgentSession extends Equatable {
     this.sessionId,
     this.customName,
     this.worktreeContexts,
+    this.hookPhase,
   });
 
   final String id;
@@ -41,6 +44,10 @@ class AgentSession extends Equatable {
   final Terminal terminal;
   /// Maps repoPath → selectedWorktreePath. Null = default workspace dir.
   final Map<String, String>? worktreeContexts;
+
+  /// Fine-grained phase from Copilot hook events.
+  /// null = idle (session alive, agent not actively working).
+  final AgentPhase? hookPhase;
 
   /// Rolling plain-text buffer of recent PTY output (max 300 lines).
   /// NOT included in [props] — mutations don't trigger state rebuilds.
@@ -122,6 +129,8 @@ class AgentSession extends Equatable {
     String? customName,
     bool clearCustomName = false,
     Map<String, String>? worktreeContexts,
+    AgentPhase? hookPhase,
+    bool clearHookPhase = false,
   }) {
     return AgentSession._preserve(
       id: id,
@@ -133,11 +142,12 @@ class AgentSession extends Equatable {
       sessionId: sessionId ?? this.sessionId,
       customName: clearCustomName ? null : (customName ?? this.customName),
       worktreeContexts: worktreeContexts ?? this.worktreeContexts,
+      hookPhase: clearHookPhase ? null : (hookPhase ?? this.hookPhase),
     );
   }
 
   String get displayName => customName?.isNotEmpty == true ? customName! : type.displayName;
 
   @override
-  List<Object?> get props => [id, type.name, workspacePath, status, sessionId, customName, worktreeContexts];
+  List<Object?> get props => [id, type.name, workspacePath, status, sessionId, customName, worktreeContexts, hookPhase];
 }

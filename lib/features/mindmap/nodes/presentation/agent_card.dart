@@ -2,8 +2,8 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-
 import 'package:yoloit/features/mindmap/nodes/presentation/card_props.dart';
+import 'package:yoloit/features/terminal/models/agent_phase.dart';
 
 /// Presentation agent/terminal card — shared shell used by both macOS and web.
 /// Web falls back to styled text lines; macOS can inject a live terminal body.
@@ -46,11 +46,7 @@ class _AgentCardState extends State<AgentCard>
   @override
   void didUpdateWidget(AgentCard old) {
     super.didUpdateWidget(old);
-    if (widget.props.isRunning && !_animCtrl.isAnimating) {
-      _animCtrl.repeat(reverse: true);
-    } else if (!widget.props.isRunning && _animCtrl.isAnimating) {
-      _animCtrl.stop();
-    }
+    _updateAnimation();
   }
 
   @override
@@ -65,28 +61,69 @@ class _AgentCardState extends State<AgentCard>
     _ => const Color(0xFF60A5FA),
   };
 
+  Color get _phaseColor {
+    final phase = widget.props.hookPhase;
+    return switch (phase) {
+      null => _statusColor,
+      ThinkingPhase() => const Color(0xFFFBBF24),         // amber
+      ToolPhase() => const Color(0xFF818CF8),              // purple
+      AwaitingApprovalPhase() => const Color(0xFFF97316), // orange — needs attention!
+      DonePhase() => const Color(0xFF34D399),              // green
+      ErrorPhase() => const Color(0xFFF87171),             // red
+    };
+  }
+
+  Duration get _animDuration {
+    return switch (widget.props.hookPhase) {
+      ThinkingPhase() => const Duration(milliseconds: 700),
+      ToolPhase() => const Duration(milliseconds: 500),
+      AwaitingApprovalPhase() => const Duration(milliseconds: 350), // fast pulse = urgent
+      DonePhase() => const Duration(milliseconds: 400),
+      _ => const Duration(milliseconds: 1800),
+    };
+  }
+
+  void _updateAnimation() {
+    // Animate only when there is an active hook phase (agent doing work).
+    // When session is just live/idle (waiting for input), keep it calm.
+    final shouldAnimate = widget.props.hookPhase != null;
+    if (_animCtrl.duration != _animDuration) {
+      _animCtrl.duration = _animDuration;
+    }
+    if (shouldAnimate && !_animCtrl.isAnimating) {
+      _animCtrl.repeat(reverse: true);
+    } else if (!shouldAnimate && _animCtrl.isAnimating) {
+      _animCtrl.stop();
+      _animCtrl.value = 0;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final isRunning = widget.props.isRunning;
-    final color = _statusColor;
+    final color = _phaseColor;
+    final phase = widget.props.hookPhase;
+    // Active = agent is actually doing something (thinking/tool/done/error).
+    final isActive = phase != null;
 
     return AnimatedBuilder(
       animation: _glowAnim,
       builder: (_, child) {
-        final glowAlpha = isRunning
+        final glowAlpha = isActive
             ? ((_glowAnim.value * 100 + 40).round()).clamp(40, 140)
-            : 60;
+            : 60; // static dim border when idle
         return Container(
+          clipBehavior: Clip.antiAlias,
           decoration: BoxDecoration(
             color: const Color(0xFF0A0C10),
             border: Border.all(color: color.withAlpha(glowAlpha), width: 1.5),
             borderRadius: BorderRadius.circular(10),
             boxShadow: [
-              if (isRunning)
+              if (isActive)
                 BoxShadow(
                   color: color.withAlpha((_glowAnim.value * 60 + 10).round()),
-                  blurRadius: 16,
-                  spreadRadius: 1,
+                  blurRadius: phase is ThinkingPhase ? 24 : 16,
+                  spreadRadius: phase is ThinkingPhase ? 2 : 1,
                 ),
               const BoxShadow(
                 color: Color(0x90000000),
@@ -103,23 +140,131 @@ class _AgentCardState extends State<AgentCard>
         children: [
           _AgentCardHeader(
             props: widget.props,
-            color: _statusColor,
+            color: color,
             isRunning: isRunning,
           ),
           Expanded(
-            child:
-                widget.body ??
-                (widget.props.isIdle
-                    ? _IdlePlaceholder(onStart: widget.onSessionStart)
-                    : _TerminalPane(
-                        lines: widget.props.lastLines,
-                        onInput: widget.onTerminalInput,
-                      )),
+            child: Stack(
+              children: [
+                // Terminal / idle / text pane fills all space.
+                Positioned.fill(
+                  child: widget.body ??
+                      (widget.props.isIdle
+                          ? _IdlePlaceholder(onStart: widget.onSessionStart)
+                          : _TerminalPane(
+                              lines: widget.props.lastLines,
+                              onInput: widget.onTerminalInput,
+                            )),
+                ),
+                // Phase bar overlays the top of the terminal — does NOT shift layout.
+                if (phase != null)
+                  Positioned(
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    child: _HookPhaseBar(phase: phase, color: color, animation: _glowAnim),
+                  ),
+              ],
+            ),
           ),
-          if (isRunning)
-            _ActivityStripes(animation: _glowAnim, color: _statusColor),
+          // Stripes only when actively processing (not just idle-running).
+          if (isActive)
+            _ActivityStripes(animation: _glowAnim, color: color),
         ],
       ),
+    );
+  }
+}
+
+/// Thin bar shown between header and body when a hook phase is active.
+class _HookPhaseBar extends StatelessWidget {
+  const _HookPhaseBar({
+    required this.phase,
+    required this.color,
+    required this.animation,
+  });
+  final AgentPhase phase;
+  final Color color;
+  final Animation<double> animation;
+
+  String get _label => switch (phase) {
+    ThinkingPhase() => '● Thinking…',
+    ToolPhase(:final toolName) => '⚙ $toolName',
+    AwaitingApprovalPhase() => '⚠ Waiting for approval',
+    DonePhase() => '✓ Done',
+    ErrorPhase() => '✕ Error',
+  };
+
+  bool get _showDots => phase is ThinkingPhase || phase is ToolPhase || phase is AwaitingApprovalPhase;
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: animation,
+      builder: (_, __) => Container(
+        height: 22,
+        padding: const EdgeInsets.symmetric(horizontal: 10),
+        decoration: BoxDecoration(
+          color: Color.lerp(
+            const Color(0xFF1A1A1A), // near-black base
+            color,
+            0.15 + animation.value * 0.08, // subtle tint, fully opaque
+          ),
+          border: Border(
+            bottom: BorderSide(color: color.withAlpha(80), width: 0.5),
+          ),
+        ),
+        child: Row(
+          children: [
+            Text(
+              _label,
+              style: TextStyle(
+                color: color,
+                fontSize: 9.5,
+                fontWeight: FontWeight.w600,
+                letterSpacing: 0.3,
+              ),
+            ),
+            const Spacer(),
+            if (_showDots)
+              _DotsIndicator(animation: animation, color: color),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _DotsIndicator extends StatelessWidget {
+  const _DotsIndicator({required this.animation, required this.color});
+  final Animation<double> animation;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: animation,
+      builder: (_, __) {
+        final v = animation.value;
+        return Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            for (int i = 0; i < 3; i++) ...[
+              if (i > 0) const SizedBox(width: 2),
+              Container(
+                width: 4,
+                height: 4,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: color.withAlpha(
+                    ((v - i * 0.15).clamp(0.1, 1.0) * 200).round(),
+                  ),
+                ),
+              ),
+            ],
+          ],
+        );
+      },
     );
   }
 }
@@ -138,12 +283,12 @@ class _AgentCardHeader extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      decoration: BoxDecoration(
-        color: const Color(0xFF0F1218),
-        border: const Border(
+      decoration: const BoxDecoration(
+        color: Color(0xFF0F1218),
+        border: Border(
           bottom: BorderSide(color: Color(0xFF1E2330), width: 1),
         ),
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(9)),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(9)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -546,9 +691,6 @@ class _ActivityStripes extends StatelessWidget {
               animation.value,
               (animation.value + 0.5).clamp(0.0, 1.0),
             ],
-          ),
-          borderRadius: const BorderRadius.vertical(
-            bottom: Radius.circular(10),
           ),
         ),
       ),

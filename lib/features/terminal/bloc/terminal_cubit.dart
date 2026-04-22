@@ -1,8 +1,11 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_pty/flutter_pty.dart';
+import 'package:yoloit/core/services/agent_hook_service.dart';
 import 'package:yoloit/core/session/session_prefs.dart';
 import 'package:yoloit/features/settings/data/agent_config_service.dart';
 import 'package:yoloit/features/skills/data/skills_install_service.dart';
@@ -11,6 +14,8 @@ import 'package:yoloit/features/terminal/data/logging_service.dart';
 import 'package:yoloit/features/terminal/data/pty_service.dart';
 import 'package:yoloit/features/terminal/data/session_persistence_service.dart';
 import 'package:yoloit/features/terminal/data/tmux_service.dart';
+import 'package:yoloit/features/terminal/models/agent_phase.dart';
+import 'package:yoloit/features/terminal/models/agent_pty_config.dart';
 import 'package:yoloit/features/terminal/models/agent_session.dart';
 import 'package:yoloit/features/terminal/models/agent_type.dart';
 import 'package:yoloit/features/workspaces/data/agent_workspace_dir_service.dart';
@@ -30,6 +35,11 @@ class TerminalCubit extends Cubit<TerminalState> {
 
   /// Remembers the active tab index per workspace so switching back restores it.
   final Map<String, int> _activeIndexPerWorkspace = {};
+
+  StreamSubscription<HookEvent>? _hookSub;
+
+  /// Per-session idle timers: fire when PTY goes quiet → clear PTY-detected ThinkingPhase.
+  final Map<String, Timer> _ptyIdleTimers = {};
 
   List<AgentSession> get _workspaceSessions =>
       _allSessions.where((s) => s.workspaceId == _activeWorkspaceId).toList();
@@ -51,6 +61,10 @@ class TerminalCubit extends Cubit<TerminalState> {
       AgentConfigService.instance.load(), // pre-load agent configs + default
     ]);
     _emitLoaded([], 0);
+
+    // Start polling ~/.yoloit/hooks/ for agent status updates.
+    AgentHookService.instance.start();
+    _hookSub = AgentHookService.instance.events.listen(_onHookEvent);
   }
 
   /// Loads persisted session metadata for other (non-active) workspaces so
@@ -212,6 +226,9 @@ class TerminalCubit extends Cubit<TerminalState> {
     unawaited(_logging.startSession(sessionId, '${type.displayName} @ $effectivePath'));
     _attachPtyToSession(pty, session);
 
+    // Install YoLoIT hooks into the workspace so Copilot CLI can pick them up.
+    unawaited(AgentHookService.installHooks(effectivePath));
+
     // Remove any idle metadata stub with the same id (from loadPersistedMetadata).
     _allSessions.removeWhere((s) => s.id == sessionId);
     _allSessions.add(session);
@@ -331,6 +348,72 @@ class TerminalCubit extends Cubit<TerminalState> {
     _ptyService.resize(active.id, columns, rows);
   }
 
+  void _onHookEvent(HookEvent event) {
+    debugPrint('[HookEvent] event=${event.event} phase=${event.phase} cwd=${event.workspacePath}');
+
+    // Match the event's workspace path to a session with the same workspacePath.
+    final idx = _allSessions.indexWhere(
+      (s) => s.workspacePath == event.workspacePath,
+    );
+    if (idx < 0) {
+      debugPrint('[HookEvent] NO MATCH for cwd=${event.workspacePath}  '
+          'sessions: ${_allSessions.map((s) => s.workspacePath).toList()}');
+      return;
+    }
+
+    // sessionStart → phase is null, already handled by AgentStatus.live.
+    final newPhase = event.phase; // AgentPhase? — null means clear
+
+    debugPrint('[HookEvent] MATCHED session[${_allSessions[idx].id}] → newPhase=$newPhase');
+
+    // ThinkingPhase auto-clears after 15s if no other event fires.
+    // PTY idle-timer (5s) will usually clear it sooner via spinner detection.
+    if (newPhase is ThinkingPhase) {
+      Future.delayed(const Duration(seconds: 15), () {
+        final i = _allSessions.indexWhere((s) => s.workspacePath == event.workspacePath);
+        if (i >= 0 && _allSessions[i].hookPhase is ThinkingPhase) {
+          _allSessions[i] = _allSessions[i].copyWith(clearHookPhase: true);
+          final cur = _loaded;
+          if (cur != null && !isClosed) {
+            final visible = _workspaceSessions;
+            emit(cur.copyWith(sessions: visible, allSessions: List.unmodifiable(_allSessions)));
+          }
+        }
+      });
+    }
+
+    // DonePhase auto-clears after 3s (brief green flash).
+    if (newPhase is DonePhase) {
+      Future.delayed(const Duration(seconds: 3), () {
+        final i = _allSessions.indexWhere((s) => s.workspacePath == event.workspacePath);
+        if (i >= 0 && _allSessions[i].hookPhase is DonePhase) {
+          _allSessions[i] = _allSessions[i].copyWith(clearHookPhase: true);
+          final cur = _loaded;
+          if (cur != null && !isClosed) {
+            final visible = _workspaceSessions;
+            emit(cur.copyWith(sessions: visible, allSessions: List.unmodifiable(_allSessions)));
+          }
+        }
+      });
+    }
+
+    _allSessions[idx] = _allSessions[idx].copyWith(
+      hookPhase: newPhase,
+      // Don't clear AwaitingApprovalPhase via postToolUse (newPhase == null):
+      // it must persist until the user explicitly responds in the terminal.
+      // It will be cleared when: userPromptSubmitted fires (new user request)
+      // or explicitly via another hook event with a non-null phase.
+      clearHookPhase: newPhase == null &&
+          _allSessions[idx].hookPhase is! AwaitingApprovalPhase,
+    );
+
+    final cur = _loaded;
+    if (cur != null && !isClosed) {
+      final visible = _workspaceSessions;
+      emit(cur.copyWith(sessions: visible, allSessions: List.unmodifiable(_allSessions)));
+    }
+  }
+
   void _attachPtyToSession(Pty pty, AgentSession session) {
     pty.output
         .cast<List<int>>()
@@ -340,11 +423,111 @@ class TerminalCubit extends Cubit<TerminalState> {
             session.terminal.write(data);
             _logging.write(session.id, data);
             session.appendOutput(data); // capture for browser streaming
+
+            // ── PTY activity detection (backup when hooks don't fire) ──────
+            final ptyConfig = session.type.ptyConfig;
+            if (ptyConfig.hasDetection) {
+              _onPtyActivity(session, data, ptyConfig);
+            }
+
+            // Done-prompt detection is now handled inside _onPtyActivity via config.
           },
           onDone: () => _onSessionDone(session.id),
           // ignore: avoid_types_on_closure_parameters
           onError: (Object e) => _onSessionDone(session.id),
         );
+  }
+
+  void _onCopilotPromptDetected(String sessionId) {
+    final current = _loaded;
+    if (current == null || isClosed) return;
+    final i = _allSessions.indexWhere((s) => s.id == sessionId);
+    if (i < 0) return;
+    if (_allSessions[i].hookPhase is! ThinkingPhase) return;
+
+    // Flash DonePhase briefly then clear.
+    _allSessions[i] = _allSessions[i].copyWith(hookPhase: const DonePhase());
+    final visible = _workspaceSessions;
+    emit(current.copyWith(sessions: visible, allSessions: List.unmodifiable(_allSessions)));
+
+    // Play completion sound (interactive mode micro-completion).
+    SessionPrefs.isCompletionSoundEnabled().then((enabled) {
+      if (enabled) Process.run('afplay', ['/System/Library/Sounds/Glass.aiff']);
+    });
+
+    Future.delayed(const Duration(seconds: 3), () {
+      final i2 = _allSessions.indexWhere((s) => s.id == sessionId);
+      if (i2 >= 0 && _allSessions[i2].hookPhase is DonePhase) {
+        _allSessions[i2] = _allSessions[i2].copyWith(clearHookPhase: true);
+        final cur = _loaded;
+        if (cur != null && !isClosed) {
+          emit(cur.copyWith(sessions: _workspaceSessions, allSessions: List.unmodifiable(_allSessions)));
+        }
+      }
+    });
+  }
+
+  /// Called on every PTY output chunk for sessions with [AgentPtyConfig].
+  /// Uses per-agent config to detect spinner (→ ThinkingPhase),
+  /// done-prompts (→ DonePhase + sound), and approval dialogs
+  /// (→ AwaitingApprovalPhase + urgent sound).
+  void _onPtyActivity(AgentSession session, String data, AgentPtyConfig config) {
+    final sessionId = session.id;
+
+    // Always look up CURRENT session state — the captured `session` is stale.
+    final i = _allSessions.indexWhere((s) => s.id == sessionId);
+    if (i < 0) return;
+    final current = _allSessions[i];
+
+    // Approval dialog detected → AwaitingApprovalPhase + urgent sound.
+    if (config.containsApproval(data) &&
+        current.hookPhase is! AwaitingApprovalPhase) {
+      _ptyIdleTimers[sessionId]?.cancel();
+      _allSessions[i] = current.copyWith(
+          hookPhase: const AwaitingApprovalPhase());
+      final cur = _loaded;
+      if (cur != null && !isClosed) {
+        emit(cur.copyWith(
+            sessions: _workspaceSessions,
+            allSessions: List.unmodifiable(_allSessions)));
+      }
+      // Urgent sound — different from completion sound.
+      SessionPrefs.isApprovalSoundEnabled().then((enabled) {
+        if (enabled) Process.run('afplay', ['/System/Library/Sounds/Sosumi.aiff']);
+      });
+      return;
+    }
+
+    // Done-prompt detected while thinking → transition to done.
+    if (current.hookPhase is ThinkingPhase && config.containsDonePrompt(data)) {
+      _onCopilotPromptDetected(sessionId);
+      return;
+    }
+
+    if (!config.containsSpinner(data)) return;
+
+    // Reset idle timer — clear phase when PTY goes quiet.
+    _ptyIdleTimers[sessionId]?.cancel();
+    _ptyIdleTimers[sessionId] = Timer(config.idleTimeout, () {
+      _ptyIdleTimers.remove(sessionId);
+      final j = _allSessions.indexWhere((s) => s.id == sessionId);
+      if (j >= 0 && _allSessions[j].hookPhase is ThinkingPhase) {
+        _allSessions[j] = _allSessions[j].copyWith(clearHookPhase: true);
+        final cur = _loaded;
+        if (cur != null && !isClosed) {
+          emit(cur.copyWith(sessions: _workspaceSessions, allSessions: List.unmodifiable(_allSessions)));
+        }
+      }
+    });
+
+    // Only set ThinkingPhase if no hook phase is already active.
+    if (current.hookPhase != null) return;
+
+    _allSessions[i] = current.copyWith(hookPhase: const ThinkingPhase());
+    final cur = _loaded;
+    if (cur != null && !isClosed) {
+      emit(cur.copyWith(sessions: _workspaceSessions, allSessions: List.unmodifiable(_allSessions)));
+    }
   }
 
   void _onSessionDone(String sessionId) {
@@ -378,6 +561,12 @@ class TerminalCubit extends Cubit<TerminalState> {
 
   @override
   Future<void> close() {
+    _hookSub?.cancel();
+    for (final t in _ptyIdleTimers.values) {
+      t.cancel();
+    }
+    _ptyIdleTimers.clear();
+    AgentHookService.instance.stop();
     _ptyService.killAll();
     return super.close();
   }
