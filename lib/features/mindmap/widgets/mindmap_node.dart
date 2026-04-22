@@ -90,10 +90,7 @@ class _MindMapNodeState extends State<MindMapNode> {
                     ),
                   ),
 
-                  // ── Resize handles — always-active, invisible-until-hover
-                  // strips along edges/corners. No toggle button; the handles
-                  // themselves are the hit zones. Visible affordance only on
-                  // hover so the card stays visually clean.
+                  // ── Resize handles — only show on direct-edge hover ──────
 
                   // Right edge strip
                   Positioned(
@@ -101,7 +98,7 @@ class _MindMapNodeState extends State<MindMapNode> {
                     width: 12,
                     child: _ResizeEdge(
                       axis: Axis.vertical,
-                      visible: _hovered,
+                      visible: false,
                       onDrag: (d) => cubit.resizeNode(widget.id, Offset(d.delta.dx, 0), minSize),
                     ),
                   ),
@@ -111,7 +108,7 @@ class _MindMapNodeState extends State<MindMapNode> {
                     width: 12,
                     child: _ResizeEdge(
                       axis: Axis.vertical,
-                      visible: _hovered,
+                      visible: false,
                       onDrag: (d) => cubit.resizeFromLeft(widget.id, d.delta.dx, minSize),
                     ),
                   ),
@@ -121,7 +118,7 @@ class _MindMapNodeState extends State<MindMapNode> {
                     height: 12,
                     child: _ResizeEdge(
                       axis: Axis.horizontal,
-                      visible: _hovered,
+                      visible: false,
                       onDrag: (d) => cubit.resizeNode(widget.id, Offset(0, d.delta.dy), minSize),
                     ),
                   ),

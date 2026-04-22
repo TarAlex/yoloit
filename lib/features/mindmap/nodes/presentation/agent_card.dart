@@ -288,6 +288,7 @@ class _AgentCardHeader extends StatelessWidget {
         border: Border(
           bottom: BorderSide(color: Color(0xFF1E2330), width: 1),
         ),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(9)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
