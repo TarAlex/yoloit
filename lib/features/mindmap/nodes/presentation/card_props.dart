@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:yoloit/features/terminal/models/agent_phase.dart';
 
 // ── Shared sub-types ───────────────────────────────────────────────────────
 
@@ -123,9 +124,8 @@ class AgentCardProps {
   final List<RepoBranchInfo> repos;
   final bool isIdle;
 
-  /// Fine-grained agent phase from hook events:
-  /// null | 'live' | 'thinking' | 'tool:bash' | 'running' | 'done' | 'error'
-  final String? hookPhase;
+  /// Fine-grained agent phase from hook events. null = idle.
+  final AgentPhase? hookPhase;
 
   factory AgentCardProps.fromJson(Map<String, dynamic> j) {
     final rawLines = j['lastLines'];
@@ -146,8 +146,17 @@ class AgentCardProps {
       lastLines: lines,
       repos: repos,
       isIdle: j['isIdle'] as bool? ?? false,
-      hookPhase: j['hookPhase'] as String?,
+      hookPhase: _parsePhase(j['hookPhase'] as String?),
     );
+  }
+
+  static AgentPhase? _parsePhase(String? s) {
+    if (s == null) return null;
+    if (s == 'thinking') return const ThinkingPhase();
+    if (s.startsWith('tool:')) return ToolPhase(s.substring(5));
+    if (s == 'done') return const DonePhase();
+    if (s == 'error') return const ErrorPhase();
+    return null;
   }
 }
 

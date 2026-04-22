@@ -1,6 +1,7 @@
 import 'package:equatable/equatable.dart';
 import 'package:xterm/xterm.dart';
 import 'package:yoloit/features/terminal/data/terminal_output_bus.dart';
+import 'package:yoloit/features/terminal/models/agent_phase.dart';
 import 'package:yoloit/features/terminal/models/agent_type.dart';
 
 enum AgentStatus { idle, live, error }
@@ -44,9 +45,9 @@ class AgentSession extends Equatable {
   /// Maps repoPath → selectedWorktreePath. Null = default workspace dir.
   final Map<String, String>? worktreeContexts;
 
-  /// Fine-grained phase from Copilot hook events:
-  /// null | 'live' | 'thinking' | 'tool:bash' | 'running' | 'done' | 'error'
-  final String? hookPhase;
+  /// Fine-grained phase from Copilot hook events.
+  /// null = idle (session alive, agent not actively working).
+  final AgentPhase? hookPhase;
 
   /// Rolling plain-text buffer of recent PTY output (max 300 lines).
   /// NOT included in [props] — mutations don't trigger state rebuilds.
@@ -128,7 +129,7 @@ class AgentSession extends Equatable {
     String? customName,
     bool clearCustomName = false,
     Map<String, String>? worktreeContexts,
-    String? hookPhase,
+    AgentPhase? hookPhase,
     bool clearHookPhase = false,
   }) {
     return AgentSession._preserve(

@@ -2,8 +2,8 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-
 import 'package:yoloit/features/mindmap/nodes/presentation/card_props.dart';
+import 'package:yoloit/features/terminal/models/agent_phase.dart';
 
 /// Presentation agent/terminal card — shared shell used by both macOS and web.
 /// Web falls back to styled text lines; macOS can inject a live terminal body.
@@ -63,20 +63,22 @@ class _AgentCardState extends State<AgentCard>
 
   Color get _phaseColor {
     final phase = widget.props.hookPhase;
-    if (phase == null) return _statusColor;
-    if (phase == 'thinking') return const Color(0xFFFBBF24); // amber
-    if (phase.startsWith('tool:')) return const Color(0xFF818CF8); // purple
-    if (phase == 'done') return const Color(0xFF34D399); // green
-    if (phase == 'error') return const Color(0xFFF87171); // red
-    return _statusColor;
+    return switch (phase) {
+      null => _statusColor,
+      ThinkingPhase() => const Color(0xFFFBBF24), // amber
+      ToolPhase() => const Color(0xFF818CF8), // purple
+      DonePhase() => const Color(0xFF34D399), // green
+      ErrorPhase() => const Color(0xFFF87171), // red
+    };
   }
 
   Duration get _animDuration {
-    final phase = widget.props.hookPhase;
-    if (phase == 'thinking') return const Duration(milliseconds: 700);
-    if (phase != null && phase.startsWith('tool:')) return const Duration(milliseconds: 500);
-    if (phase == 'done') return const Duration(milliseconds: 400);
-    return const Duration(milliseconds: 1800);
+    return switch (widget.props.hookPhase) {
+      ThinkingPhase() => const Duration(milliseconds: 700),
+      ToolPhase() => const Duration(milliseconds: 500),
+      DonePhase() => const Duration(milliseconds: 400),
+      _ => const Duration(milliseconds: 1800),
+    };
   }
 
   void _updateAnimation() {
@@ -117,8 +119,8 @@ class _AgentCardState extends State<AgentCard>
               if (isActive)
                 BoxShadow(
                   color: color.withAlpha((_glowAnim.value * 60 + 10).round()),
-                  blurRadius: phase == 'thinking' ? 24 : 16,
-                  spreadRadius: phase == 'thinking' ? 2 : 1,
+                  blurRadius: phase is ThinkingPhase ? 24 : 16,
+                  spreadRadius: phase is ThinkingPhase ? 2 : 1,
                 ),
               const BoxShadow(
                 color: Color(0x90000000),
@@ -166,17 +168,18 @@ class _HookPhaseBar extends StatelessWidget {
     required this.color,
     required this.animation,
   });
-  final String phase;
+  final AgentPhase phase;
   final Color color;
   final Animation<double> animation;
 
-  String get _label {
-    if (phase == 'thinking') return '● Thinking…';
-    if (phase.startsWith('tool:')) return '⚙ ${phase.substring(5)}';
-    if (phase == 'done') return '✓ Done';
-    if (phase == 'error') return '✕ Error';
-    return phase;
-  }
+  String get _label => switch (phase) {
+    ThinkingPhase() => '● Thinking…',
+    ToolPhase(:final toolName) => '⚙ $toolName',
+    DonePhase() => '✓ Done',
+    ErrorPhase() => '✕ Error',
+  };
+
+  bool get _showDots => phase is ThinkingPhase || phase is ToolPhase;
 
   @override
   Widget build(BuildContext context) {
@@ -203,7 +206,7 @@ class _HookPhaseBar extends StatelessWidget {
               ),
             ),
             const Spacer(),
-            if (phase == 'thinking' || phase.startsWith('tool:'))
+            if (_showDots)
               _DotsIndicator(animation: animation, color: color),
           ],
         ),

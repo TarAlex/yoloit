@@ -14,6 +14,7 @@ import 'package:yoloit/features/terminal/data/logging_service.dart';
 import 'package:yoloit/features/terminal/data/pty_service.dart';
 import 'package:yoloit/features/terminal/data/session_persistence_service.dart';
 import 'package:yoloit/features/terminal/data/tmux_service.dart';
+import 'package:yoloit/features/terminal/models/agent_phase.dart';
 import 'package:yoloit/features/terminal/models/agent_session.dart';
 import 'package:yoloit/features/terminal/models/agent_type.dart';
 import 'package:yoloit/features/workspaces/data/agent_workspace_dir_service.dart';
@@ -356,25 +357,16 @@ class TerminalCubit extends Cubit<TerminalState> {
       return;
     }
 
-    final phase = event.phase;
-
-    // sessionStart only tells us the process is running — which AgentStatus.live
-    // already tracks.  Don't let it override an active hook phase (e.g. thinking).
-    if (phase == 'live') {
-      debugPrint('[HookEvent] sessionStart ignored for hookPhase (already live)');
-      return;
-    }
-
-    // postToolUse and generic running → clear phase (back to normal running state).
-    String? newPhase = phase == 'running' ? null : phase;
+    // sessionStart → phase is null, already handled by AgentStatus.live.
+    final newPhase = event.phase; // AgentPhase? — null means clear
 
     debugPrint('[HookEvent] MATCHED session[${_allSessions[idx].id}] → newPhase=$newPhase');
 
-    // 'thinking' auto-clears after 60s if nothing else fires (e.g. simple text response).
-    if (phase == 'thinking') {
+    // ThinkingPhase auto-clears after 60s if no other event fires.
+    if (newPhase is ThinkingPhase) {
       Future.delayed(const Duration(seconds: 60), () {
         final i = _allSessions.indexWhere((s) => s.workspacePath == event.workspacePath);
-        if (i >= 0 && _allSessions[i].hookPhase == 'thinking') {
+        if (i >= 0 && _allSessions[i].hookPhase is ThinkingPhase) {
           _allSessions[i] = _allSessions[i].copyWith(clearHookPhase: true);
           final cur = _loaded;
           if (cur != null && !isClosed) {
@@ -385,11 +377,11 @@ class TerminalCubit extends Cubit<TerminalState> {
       });
     }
 
-    // 'done' auto-clears itself after a short delay.
-    if (phase == 'done') {
+    // DonePhase auto-clears after 3s (brief green flash).
+    if (newPhase is DonePhase) {
       Future.delayed(const Duration(seconds: 3), () {
         final i = _allSessions.indexWhere((s) => s.workspacePath == event.workspacePath);
-        if (i >= 0 && _allSessions[i].hookPhase == 'done') {
+        if (i >= 0 && _allSessions[i].hookPhase is DonePhase) {
           _allSessions[i] = _allSessions[i].copyWith(clearHookPhase: true);
           final cur = _loaded;
           if (cur != null && !isClosed) {
@@ -424,8 +416,8 @@ class TerminalCubit extends Cubit<TerminalState> {
 
             // Detect Copilot interactive prompt '› ' (U+203A + space).
             // When Copilot finishes responding, it shows this prompt.
-            // Use it to clear 'thinking' phase and play done sound.
-            if (session.hookPhase == 'thinking' && data.contains('\u203A ')) {
+            // Use it to clear ThinkingPhase and play done sound.
+            if (session.hookPhase is ThinkingPhase && data.contains('\u203A ')) {
               _onCopilotPromptDetected(session.id);
             }
           },
@@ -440,10 +432,10 @@ class TerminalCubit extends Cubit<TerminalState> {
     if (current == null || isClosed) return;
     final i = _allSessions.indexWhere((s) => s.id == sessionId);
     if (i < 0) return;
-    if (_allSessions[i].hookPhase != 'thinking') return;
+    if (_allSessions[i].hookPhase is! ThinkingPhase) return;
 
-    // Flash 'done' briefly then clear.
-    _allSessions[i] = _allSessions[i].copyWith(hookPhase: 'done');
+    // Flash DonePhase briefly then clear.
+    _allSessions[i] = _allSessions[i].copyWith(hookPhase: const DonePhase());
     final visible = _workspaceSessions;
     emit(current.copyWith(sessions: visible, allSessions: List.unmodifiable(_allSessions)));
 
@@ -452,7 +444,7 @@ class TerminalCubit extends Cubit<TerminalState> {
 
     Future.delayed(const Duration(seconds: 3), () {
       final i2 = _allSessions.indexWhere((s) => s.id == sessionId);
-      if (i2 >= 0 && _allSessions[i2].hookPhase == 'done') {
+      if (i2 >= 0 && _allSessions[i2].hookPhase is DonePhase) {
         _allSessions[i2] = _allSessions[i2].copyWith(clearHookPhase: true);
         final cur = _loaded;
         if (cur != null && !isClosed) {

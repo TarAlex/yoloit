@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
+import 'package:yoloit/features/terminal/models/agent_phase.dart';
 
 /// A single hook event emitted from a workspace's hook script.
 class HookEvent {
@@ -29,31 +30,30 @@ class HookEvent {
   /// Unix epoch milliseconds.
   final int timestamp;
 
-  /// Human-readable "phase" used by [AgentCard] for animation.
+  /// Typed phase for this event — null means "clear / return to idle".
   ///
-  /// - `thinking`       → userPromptSubmitted
-  /// - `tool:<name>`    → preToolUse (e.g. "tool:bash")
-  /// - `running`        → postToolUse (back to general running)
-  /// - `done`           → sessionEnd
-  /// - `error`          → errorOccurred
-  /// - `live`           → sessionStart
-  /// - `idle`           → unknown / stale
-  String get phase {
+  /// - [ThinkingPhase]  → userPromptSubmitted
+  /// - [ToolPhase]      → preToolUse
+  /// - null             → postToolUse (back to running, clear phase)
+  /// - [DonePhase]      → sessionEnd
+  /// - [ErrorPhase]     → errorOccurred
+  /// - null             → sessionStart (already tracked by AgentStatus.live)
+  AgentPhase? get phase {
     switch (event) {
       case 'sessionStart':
-        return 'live';
+        return null; // AgentStatus.live handles this; don't override hook phase
       case 'userPromptSubmitted':
-        return 'thinking';
+        return const ThinkingPhase();
       case 'preToolUse':
-        return tool != null ? 'tool:$tool' : 'tool';
+        return ToolPhase(tool ?? 'unknown');
       case 'postToolUse':
-        return 'running';
+        return null; // clear phase — agent finished a tool, back to thinking
       case 'sessionEnd':
-        return 'done';
+        return const DonePhase();
       case 'errorOccurred':
-        return 'error';
+        return const ErrorPhase();
       default:
-        return 'live';
+        return null;
     }
   }
 
