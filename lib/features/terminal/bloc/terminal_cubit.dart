@@ -37,6 +37,14 @@ class TerminalCubit extends Cubit<TerminalState> {
 
   StreamSubscription<HookEvent>? _hookSub;
 
+  /// Per-session idle timers: fire when PTY goes quiet → clear PTY-detected ThinkingPhase.
+  final Map<String, Timer> _ptyIdleTimers = {};
+
+  /// Copilot spinner / progress characters that appear while the agent works.
+  static const _kSpinnerChars = {'\u25CF', '\u25CB', '\u280B', '\u2809', '\u2839',
+      '\u2838', '\u283C', '\u2834', '\u2826', '\u2827', '\u2807', '\u280F'};
+  static const _kPtyIdleTimeout = Duration(seconds: 30);
+
   List<AgentSession> get _workspaceSessions =>
       _allSessions.where((s) => s.workspaceId == _activeWorkspaceId).toList();
 
@@ -414,6 +422,13 @@ class TerminalCubit extends Cubit<TerminalState> {
             _logging.write(session.id, data);
             session.appendOutput(data); // capture for browser streaming
 
+            // ── PTY activity detection (backup when hooks don't fire) ──────
+            // Detect Copilot spinner chars → infer ThinkingPhase.
+            // Only for AI agent types (not plain terminal).
+            if (session.type != AgentType.terminal) {
+              _onPtyActivity(session, data);
+            }
+
             // Detect Copilot interactive prompt '› ' (U+203A + space).
             // When Copilot finishes responding, it shows this prompt.
             // Use it to clear ThinkingPhase and play done sound.
@@ -454,6 +469,40 @@ class TerminalCubit extends Cubit<TerminalState> {
     });
   }
 
+  /// Called on every PTY output chunk for AI agent sessions.
+  /// If spinner characters are detected and no hook phase is active,
+  /// sets ThinkingPhase. Resets a 30s idle timer that clears it.
+  void _onPtyActivity(AgentSession session, String data) {
+    final hasSpinner = data.runes.any((r) => _kSpinnerChars.contains(String.fromCharCode(r)));
+    if (!hasSpinner) return;
+
+    final sessionId = session.id;
+
+    // Reset idle timer — clear phase when PTY goes quiet.
+    _ptyIdleTimers[sessionId]?.cancel();
+    _ptyIdleTimers[sessionId] = Timer(_kPtyIdleTimeout, () {
+      _ptyIdleTimers.remove(sessionId);
+      final i = _allSessions.indexWhere((s) => s.id == sessionId);
+      if (i >= 0 && _allSessions[i].hookPhase is ThinkingPhase) {
+        _allSessions[i] = _allSessions[i].copyWith(clearHookPhase: true);
+        final cur = _loaded;
+        if (cur != null && !isClosed) {
+          emit(cur.copyWith(sessions: _workspaceSessions, allSessions: List.unmodifiable(_allSessions)));
+        }
+      }
+    });
+
+    // Only set ThinkingPhase if no hook phase is already active.
+    final i = _allSessions.indexWhere((s) => s.id == sessionId);
+    if (i < 0 || _allSessions[i].hookPhase != null) return;
+
+    _allSessions[i] = _allSessions[i].copyWith(hookPhase: const ThinkingPhase());
+    final cur = _loaded;
+    if (cur != null && !isClosed) {
+      emit(cur.copyWith(sessions: _workspaceSessions, allSessions: List.unmodifiable(_allSessions)));
+    }
+  }
+
   void _onSessionDone(String sessionId) {
     final current = _loaded;
     if (current == null) return;
@@ -486,6 +535,10 @@ class TerminalCubit extends Cubit<TerminalState> {
   @override
   Future<void> close() {
     _hookSub?.cancel();
+    for (final t in _ptyIdleTimers.values) {
+      t.cancel();
+    }
+    _ptyIdleTimers.clear();
     AgentHookService.instance.stop();
     _ptyService.killAll();
     return super.close();
