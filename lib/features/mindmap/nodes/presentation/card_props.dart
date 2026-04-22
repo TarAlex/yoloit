@@ -113,6 +113,7 @@ class AgentCardProps {
     this.lastLines = const [],
     this.repos = const [],
     this.isIdle = false,
+    this.hookPhase,
   });
   final String name;
   final String status; // 'live','idle','error'
@@ -121,6 +122,10 @@ class AgentCardProps {
   final List<String> lastLines;
   final List<RepoBranchInfo> repos;
   final bool isIdle;
+
+  /// Fine-grained agent phase from hook events:
+  /// null | 'live' | 'thinking' | 'tool:bash' | 'running' | 'done' | 'error'
+  final String? hookPhase;
 
   factory AgentCardProps.fromJson(Map<String, dynamic> j) {
     final rawLines = j['lastLines'];
@@ -141,6 +146,7 @@ class AgentCardProps {
       lastLines: lines,
       repos: repos,
       isIdle: j['isIdle'] as bool? ?? false,
+      hookPhase: j['hookPhase'] as String?,
     );
   }
 }

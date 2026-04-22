@@ -3,6 +3,7 @@ import 'dart:convert';
 
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_pty/flutter_pty.dart';
+import 'package:yoloit/core/services/agent_hook_service.dart';
 import 'package:yoloit/core/session/session_prefs.dart';
 import 'package:yoloit/features/settings/data/agent_config_service.dart';
 import 'package:yoloit/features/skills/data/skills_install_service.dart';
@@ -31,6 +32,8 @@ class TerminalCubit extends Cubit<TerminalState> {
   /// Remembers the active tab index per workspace so switching back restores it.
   final Map<String, int> _activeIndexPerWorkspace = {};
 
+  StreamSubscription<HookEvent>? _hookSub;
+
   List<AgentSession> get _workspaceSessions =>
       _allSessions.where((s) => s.workspaceId == _activeWorkspaceId).toList();
 
@@ -51,6 +54,10 @@ class TerminalCubit extends Cubit<TerminalState> {
       AgentConfigService.instance.load(), // pre-load agent configs + default
     ]);
     _emitLoaded([], 0);
+
+    // Start polling ~/.yoloit/hooks/ for agent status updates.
+    AgentHookService.instance.start();
+    _hookSub = AgentHookService.instance.events.listen(_onHookEvent);
   }
 
   /// Loads persisted session metadata for other (non-active) workspaces so
@@ -212,6 +219,9 @@ class TerminalCubit extends Cubit<TerminalState> {
     unawaited(_logging.startSession(sessionId, '${type.displayName} @ $effectivePath'));
     _attachPtyToSession(pty, session);
 
+    // Install YoLoIT hooks into the workspace so Copilot CLI can pick them up.
+    unawaited(AgentHookService.installHooks(effectivePath));
+
     // Remove any idle metadata stub with the same id (from loadPersistedMetadata).
     _allSessions.removeWhere((s) => s.id == sessionId);
     _allSessions.add(session);
@@ -331,6 +341,44 @@ class TerminalCubit extends Cubit<TerminalState> {
     _ptyService.resize(active.id, columns, rows);
   }
 
+  void _onHookEvent(HookEvent event) {
+    // Match the event's workspace path to a session with the same workspacePath.
+    final idx = _allSessions.indexWhere(
+      (s) => s.workspacePath == event.workspacePath,
+    );
+    if (idx < 0) return;
+
+    final phase = event.phase;
+    String? newPhase = phase == 'live' || phase == 'running' ? null : phase;
+
+    // 'done' should clear itself after a short delay.
+    if (phase == 'done') {
+      newPhase = 'done';
+      Future.delayed(const Duration(seconds: 3), () {
+        final i = _allSessions.indexWhere((s) => s.workspacePath == event.workspacePath);
+        if (i >= 0 && _allSessions[i].hookPhase == 'done') {
+          _allSessions[i] = _allSessions[i].copyWith(clearHookPhase: true);
+          final cur = _loaded;
+          if (cur != null && !isClosed) {
+            final visible = _workspaceSessions;
+            emit(cur.copyWith(sessions: visible, allSessions: List.unmodifiable(_allSessions)));
+          }
+        }
+      });
+    }
+
+    _allSessions[idx] = _allSessions[idx].copyWith(
+      hookPhase: newPhase,
+      clearHookPhase: newPhase == null,
+    );
+
+    final cur = _loaded;
+    if (cur != null && !isClosed) {
+      final visible = _workspaceSessions;
+      emit(cur.copyWith(sessions: visible, allSessions: List.unmodifiable(_allSessions)));
+    }
+  }
+
   void _attachPtyToSession(Pty pty, AgentSession session) {
     pty.output
         .cast<List<int>>()
@@ -378,6 +426,8 @@ class TerminalCubit extends Cubit<TerminalState> {
 
   @override
   Future<void> close() {
+    _hookSub?.cancel();
+    AgentHookService.instance.stop();
     _ptyService.killAll();
     return super.close();
   }

@@ -46,11 +46,7 @@ class _AgentCardState extends State<AgentCard>
   @override
   void didUpdateWidget(AgentCard old) {
     super.didUpdateWidget(old);
-    if (widget.props.isRunning && !_animCtrl.isAnimating) {
-      _animCtrl.repeat(reverse: true);
-    } else if (!widget.props.isRunning && _animCtrl.isAnimating) {
-      _animCtrl.stop();
-    }
+    _updateAnimation();
   }
 
   @override
@@ -65,15 +61,46 @@ class _AgentCardState extends State<AgentCard>
     _ => const Color(0xFF60A5FA),
   };
 
+  Color get _phaseColor {
+    final phase = widget.props.hookPhase;
+    if (phase == null) return _statusColor;
+    if (phase == 'thinking') return const Color(0xFFFBBF24); // amber
+    if (phase.startsWith('tool:')) return const Color(0xFF818CF8); // purple
+    if (phase == 'done') return const Color(0xFF34D399); // green
+    if (phase == 'error') return const Color(0xFFF87171); // red
+    return _statusColor;
+  }
+
+  Duration get _animDuration {
+    final phase = widget.props.hookPhase;
+    if (phase == 'thinking') return const Duration(milliseconds: 700);
+    if (phase != null && phase.startsWith('tool:')) return const Duration(milliseconds: 500);
+    if (phase == 'done') return const Duration(milliseconds: 400);
+    return const Duration(milliseconds: 1800);
+  }
+
+  void _updateAnimation() {
+    final shouldAnimate = widget.props.isRunning || widget.props.hookPhase != null;
+    if (_animCtrl.duration != _animDuration) {
+      _animCtrl.duration = _animDuration;
+    }
+    if (shouldAnimate && !_animCtrl.isAnimating) {
+      _animCtrl.repeat(reverse: true);
+    } else if (!shouldAnimate && _animCtrl.isAnimating) {
+      _animCtrl.stop();
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final isRunning = widget.props.isRunning;
-    final color = _statusColor;
+    final color = _phaseColor;
+    final phase = widget.props.hookPhase;
 
     return AnimatedBuilder(
       animation: _glowAnim,
       builder: (_, child) {
-        final glowAlpha = isRunning
+        final glowAlpha = (isRunning || phase != null)
             ? ((_glowAnim.value * 100 + 40).round()).clamp(40, 140)
             : 60;
         return Container(
@@ -82,11 +109,11 @@ class _AgentCardState extends State<AgentCard>
             border: Border.all(color: color.withAlpha(glowAlpha), width: 1.5),
             borderRadius: BorderRadius.circular(10),
             boxShadow: [
-              if (isRunning)
+              if (isRunning || phase != null)
                 BoxShadow(
                   color: color.withAlpha((_glowAnim.value * 60 + 10).round()),
-                  blurRadius: 16,
-                  spreadRadius: 1,
+                  blurRadius: phase == 'thinking' ? 24 : 16,
+                  spreadRadius: phase == 'thinking' ? 2 : 1,
                 ),
               const BoxShadow(
                 color: Color(0x90000000),
@@ -103,9 +130,11 @@ class _AgentCardState extends State<AgentCard>
         children: [
           _AgentCardHeader(
             props: widget.props,
-            color: _statusColor,
+            color: color,
             isRunning: isRunning,
           ),
+          if (widget.props.hookPhase != null)
+            _HookPhaseBar(phase: widget.props.hookPhase!, color: color, animation: _glowAnim),
           Expanded(
             child:
                 widget.body ??
@@ -117,9 +146,96 @@ class _AgentCardState extends State<AgentCard>
                       )),
           ),
           if (isRunning)
-            _ActivityStripes(animation: _glowAnim, color: _statusColor),
+            _ActivityStripes(animation: _glowAnim, color: color),
         ],
       ),
+    );
+  }
+}
+
+/// Thin bar shown between header and body when a hook phase is active.
+class _HookPhaseBar extends StatelessWidget {
+  const _HookPhaseBar({
+    required this.phase,
+    required this.color,
+    required this.animation,
+  });
+  final String phase;
+  final Color color;
+  final Animation<double> animation;
+
+  String get _label {
+    if (phase == 'thinking') return '● Thinking…';
+    if (phase.startsWith('tool:')) return '⚙ ${phase.substring(5)}';
+    if (phase == 'done') return '✓ Done';
+    if (phase == 'error') return '✕ Error';
+    return phase;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: animation,
+      builder: (_, __) => Container(
+        height: 22,
+        padding: const EdgeInsets.symmetric(horizontal: 10),
+        decoration: BoxDecoration(
+          color: color.withAlpha(((animation.value * 20) + 10).round()),
+          border: Border(
+            bottom: BorderSide(color: color.withAlpha(60), width: 0.5),
+          ),
+        ),
+        child: Row(
+          children: [
+            Text(
+              _label,
+              style: TextStyle(
+                color: color,
+                fontSize: 9.5,
+                fontWeight: FontWeight.w600,
+                letterSpacing: 0.3,
+              ),
+            ),
+            const Spacer(),
+            if (phase == 'thinking' || phase.startsWith('tool:'))
+              _DotsIndicator(animation: animation, color: color),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _DotsIndicator extends StatelessWidget {
+  const _DotsIndicator({required this.animation, required this.color});
+  final Animation<double> animation;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: animation,
+      builder: (_, __) {
+        final v = animation.value;
+        return Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            for (int i = 0; i < 3; i++) ...[
+              if (i > 0) const SizedBox(width: 2),
+              Container(
+                width: 4,
+                height: 4,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: color.withAlpha(
+                    ((v - i * 0.15).clamp(0.1, 1.0) * 200).round(),
+                  ),
+                ),
+              ),
+            ],
+          ],
+        );
+      },
     );
   }
 }

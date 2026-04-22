@@ -15,6 +15,7 @@ class AgentSession extends Equatable {
     this.sessionId,
     this.customName,
     this.worktreeContexts,
+    this.hookPhase,
   }) : terminal = Terminal(maxLines: 10000);
 
   // Private constructor that preserves an existing terminal instance.
@@ -28,6 +29,7 @@ class AgentSession extends Equatable {
     this.sessionId,
     this.customName,
     this.worktreeContexts,
+    this.hookPhase,
   });
 
   final String id;
@@ -41,6 +43,10 @@ class AgentSession extends Equatable {
   final Terminal terminal;
   /// Maps repoPath → selectedWorktreePath. Null = default workspace dir.
   final Map<String, String>? worktreeContexts;
+
+  /// Fine-grained phase from Copilot hook events:
+  /// null | 'live' | 'thinking' | 'tool:bash' | 'running' | 'done' | 'error'
+  final String? hookPhase;
 
   /// Rolling plain-text buffer of recent PTY output (max 300 lines).
   /// NOT included in [props] — mutations don't trigger state rebuilds.
@@ -122,6 +128,8 @@ class AgentSession extends Equatable {
     String? customName,
     bool clearCustomName = false,
     Map<String, String>? worktreeContexts,
+    String? hookPhase,
+    bool clearHookPhase = false,
   }) {
     return AgentSession._preserve(
       id: id,
@@ -133,6 +141,7 @@ class AgentSession extends Equatable {
       sessionId: sessionId ?? this.sessionId,
       customName: clearCustomName ? null : (customName ?? this.customName),
       worktreeContexts: worktreeContexts ?? this.worktreeContexts,
+      hookPhase: clearHookPhase ? null : (hookPhase ?? this.hookPhase),
     );
   }
 
