@@ -36,13 +36,21 @@ buildMindMapGraph({
 
     for (final session in sessions) {
       final agentNodeId = 'agent:${session.id}';
+
+      // Determine the branch this session is actually on.
+      // For worktree sessions, use the first branch from worktreeContexts.
+      final wt = session.worktreeContexts;
+      final sessionBranch = (wt != null && wt.isNotEmpty)
+          ? p.basename(wt.values.first)
+          : ws.gitBranch;
+
       nodes.add(
         AgentNodeData(
           id: agentNodeId,
           session: session,
           workspaceId: ws.id,
           workspacePaths: ws.paths,
-          workspaceBranch: ws.gitBranch,
+          workspaceBranch: sessionBranch,
         ),
       );
 
@@ -63,10 +71,10 @@ buildMindMapGraph({
         ),
       );
 
-      final wt = session.worktreeContexts;
       final repoPaths = <String, String>{};
-      if (wt != null && wt.isNotEmpty) {
-        repoPaths.addAll(wt);
+      final sessionWt = session.worktreeContexts;
+      if (sessionWt != null && sessionWt.isNotEmpty) {
+        repoPaths.addAll(sessionWt);
       } else {
         for (final repoPath in ws.paths) {
           repoPaths[repoPath] = ws.gitBranch ?? 'main';
@@ -76,9 +84,12 @@ buildMindMapGraph({
       for (final entry in repoPaths.entries) {
         final repoPath = entry.key;
         final branchRef = entry.value;
+        final branchName = p.basename(branchRef);
         final repoName = p.basename(repoPath);
-        final repoNodeId = 'repo:${ws.id}:$repoPath';
-        final branchNodeId = 'branch:${ws.id}:$repoPath';
+        // Include branch in the ID so worktrees on the same repo but different
+        // branches each get their own set of nodes (repo → branch → tree → diff).
+        final repoNodeId = 'repo:${ws.id}:$repoPath:$branchName';
+        final branchNodeId = 'branch:${ws.id}:$repoPath:$branchName';
 
         if (!nodes.any((node) => node.id == repoNodeId)) {
           nodes.add(
@@ -87,7 +98,7 @@ buildMindMapGraph({
               sessionId: session.id,
               repoPath: repoPath,
               repoName: repoName,
-              branch: p.basename(branchRef),
+              branch: branchName,
             ),
           );
         }
@@ -106,7 +117,7 @@ buildMindMapGraph({
               id: branchNodeId,
               repoId: repoNodeId,
               repoName: repoName,
-              branch: p.basename(branchRef),
+              branch: branchName,
               commitHash: '',
             ),
           );
@@ -241,15 +252,17 @@ buildMindMapGraph({
 
   final repoNodes = nodes.whereType<RepoNodeData>().toList();
   for (final repo in repoNodes) {
-    final treeId = 'tree:${repo.repoPath}';
-    final diffId = 'diff:${repo.repoPath}';
+    // Use repoPath + branch in the ID so worktrees on the same repo path but
+    // different branches get separate Tree and Diff panels.
+    final treeId = 'tree:${repo.repoPath}:${repo.branch}';
+    final diffId = 'diff:${repo.repoPath}:${repo.branch}';
     if (nodes.any((node) => node.id == treeId)) continue;
     nodes.add(
       FileTreeNodeData(
         id: treeId,
         workspaceId: '',
         repoPath: repo.repoPath,
-        repoName: repo.repoName,
+        repoName: '${repo.repoName} · ${repo.branch}',
       ),
     );
     conns.add(
@@ -266,7 +279,7 @@ buildMindMapGraph({
           id: diffId,
           workspaceId: '',
           repoPath: repo.repoPath,
-          repoName: repo.repoName,
+          repoName: '${repo.repoName} · ${repo.branch}',
         ),
       );
       conns.add(
