@@ -283,12 +283,11 @@ class _AgentCardHeader extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      decoration: BoxDecoration(
-        color: const Color(0xFF0F1218),
-        border: const Border(
+      decoration: const BoxDecoration(
+        color: Color(0xFF0F1218),
+        border: Border(
           bottom: BorderSide(color: Color(0xFF1E2330), width: 1),
         ),
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(9)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -691,9 +690,6 @@ class _ActivityStripes extends StatelessWidget {
               animation.value,
               (animation.value + 0.5).clamp(0.0, 1.0),
             ],
-          ),
-          borderRadius: const BorderRadius.vertical(
-            bottom: Radius.circular(10),
           ),
         ),
       ),
