@@ -141,23 +141,66 @@ class AgentHookService {
     }
   }
 
-  /// Installs the YoLoIT hooks (hooks.json + yoloit-hook.sh) into [workspacePath]
-  /// under `.github/hooks/`.  Idempotent — only writes when content differs.
+  /// Installs the YoLoIT hooks into [workspacePath] using symlinks.
+  ///
+  /// Strategy:
+  /// 1. Write the canonical script once to `~/.yoloit/bin/yoloit-hook.sh`.
+  /// 2. Create `.github/hooks/` in the workspace.
+  /// 3. Symlink `yoloit-hook.sh` and `hooks.json` → canonical files.
+  ///
+  /// Updating the binary automatically updates ALL workspaces at once — no
+  /// need to revisit each workspace on every YoLoIT release.
   static Future<void> installHooks(String workspacePath) async {
+    final home = Platform.environment['HOME'] ?? '';
+    final binDir = Directory('$home/.yoloit/bin');
+    await binDir.create(recursive: true);
+
+    // Write canonical files (idempotent — only writes when content differs).
+    final canonicalScript = File('${binDir.path}/yoloit-hook.sh');
+    await _writeIfChanged(canonicalScript, _hookScriptContent);
+    try {
+      await Process.run('chmod', ['+x', canonicalScript.path]);
+    } catch (_) {}
+
+    final canonicalJson = File('${binDir.path}/hooks.json');
+    await _writeIfChanged(canonicalJson, _hooksJsonContent);
+
+    // Create .github/hooks/ in the workspace.
     final hooksDir = Directory('$workspacePath/.github/hooks');
     await hooksDir.create(recursive: true);
 
-    await _writeIfChanged(
-      File('${hooksDir.path}/hooks.json'),
-      _hooksJsonContent,
+    // Symlink workspace files → canonical files.
+    await _symlinkIfNeeded(
+      link: '${hooksDir.path}/yoloit-hook.sh',
+      target: canonicalScript.path,
+      makeExecutable: true,
     );
+    await _symlinkIfNeeded(
+      link: '${hooksDir.path}/hooks.json',
+      target: canonicalJson.path,
+    );
+  }
 
-    final scriptFile = File('${hooksDir.path}/yoloit-hook.sh');
-    await _writeIfChanged(scriptFile, _hookScriptContent);
-
-    // Ensure the script is executable.
+  static Future<void> _symlinkIfNeeded({
+    required String link,
+    required String target,
+    bool makeExecutable = false,
+  }) async {
     try {
-      await Process.run('chmod', ['+x', scriptFile.path]);
+      final linkFile = Link(link);
+      if (await linkFile.exists()) {
+        final current = await linkFile.target();
+        if (current == target) return; // already correct
+        await linkFile.delete();
+      } else {
+        // Remove any plain file that might be there from the old copy approach.
+        final plain = File(link);
+        if (await plain.exists()) await plain.delete();
+      }
+      await linkFile.create(target);
+      if (makeExecutable) {
+        await Process.run('chmod', ['+x', link]);
+      }
     } catch (_) {}
   }
 
