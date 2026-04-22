@@ -80,7 +80,9 @@ class _AgentCardState extends State<AgentCard>
   }
 
   void _updateAnimation() {
-    final shouldAnimate = widget.props.isRunning || widget.props.hookPhase != null;
+    // Animate only when there is an active hook phase (agent doing work).
+    // When session is just live/idle (waiting for input), keep it calm.
+    final shouldAnimate = widget.props.hookPhase != null;
     if (_animCtrl.duration != _animDuration) {
       _animCtrl.duration = _animDuration;
     }
@@ -88,6 +90,7 @@ class _AgentCardState extends State<AgentCard>
       _animCtrl.repeat(reverse: true);
     } else if (!shouldAnimate && _animCtrl.isAnimating) {
       _animCtrl.stop();
+      _animCtrl.value = 0;
     }
   }
 
@@ -96,20 +99,22 @@ class _AgentCardState extends State<AgentCard>
     final isRunning = widget.props.isRunning;
     final color = _phaseColor;
     final phase = widget.props.hookPhase;
+    // Active = agent is actually doing something (thinking/tool/done/error).
+    final isActive = phase != null;
 
     return AnimatedBuilder(
       animation: _glowAnim,
       builder: (_, child) {
-        final glowAlpha = (isRunning || phase != null)
+        final glowAlpha = isActive
             ? ((_glowAnim.value * 100 + 40).round()).clamp(40, 140)
-            : 60;
+            : 60; // static dim border when idle
         return Container(
           decoration: BoxDecoration(
             color: const Color(0xFF0A0C10),
             border: Border.all(color: color.withAlpha(glowAlpha), width: 1.5),
             borderRadius: BorderRadius.circular(10),
             boxShadow: [
-              if (isRunning || phase != null)
+              if (isActive)
                 BoxShadow(
                   color: color.withAlpha((_glowAnim.value * 60 + 10).round()),
                   blurRadius: phase == 'thinking' ? 24 : 16,
@@ -133,8 +138,8 @@ class _AgentCardState extends State<AgentCard>
             color: color,
             isRunning: isRunning,
           ),
-          if (widget.props.hookPhase != null)
-            _HookPhaseBar(phase: widget.props.hookPhase!, color: color, animation: _glowAnim),
+          if (phase != null)
+            _HookPhaseBar(phase: phase, color: color, animation: _glowAnim),
           Expanded(
             child:
                 widget.body ??
@@ -145,7 +150,8 @@ class _AgentCardState extends State<AgentCard>
                         onInput: widget.onTerminalInput,
                       )),
           ),
-          if (isRunning)
+          // Stripes only when actively processing (not just idle-running).
+          if (isActive)
             _ActivityStripes(animation: _glowAnim, color: color),
         ],
       ),
