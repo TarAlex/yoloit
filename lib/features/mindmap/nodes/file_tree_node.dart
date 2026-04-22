@@ -88,12 +88,9 @@ class FileTreeNode extends StatelessWidget {
     ctrl.dispose();
     if (name == null || name.isEmpty) return;
 
-    final newPath = '$parentPath/$name';
-    await Directory(newPath).create(recursive: true);
-
-    // Expand the parent so the new folder is visible.
+    // Use ReviewCubit.createFolder so the tree refreshes automatically.
     if (!reviewCubit.isClosed) {
-      reviewCubit.toggleNode(parentPath);   // expand (or re-expand)
+      await reviewCubit.createFolder(parentPath, name);
     }
   }
 
