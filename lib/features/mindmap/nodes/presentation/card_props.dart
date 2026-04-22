@@ -154,6 +154,7 @@ class AgentCardProps {
     if (s == null) return null;
     if (s == 'thinking') return const ThinkingPhase();
     if (s.startsWith('tool:')) return ToolPhase(s.substring(5));
+    if (s == 'awaiting_approval') return const AwaitingApprovalPhase();
     if (s == 'done') return const DonePhase();
     if (s == 'error') return const ErrorPhase();
     return null;

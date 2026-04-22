@@ -9,6 +9,7 @@ class AgentPtyConfig {
   const AgentPtyConfig({
     this.spinnerChars = const {},
     this.donePrompts = const {},
+    this.approvalPatterns = const {},
     this.idleTimeout = const Duration(seconds: 30),
   });
 
@@ -20,18 +21,26 @@ class AgentPtyConfig {
   /// user input (e.g. prompt character). Triggers DonePhase + sound.
   final Set<String> donePrompts;
 
+  /// Substrings in PTY output that signal the agent is waiting for user
+  /// approval (e.g. permission dialog). Triggers AwaitingApprovalPhase + sound.
+  final Set<String> approvalPatterns;
+
   /// How long after spinner chars stop before we clear ThinkingPhase.
   final Duration idleTimeout;
 
-  bool get hasDetection => spinnerChars.isNotEmpty || donePrompts.isNotEmpty;
+  bool get hasDetection =>
+      spinnerChars.isNotEmpty ||
+      donePrompts.isNotEmpty ||
+      approvalPatterns.isNotEmpty;
 
   /// Returns true if [data] contains any spinner character.
-  bool containsSpinner(String data) =>
-      spinnerChars.any(data.contains);
+  bool containsSpinner(String data) => spinnerChars.any(data.contains);
 
   /// Returns true if [data] contains any done-prompt pattern.
-  bool containsDonePrompt(String data) =>
-      donePrompts.any(data.contains);
+  bool containsDonePrompt(String data) => donePrompts.any(data.contains);
+
+  /// Returns true if [data] contains an approval dialog pattern.
+  bool containsApproval(String data) => approvalPatterns.any(data.contains);
 }
 
 /// Per-agent PTY configs. Extend when adding new agent types.
@@ -47,10 +56,17 @@ extension AgentTypePtyConfig on AgentType {
             '\u25CE', // ◎ bullseye
             '\u25C9', // ◉ fisheye
           },
-          // '› ' — Copilot interactive prompt. NOTE: this is drawn via ANSI cursor
-          // positioning in Copilot's status bar; may not reliably appear in stream.
+          // '› ' — Copilot interactive prompt (may not reliably appear in stream).
           // Primary clearing mechanism is the 5s idle timeout after spinner stops.
           donePrompts: {'\u203A '},
+          // Copilot shows these strings when asking user to approve a tool action.
+          approvalPatterns: {
+            'Do you want to allow',
+            'Allow directory access',
+            'Allow file access',
+            'Allow network access',
+            'to navigate',   // bottom hint line of approval dialogs
+          },
           // 5s after spinner stops → agent is done responding.
           idleTimeout: Duration(seconds: 5),
         );

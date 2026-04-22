@@ -29,6 +29,7 @@ import 'package:yoloit/features/runs/bloc/run_state.dart';
 import 'package:yoloit/features/runs/models/run_session.dart';
 import 'package:yoloit/features/terminal/bloc/terminal_cubit.dart';
 import 'package:yoloit/features/terminal/bloc/terminal_state.dart';
+import 'package:yoloit/features/terminal/models/agent_phase.dart';
 import 'package:yoloit/features/workspaces/bloc/workspace_cubit.dart';
 import 'package:yoloit/features/workspaces/bloc/workspace_state.dart';
 
@@ -608,23 +609,58 @@ class _MindMapCanvasState extends State<_MindMapCanvas> {
                     const SizedBox(height: 4),
                     // ── Mini-map ───────────────────────────────────────────
                     if (_showMinimap)
-                    BlocBuilder<MindMapCubit, MindMapState>(
-                      buildWhen: (prev, next) =>
-                          prev.positions != next.positions ||
-                          prev.sizes != next.sizes ||
-                          prev.hidden != next.hidden ||
-                          prev.hiddenTypes != next.hiddenTypes ||
-                          prev.nodeColors != next.nodeColors,
-                      builder: (ctx, mm) => _MiniMap(
-                        nodes: widget.nodes,
-                        positions: mm.positions,
-                        sizes: mm.sizes,
-                        hidden: mm.hidden,
-                        hiddenTypes: mm.hiddenTypes,
-                        transformCtrl: widget.transformCtrl,
-                        viewportSize: viewportSize,
-                        onPanTo: widget.onPanToOffset,
-                        syncedNodeColors: mm.nodeColors,
+                    BlocBuilder<TerminalCubit, TerminalState>(
+                      buildWhen: (prev, next) {
+                        if (prev is! TerminalLoaded || next is! TerminalLoaded) return false;
+                        if (prev.allSessions.length != next.allSessions.length) return true;
+                        for (var i = 0; i < prev.allSessions.length; i++) {
+                          if (prev.allSessions[i].hookPhase != next.allSessions[i].hookPhase) return true;
+                        }
+                        return false;
+                      },
+                      builder: (ctx, termSt) => BlocBuilder<MindMapCubit, MindMapState>(
+                        buildWhen: (prev, next) =>
+                            prev.positions != next.positions ||
+                            prev.sizes != next.sizes ||
+                            prev.hidden != next.hidden ||
+                            prev.hiddenTypes != next.hiddenTypes ||
+                            prev.nodeColors != next.nodeColors,
+                        builder: (ctx2, mm) {
+                          // Build phase colours: agent nodes colored by hookPhase.
+                          final phaseColors = <String, Color>{};
+                          if (termSt is TerminalLoaded) {
+                            for (final s in termSt.allSessions) {
+                              final phase = s.hookPhase;
+                              if (phase == null) continue;
+                              final nodeId = 'agent:${s.id}';
+                              final Color c;
+                              if (phase is ThinkingPhase) {
+                                c = const Color(0xFFFBBF24);
+                              } else if (phase is ToolPhase) {
+                                c = const Color(0xFF818CF8);
+                              } else if (phase is AwaitingApprovalPhase) {
+                                c = const Color(0xFFF97316);
+                              } else if (phase is DonePhase) {
+                                c = const Color(0xFF34D399);
+                              } else {
+                                c = const Color(0xFFF87171);
+                              }
+                              phaseColors[nodeId] = c.withAlpha(0xEE);
+                            }
+                          }
+                          return _MiniMap(
+                            nodes: widget.nodes,
+                            positions: mm.positions,
+                            sizes: mm.sizes,
+                            hidden: mm.hidden,
+                            hiddenTypes: mm.hiddenTypes,
+                            transformCtrl: widget.transformCtrl,
+                            viewportSize: viewportSize,
+                            onPanTo: widget.onPanToOffset,
+                            syncedNodeColors: mm.nodeColors,
+                            agentPhaseColors: phaseColors,
+                          );
+                        },
                       ),
                     ),
                   ],
@@ -1611,6 +1647,7 @@ class _MiniMap extends StatelessWidget {
     required this.viewportSize,
     required this.onPanTo,
     this.syncedNodeColors = const {},
+    this.agentPhaseColors = const {},
   });
 
   final List<MindMapNodeData> nodes;
@@ -1623,6 +1660,8 @@ class _MiniMap extends StatelessWidget {
   final void Function(Offset canvasCenter) onPanTo;
   /// Node colours received from the collaboration host (guest-side only).
   final Map<String, int> syncedNodeColors;
+  /// Phase-driven colours for agent nodes (keyed by node id = 'agent:sessionId').
+  final Map<String, Color> agentPhaseColors;
 
   static const double _mapW = 210.0;
   static const double _mapH = 130.0;
@@ -1681,6 +1720,10 @@ class _MiniMap extends StatelessWidget {
           if (n is WorkspaceNodeData && n.workspace.color != null) {
             nodeColors[n.id] = n.workspace.color!.withAlpha(0xCC);
           }
+        }
+        // Agent phase colours override the default type colour when agent is active.
+        for (final entry in agentPhaseColors.entries) {
+          nodeColors[entry.key] = entry.value;
         }
         // Apply collaboration-synced colours for nodes that don't have a local colour.
         for (final entry in syncedNodeColors.entries) {

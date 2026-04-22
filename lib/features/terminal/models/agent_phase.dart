@@ -45,6 +45,16 @@ class DonePhase extends AgentPhase {
   String toString() => 'done';
 }
 
+/// Agent is waiting for the user to approve a tool call
+/// (e.g. "Allow directory access" dialog in Copilot).
+/// Detected via PTY output; cleared when postToolUse fires.
+class AwaitingApprovalPhase extends AgentPhase {
+  const AwaitingApprovalPhase();
+
+  @override
+  String toString() => 'awaiting_approval';
+}
+
 /// Agent encountered an error.
 class ErrorPhase extends AgentPhase {
   const ErrorPhase();

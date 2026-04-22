@@ -65,10 +65,11 @@ class _AgentCardState extends State<AgentCard>
     final phase = widget.props.hookPhase;
     return switch (phase) {
       null => _statusColor,
-      ThinkingPhase() => const Color(0xFFFBBF24), // amber
-      ToolPhase() => const Color(0xFF818CF8), // purple
-      DonePhase() => const Color(0xFF34D399), // green
-      ErrorPhase() => const Color(0xFFF87171), // red
+      ThinkingPhase() => const Color(0xFFFBBF24),         // amber
+      ToolPhase() => const Color(0xFF818CF8),              // purple
+      AwaitingApprovalPhase() => const Color(0xFFF97316), // orange — needs attention!
+      DonePhase() => const Color(0xFF34D399),              // green
+      ErrorPhase() => const Color(0xFFF87171),             // red
     };
   }
 
@@ -76,6 +77,7 @@ class _AgentCardState extends State<AgentCard>
     return switch (widget.props.hookPhase) {
       ThinkingPhase() => const Duration(milliseconds: 700),
       ToolPhase() => const Duration(milliseconds: 500),
+      AwaitingApprovalPhase() => const Duration(milliseconds: 350), // fast pulse = urgent
       DonePhase() => const Duration(milliseconds: 400),
       _ => const Duration(milliseconds: 1800),
     };
@@ -187,11 +189,12 @@ class _HookPhaseBar extends StatelessWidget {
   String get _label => switch (phase) {
     ThinkingPhase() => '● Thinking…',
     ToolPhase(:final toolName) => '⚙ $toolName',
+    AwaitingApprovalPhase() => '⚠ Waiting for approval',
     DonePhase() => '✓ Done',
     ErrorPhase() => '✕ Error',
   };
 
-  bool get _showDots => phase is ThinkingPhase || phase is ToolPhase;
+  bool get _showDots => phase is ThinkingPhase || phase is ToolPhase || phase is AwaitingApprovalPhase;
 
   @override
   Widget build(BuildContext context) {
@@ -201,9 +204,13 @@ class _HookPhaseBar extends StatelessWidget {
         height: 22,
         padding: const EdgeInsets.symmetric(horizontal: 10),
         decoration: BoxDecoration(
-          color: color.withAlpha(((animation.value * 20) + 10).round()),
+          color: Color.lerp(
+            const Color(0xFF1A1A1A), // near-black base
+            color,
+            0.15 + animation.value * 0.08, // subtle tint, fully opaque
+          ),
           border: Border(
-            bottom: BorderSide(color: color.withAlpha(60), width: 0.5),
+            bottom: BorderSide(color: color.withAlpha(80), width: 0.5),
           ),
         ),
         child: Row(

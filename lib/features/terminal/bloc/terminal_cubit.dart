@@ -461,8 +461,9 @@ class TerminalCubit extends Cubit<TerminalState> {
   }
 
   /// Called on every PTY output chunk for sessions with [AgentPtyConfig].
-  /// Uses per-agent config to detect spinner (→ ThinkingPhase) and
-  /// done-prompts (→ DonePhase + sound), as a backup when hooks don't fire.
+  /// Uses per-agent config to detect spinner (→ ThinkingPhase),
+  /// done-prompts (→ DonePhase + sound), and approval dialogs
+  /// (→ AwaitingApprovalPhase + urgent sound).
   void _onPtyActivity(AgentSession session, String data, AgentPtyConfig config) {
     final sessionId = session.id;
 
@@ -470,6 +471,23 @@ class TerminalCubit extends Cubit<TerminalState> {
     final i = _allSessions.indexWhere((s) => s.id == sessionId);
     if (i < 0) return;
     final current = _allSessions[i];
+
+    // Approval dialog detected → AwaitingApprovalPhase + urgent sound.
+    if (config.containsApproval(data) &&
+        current.hookPhase is! AwaitingApprovalPhase) {
+      _ptyIdleTimers[sessionId]?.cancel();
+      _allSessions[i] = current.copyWith(
+          hookPhase: const AwaitingApprovalPhase());
+      final cur = _loaded;
+      if (cur != null && !isClosed) {
+        emit(cur.copyWith(
+            sessions: _workspaceSessions,
+            allSessions: List.unmodifiable(_allSessions)));
+      }
+      // Urgent sound — different from completion sound.
+      Process.run('afplay', ['/System/Library/Sounds/Sosumi.aiff']);
+      return;
+    }
 
     // Done-prompt detected while thinking → transition to done.
     if (current.hookPhase is ThinkingPhase && config.containsDonePrompt(data)) {
