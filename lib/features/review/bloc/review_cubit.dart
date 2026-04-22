@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:path/path.dart' as p;
 import 'package:yoloit/core/services/git_service.dart';
@@ -84,7 +85,13 @@ class ReviewCubit extends Cubit<ReviewState> {
 
   Future<void> selectFile(String absolutePath) async {
     final current = _loaded;
-    if (current == null) return;
+    debugPrint('[ReviewCubit] selectFile: $absolutePath');
+    debugPrint('[ReviewCubit] _workspacePaths: $_workspacePaths');
+    debugPrint('[ReviewCubit] _primaryPath: $_primaryPath');
+    if (current == null) {
+      debugPrint('[ReviewCubit] selectFile: _loaded is null, returning early!');
+      return;
+    }
 
     emit(current.copyWith(
       selectedFilePath: absolutePath,
@@ -95,6 +102,7 @@ class ReviewCubit extends Cubit<ReviewState> {
     // Find which workspace root this file belongs to.
     final gitRoot = _gitRootFor(absolutePath) ?? _primaryPath ?? '';
     final relativePath = p.relative(absolutePath, from: gitRoot);
+    debugPrint('[ReviewCubit] gitRoot=$gitRoot relativePath=$relativePath');
 
     // Load diff and file content in parallel
     final diffFuture = DiffService.instance.getDiff(gitRoot, relativePath);
@@ -103,6 +111,7 @@ class ReviewCubit extends Cubit<ReviewState> {
     final results = await Future.wait([diffFuture, fileFuture]);
     final hunks = results[0] as List<DiffHunk>;
     final fileResult = results[1] as FileViewResult;
+    debugPrint('[ReviewCubit] selectFile done: ${hunks.length} hunks');
 
     if (!isClosed) {
       emit(current.copyWith(

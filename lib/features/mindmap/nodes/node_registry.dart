@@ -3,6 +3,7 @@ import 'package:yoloit/features/mindmap/model/mindmap_node_model.dart';
 import 'package:yoloit/features/mindmap/nodes/agent_node.dart';
 import 'package:yoloit/features/mindmap/nodes/editor_node.dart';
 import 'package:yoloit/features/mindmap/nodes/diff_node.dart';
+import 'package:yoloit/features/mindmap/nodes/file_diff_panel_node.dart';
 import 'package:yoloit/features/mindmap/nodes/file_panel_node.dart';
 import 'package:yoloit/features/mindmap/nodes/file_tree_node.dart';
 import 'package:yoloit/features/mindmap/nodes/files_node.dart';
@@ -39,6 +40,7 @@ abstract final class NodeRegistry {
     DiffNodeData         d => DiffNode(data: d),
     EditorNodeData       d => EditorNode(data: d),
     FilePanelNodeData    d => FilePanelNode(data: d),
+    FileDiffPanelNodeData d => FileDiffPanelNode(data: d),
     RunNodeData          d => RunNode(data: d),
     MindMapPluginNodeData d => MindMapPluginRegistry.instance.buildWidget(d),
   };
@@ -51,6 +53,7 @@ abstract final class NodeRegistry {
     DiffNodeData()            => true,
     EditorNodeData()          => true,
     FilePanelNodeData()       => true,
+    FileDiffPanelNodeData()   => true,
     MindMapPluginNodeData  d  => MindMapPluginRegistry.instance.isResizable(d),
     _                         => false,
   };
@@ -63,6 +66,7 @@ abstract final class NodeRegistry {
     DiffNodeData()            => const Size(260, 220),
     EditorNodeData()          => const Size(280, 160),
     FilePanelNodeData()       => const Size(280, 160),
+    FileDiffPanelNodeData()   => const Size(280, 200),
     RunNodeData()             => const Size(280, 180),
     WorkspaceNodeData()       => const Size(160, 76),
     SessionNodeData()         => const Size(180, 76),

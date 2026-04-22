@@ -40,16 +40,23 @@ class GitService {
         workingDirectory: workspacePath,
       );
       final output = result.stdout.toString();
-      if (output.isEmpty) {
-        // Try staged diff
-        final staged = await runExecutableArguments(
-          'git',
-          ['diff', '--cached', '--', filePath],
-          workingDirectory: workspacePath,
-        );
-        return staged.stdout.toString();
-      }
-      return output;
+      if (output.isNotEmpty) return output;
+
+      // Try staged diff
+      final staged = await runExecutableArguments(
+        'git',
+        ['diff', '--cached', '--', filePath],
+        workingDirectory: workspacePath,
+      );
+      if (staged.stdout.toString().isNotEmpty) return staged.stdout.toString();
+
+      // Fallback for untracked files (no commits yet): diff against /dev/null
+      final untracked = await runExecutableArguments(
+        'git',
+        ['diff', '--no-index', '--', '/dev/null', filePath],
+        workingDirectory: workspacePath,
+      );
+      return untracked.stdout.toString();
     } catch (_) {
       return '';
     }

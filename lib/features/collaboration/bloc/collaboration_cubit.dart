@@ -395,6 +395,11 @@ class CollaborationCubit extends Cubit<CollaborationState> {
         'type': 'panel',
         'filePath': d.filePath,
       },
+      FileDiffPanelNodeData d => {
+        'type': 'filediff',
+        'filePath': d.filePath,
+        'repoPath': d.repoPath,
+      },
       FilesNodeData d => {
         'type': 'files',
         'repoPath': d.repoPath,

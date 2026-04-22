@@ -153,9 +153,13 @@ class MindMapCubit extends Cubit<MindMapState> {
     final panelEditors = state.nodes
         .where((n) =>
             (n is EditorNodeData && n.id != 'editor:active' ||
-             n is FilePanelNodeData) &&
+             n is FilePanelNodeData ||
+             n is FileDiffPanelNodeData) &&
             !nodes.any((m) => m.id == n.id))
         .toList();
+    if (panelEditors.isNotEmpty) {
+      debugPrint('[MindMapCubit] updateNodes: preserving ${panelEditors.length} panel nodes: ${panelEditors.map((n) => n.id).toList()}');
+    }
     final panelConns = state.connections
         .where((c) => panelEditors.any((n) => n.id == c.fromId || n.id == c.toId))
         .toList();
@@ -374,6 +378,60 @@ class MindMapCubit extends Cubit<MindMapState> {
       locked: state.locked,
       connections: newConnections,
     );
+    emit(state.copyWith(
+      nodes: newNodes,
+      positions: newPositions,
+      connections: newConnections,
+    ));
+    _savePositions(newPositions);
+  }
+
+  void openFileDiffAsPanel({
+    required String filePath,
+    required String repoPath,
+  }) {
+    final id = 'filediff:${filePath.hashCode}';
+    debugPrint('[MindMapCubit] openFileDiffAsPanel id=$id, state.nodes.length=${state.nodes.length}');
+    if (state.nodes.any((n) => n.id == id)) {
+      debugPrint('[MindMapCubit] node already exists, unhiding');
+      final newHidden = {...state.hidden}..remove(id);
+      emit(state.copyWith(hidden: newHidden));
+      _saveHidden(newHidden);
+      return;
+    }
+    final newNode = FileDiffPanelNodeData(
+      id: id,
+      filePath: filePath,
+      repoPath: repoPath,
+    );
+
+    // Connect from the diff node (if any).
+    final diffNode = state.nodes.whereType<DiffNodeData>().where(
+      (n) => n.repoPath == repoPath,
+    ).firstOrNull;
+    debugPrint('[MindMapCubit] diffNode found: ${diffNode?.id}');
+
+    final newNodes = [...state.nodes, newNode];
+    final newConnections = diffNode != null
+        ? [
+            ...state.connections,
+            MindMapConnection(
+              fromId: diffNode.id,
+              toId: id,
+              style: ConnectorStyle.dashed,
+              color: const Color(0x7060A5FA),
+            ),
+          ]
+        : state.connections;
+
+    final newPositions = _engine.compute(
+      nodes: newNodes,
+      existing: state.positions,
+      sizes: state.sizes,
+      locked: state.locked,
+      connections: newConnections,
+    );
+    debugPrint('[MindMapCubit] newNodes.length=${newNodes.length}, pos for $id=${newPositions[id]}');
     emit(state.copyWith(
       nodes: newNodes,
       positions: newPositions,

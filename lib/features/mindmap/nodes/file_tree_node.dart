@@ -1,9 +1,9 @@
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:yoloit/features/collaboration/desktop/repo_directory_listing.dart';
-import 'package:yoloit/features/editor/bloc/file_editor_cubit.dart';
 import 'package:yoloit/features/mindmap/bloc/mindmap_cubit.dart';
 import 'package:yoloit/features/mindmap/model/mindmap_node_model.dart';
 import 'package:yoloit/features/mindmap/nodes/presentation/file_tree_card.dart';
@@ -27,7 +27,7 @@ class FileTreeNode extends StatelessWidget {
           listDirectory: listRepoDir,
         ),
         onToggle: (path) => context.read<ReviewCubit>().toggleNode(path),
-        onSelect: (path) => context.read<FileEditorCubit>().openFile(path),
+        onSelect: (path) => _openInPanel(context, path),
         onNewFolder: (parentPath) => _createNewFolder(context, parentPath),
         onShowInFinder: (path) => Process.run('open', ['-R', path]),
         onOpenInPanel: (path) => _openInPanel(context, path),
@@ -95,11 +95,20 @@ class FileTreeNode extends StatelessWidget {
   }
 
   void _openInPanel(BuildContext context, String path) {
+    debugPrint('[FileTreeNode] _openInPanel called: path=$path');
     final nodeId = 'panel:${path.hashCode}';
-    if (!context.mounted) return;
-    context.read<MindMapCubit>().openFileAsPanel(
-      id: nodeId,
-      filePath: path,
-    );
+    if (!context.mounted) {
+      debugPrint('[FileTreeNode] context not mounted, aborting');
+      return;
+    }
+    try {
+      context.read<MindMapCubit>().openFileAsPanel(
+        id: nodeId,
+        filePath: path,
+      );
+      debugPrint('[FileTreeNode] openFileAsPanel completed');
+    } catch (e, st) {
+      debugPrint('[FileTreeNode] ERROR: $e\n$st');
+    }
   }
 }

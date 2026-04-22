@@ -256,6 +256,27 @@ class FilePanelNodeData extends MindMapNodeData {
   String get typeTag => 'panel';
 }
 
+// ── File Diff Panel ─────────────────────────────────────────────────────────
+
+class FileDiffPanelNodeData extends MindMapNodeData {
+  const FileDiffPanelNodeData({
+    required super.id,
+    required this.filePath,
+    required this.repoPath,
+  });
+  final String filePath;
+  final String repoPath;
+
+  @override
+  Size get defaultSize => const Size(480, 380);
+
+  @override
+  int get columnIndex => 6;
+
+  @override
+  String get typeTag => 'filediff';
+}
+
 // ── Run Session ────────────────────────────────────────────────────────────
 
 class RunNodeData extends MindMapNodeData {

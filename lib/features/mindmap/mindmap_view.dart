@@ -2,7 +2,7 @@ import 'dart:math' as math show max, min;
 import 'dart:ui' as ui;
 
 import 'package:file_picker/file_picker.dart';
-import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/foundation.dart' show debugPrint, kIsWeb;
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
@@ -479,6 +479,16 @@ class _MindMapCanvasState extends State<_MindMapCanvas> {
                       final defaultSizeMap = {
                         for (final n in widget.nodes) n.id: n.defaultSize,
                       };
+                      // Use mmState.nodes (which includes preserved panel nodes)
+                      // instead of widget.nodes (which only has graph-builder nodes).
+                      final renderNodes = mmState.nodes.isNotEmpty
+                          ? mmState.nodes
+                          : widget.nodes;
+                      final filediffCount = renderNodes.where((n) => n is FileDiffPanelNodeData).length;
+                      final filePanelCount = renderNodes.where((n) => n is FilePanelNodeData).length;
+                      if (filediffCount > 0 || filePanelCount > 0) {
+                        debugPrint('[Canvas] renderNodes=${renderNodes.length}, filediff=$filediffCount, filePanel=$filePanelCount, widget.nodes=${widget.nodes.length}');
+                      }
                       return Stack(
                         clipBehavior: Clip.none,
                         children: [
@@ -492,16 +502,16 @@ class _MindMapCanvasState extends State<_MindMapCanvas> {
                           Positioned.fill(
                             child: RepaintBoundary(
                               child: MindMapConnectorLayer(
-                                connections: widget.conns.where((c) {
+                                connections: mmState.connections.where((c) {
                                   if (mmState.hidden.contains(c.fromId))
                                     return false;
                                   if (mmState.hidden.contains(c.toId))
                                     return false;
-                                  final fromTag = widget.nodes
+                                  final fromTag = renderNodes
                                       .where((n) => n.id == c.fromId)
                                       .firstOrNull
                                       ?.typeTag;
-                                  final toTag = widget.nodes
+                                  final toTag = renderNodes
                                       .where((n) => n.id == c.toId)
                                       .firstOrNull
                                       ?.typeTag;
@@ -522,7 +532,7 @@ class _MindMapCanvasState extends State<_MindMapCanvas> {
                           ),
 
                            // Node cards (skip hidden and hidden-type).
-                           for (final node in widget.nodes)
+                           for (final node in renderNodes)
                              if (!mmState.hidden.contains(node.id) &&
                                  !mmState.hiddenTypes.contains(node.typeTag))
                                MindMapNode(
@@ -1292,6 +1302,11 @@ class _TreeRow extends StatelessWidget {
       label: p.basename(d.filePath),
       icon: Icons.insert_drive_file_outlined,
       color: const Color(0xFFFFCC44),
+    ),
+    FileDiffPanelNodeData d => (
+      label: '± ${p.basename(d.filePath)}',
+      icon: Icons.difference_outlined,
+      color: const Color(0xFF7C3AED),
     ),
     RunNodeData d => (
       label: d.session.config.name,
