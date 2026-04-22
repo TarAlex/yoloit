@@ -330,11 +330,13 @@ class DiffCardProps {
     this.repoPath,
     this.hunks = const [],
     this.changedFiles = const [],
+    this.selectedFilePath,
   });
   final String? repoName;
   final String? repoPath;
   final List<DiffHunk> hunks;
   final List<ChangedFileEntry> changedFiles;
+  final String? selectedFilePath;
 
   factory DiffCardProps.fromJson(Map<String, dynamic> j) => DiffCardProps(
         repoName: j['repoName'] as String?,

@@ -4,8 +4,9 @@ import 'package:yoloit/features/mindmap/nodes/presentation/card_props.dart';
 
 /// Presentation diff card — renders changed files list + optional diff hunks.
 class DiffCard extends StatelessWidget {
-  const DiffCard({super.key, required this.props});
+  const DiffCard({super.key, required this.props, this.onFileTap});
   final DiffCardProps props;
+  final void Function(String filePath)? onFileTap;
 
   @override
   Widget build(BuildContext context) {
@@ -82,7 +83,13 @@ class DiffCard extends StatelessWidget {
                         // Changed files list
                         if (props.changedFiles.isNotEmpty) ...[
                           for (final f in props.changedFiles)
-                            _ChangedFileRow(file: f),
+                            _ChangedFileRow(
+                              file: f,
+                              isSelected: props.selectedFilePath == f.path,
+                              onTap: onFileTap != null
+                                  ? () => onFileTap!(f.path)
+                                  : null,
+                            ),
                           if (props.hunks.isNotEmpty)
                             const Divider(
                                 color: Color(0xFF1E2330), height: 8),
@@ -100,8 +107,14 @@ class DiffCard extends StatelessWidget {
 }
 
 class _ChangedFileRow extends StatelessWidget {
-  const _ChangedFileRow({required this.file});
+  const _ChangedFileRow({
+    required this.file,
+    this.onTap,
+    this.isSelected = false,
+  });
   final ChangedFileEntry file;
+  final VoidCallback? onTap;
+  final bool isSelected;
 
   @override
   Widget build(BuildContext context) {
@@ -112,42 +125,50 @@ class _ChangedFileRow extends StatelessWidget {
       'untracked' => (const Color(0xFF94A3B8), 'U'),
       _ => (const Color(0xFFFBBF24), 'M'),
     };
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-      child: Row(
-        children: [
-          Container(
-            width: 14,
-            alignment: Alignment.center,
-            child: Text(label,
-                style: TextStyle(
-                    fontSize: 9,
-                    fontWeight: FontWeight.w700,
-                    color: color,
-                    fontFamily: 'monospace')),
-          ),
-          const SizedBox(width: 5),
-          Expanded(
-            child: Text(
-              file.name.isNotEmpty ? file.name : file.path.split('/').last,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
-                  fontSize: 10,
-                  color: Color(0xFFCECEEE),
-                  fontFamily: 'monospace'),
+    return InkWell(
+      onTap: onTap,
+      child: Container(
+        color: isSelected
+            ? const Color(0x1A7C6BFF)
+            : Colors.transparent,
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+        child: Row(
+          children: [
+            Container(
+              width: 14,
+              alignment: Alignment.center,
+              child: Text(label,
+                  style: TextStyle(
+                      fontSize: 9,
+                      fontWeight: FontWeight.w700,
+                      color: color,
+                      fontFamily: 'monospace')),
             ),
-          ),
-          if (file.addedLines > 0)
-            Text('+${file.addedLines}',
-                style: const TextStyle(
-                    fontSize: 9, color: Color(0xFF34D399))),
-          if (file.removedLines > 0) ...[
-            const SizedBox(width: 3),
-            Text('-${file.removedLines}',
-                style: const TextStyle(
-                    fontSize: 9, color: Color(0xFFF87171))),
+            const SizedBox(width: 5),
+            Expanded(
+              child: Text(
+                file.name.isNotEmpty ? file.name : file.path.split('/').last,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                    fontSize: 10,
+                    color: isSelected
+                        ? const Color(0xFFE8E8FF)
+                        : const Color(0xFFCECEEE),
+                    fontFamily: 'monospace'),
+              ),
+            ),
+            if (file.addedLines > 0)
+              Text('+${file.addedLines}',
+                  style: const TextStyle(
+                      fontSize: 9, color: Color(0xFF34D399))),
+            if (file.removedLines > 0) ...[
+              const SizedBox(width: 3),
+              Text('-${file.removedLines}',
+                  style: const TextStyle(
+                      fontSize: 9, color: Color(0xFFF87171))),
+            ],
           ],
-        ],
+        ),
       ),
     );
   }

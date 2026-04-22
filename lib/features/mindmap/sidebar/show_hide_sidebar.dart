@@ -4,6 +4,8 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:path/path.dart' as p;
 import 'package:yoloit/features/mindmap/bloc/mindmap_state.dart';
 import 'package:yoloit/features/mindmap/model/mindmap_node_model.dart';
+import 'package:yoloit/features/review/bloc/review_cubit.dart';
+import 'package:yoloit/features/review/bloc/review_state.dart';
 import 'package:yoloit/features/terminal/bloc/terminal_cubit.dart';
 
 class ShowHideSidebarNode extends Equatable {
@@ -795,6 +797,31 @@ class _SidebarTreeRow extends StatelessWidget {
                   color: const Color(0xFF6B7898),
                 ),
               ],
+              if (node.type == 'diff')
+                BlocBuilder<ReviewCubit, ReviewState>(
+                  builder: (context, state) {
+                    final count = state is ReviewLoaded
+                        ? state.changedFiles.length
+                        : 0;
+                    if (count == 0) return const SizedBox.shrink();
+                    return Container(
+                      margin: const EdgeInsets.only(left: 4),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 4, vertical: 1),
+                      decoration: BoxDecoration(
+                        color: const Color(0x337C6BFF),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Text(
+                        '$count',
+                        style: const TextStyle(
+                            fontSize: 8,
+                            color: Color(0xFF9B8FFF),
+                            fontWeight: FontWeight.w600),
+                      ),
+                    );
+                  },
+                ),
             ],
           ),
         ),

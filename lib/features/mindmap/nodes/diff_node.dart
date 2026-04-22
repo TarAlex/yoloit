@@ -14,13 +14,17 @@ class DiffNode extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return BlocBuilder<ReviewCubit, ReviewState>(
-      builder: (context, state) => DiffCard(
-        props: buildDiffCardProps(
-          repoPath: data.repoPath ?? '',
-          repoName: data.repoName,
-          reviewState: state,
-        ),
-      ),
+      builder: (context, state) {
+        final cubit = context.read<ReviewCubit>();
+        return DiffCard(
+          props: buildDiffCardProps(
+            repoPath: data.repoPath ?? '',
+            repoName: data.repoName,
+            reviewState: state,
+          ),
+          onFileTap: (filePath) => cubit.selectFile(filePath),
+        );
+      },
     );
   }
 }

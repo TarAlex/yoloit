@@ -54,6 +54,7 @@ DiffCardProps buildDiffCardProps({
     repoName: repoName,
     repoPath: repoPath,
     changedFiles: changedFiles,
+    selectedFilePath: selectedFilePath.isNotEmpty ? selectedFilePath : null,
     hunks: rawHunks.map(_mapReviewDiffHunk).toList(),
   );
 }
