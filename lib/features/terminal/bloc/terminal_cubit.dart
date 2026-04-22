@@ -15,6 +15,7 @@ import 'package:yoloit/features/terminal/data/pty_service.dart';
 import 'package:yoloit/features/terminal/data/session_persistence_service.dart';
 import 'package:yoloit/features/terminal/data/tmux_service.dart';
 import 'package:yoloit/features/terminal/models/agent_phase.dart';
+import 'package:yoloit/features/terminal/models/agent_pty_config.dart';
 import 'package:yoloit/features/terminal/models/agent_session.dart';
 import 'package:yoloit/features/terminal/models/agent_type.dart';
 import 'package:yoloit/features/workspaces/data/agent_workspace_dir_service.dart';
@@ -39,11 +40,6 @@ class TerminalCubit extends Cubit<TerminalState> {
 
   /// Per-session idle timers: fire when PTY goes quiet → clear PTY-detected ThinkingPhase.
   final Map<String, Timer> _ptyIdleTimers = {};
-
-  /// Copilot spinner / progress characters that appear while the agent works.
-  static const _kSpinnerChars = {'\u25CF', '\u25CB', '\u280B', '\u2809', '\u2839',
-      '\u2838', '\u283C', '\u2834', '\u2826', '\u2827', '\u2807', '\u280F'};
-  static const _kPtyIdleTimeout = Duration(seconds: 30);
 
   List<AgentSession> get _workspaceSessions =>
       _allSessions.where((s) => s.workspaceId == _activeWorkspaceId).toList();
@@ -423,18 +419,14 @@ class TerminalCubit extends Cubit<TerminalState> {
             session.appendOutput(data); // capture for browser streaming
 
             // ── PTY activity detection (backup when hooks don't fire) ──────
-            // Detect Copilot spinner chars → infer ThinkingPhase.
-            // Only for AI agent types (not plain terminal).
-            if (session.type != AgentType.terminal) {
-              _onPtyActivity(session, data);
+            // Use per-agent config: each agent type declares its own spinner
+            // chars and done-prompt patterns.
+            final ptyConfig = session.type.ptyConfig;
+            if (ptyConfig.hasDetection) {
+              _onPtyActivity(session, data, ptyConfig);
             }
 
-            // Detect Copilot interactive prompt '› ' (U+203A + space).
-            // When Copilot finishes responding, it shows this prompt.
-            // Use it to clear ThinkingPhase and play done sound.
-            if (session.hookPhase is ThinkingPhase && data.contains('\u203A ')) {
-              _onCopilotPromptDetected(session.id);
-            }
+            // Done-prompt detection is now handled inside _onPtyActivity via config.
           },
           onDone: () => _onSessionDone(session.id),
           // ignore: avoid_types_on_closure_parameters
@@ -469,18 +461,23 @@ class TerminalCubit extends Cubit<TerminalState> {
     });
   }
 
-  /// Called on every PTY output chunk for AI agent sessions.
-  /// If spinner characters are detected and no hook phase is active,
-  /// sets ThinkingPhase. Resets a 30s idle timer that clears it.
-  void _onPtyActivity(AgentSession session, String data) {
-    final hasSpinner = data.runes.any((r) => _kSpinnerChars.contains(String.fromCharCode(r)));
-    if (!hasSpinner) return;
-
+  /// Called on every PTY output chunk for sessions with [AgentPtyConfig].
+  /// Uses per-agent config to detect spinner (→ ThinkingPhase) and
+  /// done-prompts (→ DonePhase + sound), as a backup when hooks don't fire.
+  void _onPtyActivity(AgentSession session, String data, AgentPtyConfig config) {
     final sessionId = session.id;
+
+    // Done-prompt detected while thinking → transition to done.
+    if (session.hookPhase is ThinkingPhase && config.containsDonePrompt(data)) {
+      _onCopilotPromptDetected(sessionId);
+      return;
+    }
+
+    if (!config.containsSpinner(data)) return;
 
     // Reset idle timer — clear phase when PTY goes quiet.
     _ptyIdleTimers[sessionId]?.cancel();
-    _ptyIdleTimers[sessionId] = Timer(_kPtyIdleTimeout, () {
+    _ptyIdleTimers[sessionId] = Timer(config.idleTimeout, () {
       _ptyIdleTimers.remove(sessionId);
       final i = _allSessions.indexWhere((s) => s.id == sessionId);
       if (i >= 0 && _allSessions[i].hookPhase is ThinkingPhase) {
