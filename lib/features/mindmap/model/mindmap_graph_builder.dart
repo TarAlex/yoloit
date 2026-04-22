@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:path/path.dart' as p;
 
@@ -9,6 +11,39 @@ import 'package:yoloit/features/runs/models/run_session.dart';
 import 'package:yoloit/features/terminal/bloc/terminal_state.dart';
 import 'package:yoloit/features/terminal/models/agent_session.dart';
 import 'package:yoloit/features/workspaces/bloc/workspace_state.dart';
+
+/// Reads the current branch name from a git directory (main repo or worktree)
+/// by inspecting the HEAD file — no subprocess, instant.
+String _branchFromDir(String dirPath) {
+  try {
+    // Main repo: .git is a directory → HEAD lives inside it.
+    final dotGitDir = Directory('$dirPath/.git');
+    if (dotGitDir.existsSync()) {
+      final head = File('$dirPath/.git/HEAD').readAsStringSync().trim();
+      if (head.startsWith('ref: refs/heads/')) {
+        return head.substring('ref: refs/heads/'.length);
+      }
+      return head.length >= 7 ? head.substring(0, 7) : head;
+    }
+    // Worktree: .git is a file containing "gitdir: <absolute-path>"
+    final dotGitFile = File('$dirPath/.git');
+    if (dotGitFile.existsSync()) {
+      final content = dotGitFile.readAsStringSync().trim();
+      if (content.startsWith('gitdir: ')) {
+        var gitdir = content.substring('gitdir: '.length);
+        if (!gitdir.startsWith('/')) {
+          gitdir = p.normalize('$dirPath/$gitdir');
+        }
+        final head = File('$gitdir/HEAD').readAsStringSync().trim();
+        if (head.startsWith('ref: refs/heads/')) {
+          return head.substring('ref: refs/heads/'.length);
+        }
+        return head.length >= 7 ? head.substring(0, 7) : head;
+      }
+    }
+  } catch (_) {}
+  return 'HEAD';
+}
 
 ({List<MindMapNodeData> nodes, List<MindMapConnection> conns})
 buildMindMapGraph({
@@ -38,11 +73,11 @@ buildMindMapGraph({
       final agentNodeId = 'agent:${session.id}';
 
       // Determine the branch this session is actually on.
-      // For worktree sessions, use the first branch from worktreeContexts.
-      final wt = session.worktreeContexts;
-      final sessionBranch = (wt != null && wt.isNotEmpty)
-          ? p.basename(wt.values.first)
-          : ws.gitBranch;
+      // For worktree sessions read from the worktree path's HEAD file.
+      final sessionWtFirst = session.worktreeContexts?.values.firstOrNull;
+      final sessionBranch = sessionWtFirst != null
+          ? _branchFromDir(sessionWtFirst)
+          : _branchFromDir(ws.paths.isNotEmpty ? ws.paths.first : '');
 
       nodes.add(
         AgentNodeData(
@@ -71,32 +106,44 @@ buildMindMapGraph({
         ),
       );
 
-      final repoPaths = <String, String>{};
+      final repoPaths = <String, ({String effectivePath, String branch})>{};
       final sessionWt = session.worktreeContexts;
       if (sessionWt != null && sessionWt.isNotEmpty) {
-        repoPaths.addAll(sessionWt);
+        // worktreeContexts: originalRepoPath → worktreePath
+        // Use the worktreePath as the effective directory for file tree / diff
+        // and read the real branch from the HEAD file.
+        for (final e in sessionWt.entries) {
+          final worktreePath = e.value;
+          repoPaths[e.key] = (
+            effectivePath: worktreePath,
+            branch: _branchFromDir(worktreePath),
+          );
+        }
       } else {
         for (final repoPath in ws.paths) {
-          repoPaths[repoPath] = ws.gitBranch ?? 'main';
+          repoPaths[repoPath] = (
+            effectivePath: repoPath,
+            branch: _branchFromDir(repoPath),
+          );
         }
       }
 
       for (final entry in repoPaths.entries) {
-        final repoPath = entry.key;
-        final branchRef = entry.value;
-        final branchName = p.basename(branchRef);
-        final repoName = p.basename(repoPath);
+        final originalRepoPath = entry.key;
+        final effectivePath = entry.value.effectivePath;
+        final branchName = entry.value.branch;
+        final repoName = p.basename(originalRepoPath);
         // Include branch in the ID so worktrees on the same repo but different
         // branches each get their own set of nodes (repo → branch → tree → diff).
-        final repoNodeId = 'repo:${ws.id}:$repoPath:$branchName';
-        final branchNodeId = 'branch:${ws.id}:$repoPath:$branchName';
+        final repoNodeId = 'repo:${ws.id}:$originalRepoPath:$branchName';
+        final branchNodeId = 'branch:${ws.id}:$originalRepoPath:$branchName';
 
         if (!nodes.any((node) => node.id == repoNodeId)) {
           nodes.add(
             RepoNodeData(
               id: repoNodeId,
               sessionId: session.id,
-              repoPath: repoPath,
+              repoPath: effectivePath,
               repoName: repoName,
               branch: branchName,
             ),
