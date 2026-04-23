@@ -452,7 +452,7 @@ class TerminalCubit extends Cubit<TerminalState> {
 
     // Play completion sound (interactive mode micro-completion).
     SessionPrefs.isCompletionSoundEnabled().then((enabled) {
-      if (enabled) Process.run('afplay', ['/System/Library/Sounds/Glass.aiff']);
+      if (enabled && Platform.isMacOS) Process.run('afplay', ['/System/Library/Sounds/Glass.aiff']);
     });
 
     Future.delayed(const Duration(seconds: 3), () {
@@ -493,7 +493,7 @@ class TerminalCubit extends Cubit<TerminalState> {
       }
       // Urgent sound — different from completion sound.
       SessionPrefs.isApprovalSoundEnabled().then((enabled) {
-        if (enabled) Process.run('afplay', ['/System/Library/Sounds/Sosumi.aiff']);
+        if (enabled && Platform.isMacOS) Process.run('afplay', ['/System/Library/Sounds/Sosumi.aiff']);
       });
       return;
     }
