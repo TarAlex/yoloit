@@ -199,8 +199,11 @@ Future<void> _pumpSidebar(WidgetTester tester, ShowHideSidebarData data) async {
             child: MindMapShowHideSidebar(
               data: data,
               onToggleHide: (_) {},
+              onToggleGroup: (_) {},
               onFocusNode: (_) {},
               onShowAll: () {},
+              onHideAll: () {},
+              onToggleType: (_) {},
               onCreateWorkspace: () {},
             ),
           ),

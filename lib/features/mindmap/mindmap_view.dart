@@ -1229,8 +1229,11 @@ class _GroupSidebarState extends State<_GroupSidebar> {
           onToggleHide: (nodeId) => mm.hidden.contains(nodeId)
               ? cubit.showNode(nodeId)
               : cubit.hideNode(nodeId),
+          onToggleGroup: cubit.toggleGroupVisibility,
           onFocusNode: widget.onFocusNode,
           onShowAll: cubit.showAllNodes,
+          onHideAll: cubit.hideAll,
+          onToggleType: cubit.toggleType,
           onCreateWorkspace: () => _createWorkspace(context),
         );
       },

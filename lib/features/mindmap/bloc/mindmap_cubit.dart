@@ -200,16 +200,16 @@ class MindMapCubit extends Cubit<MindMapState> {
       connections: mergedConns,
     );
 
-    // Auto-reveal any live/active agent sessions.  A session becoming live
-    // means the user or the system spawned it — it should always be visible
-    // regardless of whether its card was previously closed (×).
-    final liveAgentIds = nodes.whereType<AgentNodeData>()
-        .where((a) => a.session.status == AgentStatus.live)
+    // Auto-reveal only BRAND NEW live sessions (not previously in the graph).
+    // This avoids un-hiding sessions that were explicitly hidden in a saved view.
+    final prevAgentIds = state.nodes.whereType<AgentNodeData>().map((a) => a.id).toSet();
+    final newLiveAgentIds = nodes.whereType<AgentNodeData>()
+        .where((a) => a.session.status == AgentStatus.live && !prevAgentIds.contains(a.id))
         .map((a) => a.id)
         .toSet();
-    final newHidden = liveAgentIds.isEmpty
+    final newHidden = newLiveAgentIds.isEmpty
         ? state.hidden
-        : ({...state.hidden}..removeAll(liveAgentIds));
+        : ({...state.hidden}..removeAll(newLiveAgentIds));
 
     emit(state.copyWith(
       nodes:       mergedNodes,
@@ -276,6 +276,28 @@ class MindMapCubit extends Cubit<MindMapState> {
 
   void hideNode(String id) {
     final newHidden = {...state.hidden, id};
+    emit(state.copyWith(hidden: newHidden));
+    _saveHidden(newHidden);
+  }
+
+  /// Hide every node currently on the canvas.
+  void hideAll() {
+    final allIds = state.nodes.map((n) => n.id).toSet();
+    emit(state.copyWith(hidden: allIds, hiddenTypes: {}));
+    _saveHidden(allIds);
+    _saveHiddenTypes({});
+  }
+
+  /// Toggle visibility for a group of IDs together (e.g. a workspace + children).
+  /// If any of the IDs is currently visible, hides all; otherwise shows all.
+  void toggleGroupVisibility(List<String> ids) {
+    final anyVisible = ids.any((id) => !state.hidden.contains(id));
+    final newHidden = {...state.hidden};
+    if (anyVisible) {
+      newHidden.addAll(ids);
+    } else {
+      newHidden.removeAll(ids);
+    }
     emit(state.copyWith(hidden: newHidden));
     _saveHidden(newHidden);
   }

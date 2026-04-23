@@ -35,14 +35,16 @@ class ShowHideSidebarData extends Equatable {
     this.workspaces = const [],
     this.orphans = const [],
     this.hiddenCount = 0,
+    this.hiddenTypes = const {},
   });
 
   final List<ShowHideSidebarNode> workspaces;
   final List<ShowHideSidebarNode> orphans;
   final int hiddenCount;
+  final Set<String> hiddenTypes;
 
   @override
-  List<Object?> get props => [workspaces, orphans, hiddenCount];
+  List<Object?> get props => [workspaces, orphans, hiddenCount, hiddenTypes];
 }
 
 ShowHideSidebarData buildShowHideSidebarDataFromMindMapState(
@@ -97,6 +99,7 @@ ShowHideSidebarData buildShowHideSidebarDataFromMindMapState(
     workspaces: workspaces,
     orphans: orphans,
     hiddenCount: state.hidden.length + state.hiddenTypes.length,
+    hiddenTypes: state.hiddenTypes,
   );
 }
 
@@ -199,6 +202,7 @@ ShowHideSidebarData buildShowHideSidebarDataFromSnapshotPayload(
     workspaces: workspaces,
     orphans: orphans,
     hiddenCount: hidden.length + hiddenTypes.length,
+    hiddenTypes: hiddenTypes,
   );
 }
 
@@ -207,15 +211,22 @@ class MindMapShowHideSidebar extends StatefulWidget {
     super.key,
     required this.data,
     required this.onToggleHide,
+    required this.onToggleGroup,
     this.onFocusNode,
     this.onShowAll,
+    this.onHideAll,
+    this.onToggleType,
     this.onCreateWorkspace,
   });
 
   final ShowHideSidebarData data;
   final void Function(String nodeId) onToggleHide;
+  /// Toggle a group of node IDs together (workspace + its children).
+  final void Function(List<String> ids) onToggleGroup;
   final void Function(String nodeId)? onFocusNode;
   final VoidCallback? onShowAll;
+  final VoidCallback? onHideAll;
+  final void Function(String typeTag)? onToggleType;
   final VoidCallback? onCreateWorkspace;
 
   @override
@@ -283,11 +294,22 @@ class _MindMapShowHideSidebarState extends State<MindMapShowHideSidebar> {
                         ),
                       ),
                     ),
+                    if (widget.onHideAll != null)
+                      InkWell(
+                        onTap: widget.onHideAll,
+                        child: const Padding(
+                          padding: EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                          child: Text(
+                            'Hide all',
+                            style: TextStyle(fontSize: 9, color: Color(0xFFFF6B6B)),
+                          ),
+                        ),
+                      ),
                     if (widget.data.hiddenCount > 0 && widget.onShowAll != null)
                       InkWell(
                         onTap: widget.onShowAll,
                         child: const Padding(
-                          padding: EdgeInsets.all(4),
+                          padding: EdgeInsets.symmetric(horizontal: 4, vertical: 2),
                           child: Text(
                             'Show all',
                             style: TextStyle(
@@ -311,6 +333,12 @@ class _MindMapShowHideSidebarState extends State<MindMapShowHideSidebar> {
                   ],
                 ),
               ),
+              // ── Type filter chips ───────────────────────────────────────
+              if (widget.onToggleType != null)
+                _TypeFilterBar(
+                  hiddenTypes: widget.data.hiddenTypes,
+                  onToggle: widget.onToggleType!,
+                ),
               const Divider(height: 1, color: Color(0xFF1E2330)),
               if (widget.onCreateWorkspace != null)
                 Padding(
@@ -371,13 +399,25 @@ class _MindMapShowHideSidebarState extends State<MindMapShowHideSidebar> {
       final isWorkspace = depth == 0 && node.type == 'workspace';
       final hasChildren = node.children.isNotEmpty;
       final expanded = _expandedIds.contains(node.id);
+
+      // For workspace rows, toggling hides/shows workspace + all descendant IDs together.
+      List<String> _allDescendantIds(ShowHideSidebarNode n) {
+        final ids = <String>[n.id];
+        for (final c in n.children) ids.addAll(_allDescendantIds(c));
+        return ids;
+      }
+
+      final VoidCallback toggleHide = isWorkspace
+          ? () => widget.onToggleGroup(_allDescendantIds(node))
+          : () => widget.onToggleHide(node.id);
+
       widgets.add(
         _SidebarTreeRow(
           node: node,
           depth: depth,
           isWorkspace: isWorkspace,
           expanded: expanded,
-          onToggleHide: () => widget.onToggleHide(node.id),
+          onToggleHide: toggleHide,
           onToggleExpand: hasChildren
               ? () => setState(() {
                   expanded
@@ -1115,6 +1155,71 @@ class _SidebarActionState extends State<_SidebarAction> {
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+// ── Type filter chips bar ──────────────────────────────────────────────────
+
+class _TypeFilterBar extends StatelessWidget {
+  const _TypeFilterBar({required this.hiddenTypes, required this.onToggle});
+
+  final Set<String> hiddenTypes;
+  final void Function(String) onToggle;
+
+  static const _chips = [
+    (type: 'agent',  label: 'Sessions', icon: Icons.terminal),
+    (type: 'branch', label: 'Branches', icon: Icons.alt_route),
+    (type: 'run',    label: 'Runs',     icon: Icons.play_circle_outline),
+    (type: 'files',  label: 'Files',    icon: Icons.folder_open_outlined),
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      color: const Color(0xFF0D1018),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+      child: Wrap(
+        spacing: 4,
+        runSpacing: 4,
+        children: _chips.map((c) {
+          final hidden = hiddenTypes.contains(c.type);
+          return GestureDetector(
+            onTap: () => onToggle(c.type),
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 150),
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+              decoration: BoxDecoration(
+                color: hidden ? const Color(0xFF1A1E2A) : const Color(0xFF1E1840),
+                borderRadius: BorderRadius.circular(4),
+                border: Border.all(
+                  color: hidden ? const Color(0xFF2A3040) : const Color(0xFF5C4FCC),
+                ),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(c.icon, size: 10,
+                    color: hidden ? const Color(0xFF4A5680) : const Color(0xFF9B8FFF)),
+                  const SizedBox(width: 3),
+                  Text(
+                    c.label,
+                    style: TextStyle(
+                      fontSize: 9,
+                      color: hidden ? const Color(0xFF4A5680) : const Color(0xFFB0A8FF),
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  if (hidden) ...[
+                    const SizedBox(width: 3),
+                    const Icon(Icons.visibility_off, size: 8, color: Color(0xFF4A5680)),
+                  ],
+                ],
+              ),
+            ),
+          );
+        }).toList(),
       ),
     );
   }
