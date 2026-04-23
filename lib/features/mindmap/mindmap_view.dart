@@ -93,6 +93,9 @@ class _MindMapViewState extends State<MindMapView>
       duration: const Duration(milliseconds: 480),
     );
 
+    // Global Cmd+O handler — fires regardless of which widget has focus.
+    HardwareKeyboard.instance.addHandler(_handleGlobalKey);
+
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       await context.read<MindMapCubit>().loadPersistedPositions();
       if (!mounted) return;
@@ -109,6 +112,7 @@ class _MindMapViewState extends State<MindMapView>
 
   @override
   void dispose() {
+    HardwareKeyboard.instance.removeHandler(_handleGlobalKey);
     _transformCtrl.dispose();
     _dashCtrl.dispose();
     _panCtrl.dispose();
@@ -318,17 +322,20 @@ class _MindMapViewState extends State<MindMapView>
     );
   }
 
+  /// Global key handler: catches Cmd+O regardless of which widget has focus.
+  bool _handleGlobalKey(KeyEvent event) {
+    if (event is KeyDownEvent &&
+        event.logicalKey == LogicalKeyboardKey.keyO &&
+        HardwareKeyboard.instance.isMetaPressed) {
+      _openFileInPanel();
+      return true; // consumed — prevents system beep
+    }
+    return false;
+  }
+
   @override
   Widget build(BuildContext context) {
-    return CallbackShortcuts(
-      bindings: {
-        const SingleActivator(LogicalKeyboardKey.keyO, meta: true): _openFileInPanel,
-      },
-      child: Focus(
-        autofocus: false,
-        child: _buildInner(context),
-      ),
-    );
+    return _buildInner(context);
   }
 
   Widget _buildInner(BuildContext context) {

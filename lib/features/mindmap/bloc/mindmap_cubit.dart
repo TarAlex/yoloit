@@ -164,7 +164,21 @@ class MindMapCubit extends Cubit<MindMapState> {
         .where((c) => panelEditors.any((n) => n.id == c.fromId || n.id == c.toId))
         .toList();
 
-    final mergedNodes = [...nodes, ...panelEditors];
+    final panelFilePaths = panelEditors
+        .whereType<FilePanelNodeData>()
+        .map((n) => n.filePath)
+        .toSet();
+
+    // Suppress 'editor:active' when there's already a FilePanelNodeData for
+    // the same file — prevents double Code/Preview controls from showing.
+    final filteredNodes = nodes.where((n) {
+      if (n is EditorNodeData && n.id == 'editor:active') {
+        return !panelFilePaths.contains(n.filePath);
+      }
+      return true;
+    }).toList();
+
+    final mergedNodes = [...filteredNodes, ...panelEditors];
     final mergedConns = [...connections, ...panelConns];
 
     final newPositions = _engine.compute(
