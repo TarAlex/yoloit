@@ -596,91 +596,49 @@ class _MarkdownPreview extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.appColors;
+    final sheet = MarkdownStyleSheet(
+      h1: const TextStyle(color: AppColors.textPrimary, fontSize: 28, fontWeight: FontWeight.w700, height: 1.4),
+      h2: const TextStyle(color: AppColors.textPrimary, fontSize: 22, fontWeight: FontWeight.w700, height: 1.4),
+      h3: const TextStyle(color: AppColors.textPrimary, fontSize: 18, fontWeight: FontWeight.w600, height: 1.4),
+      h4: const TextStyle(color: AppColors.textPrimary, fontSize: 16, fontWeight: FontWeight.w600),
+      p: const TextStyle(color: AppColors.textSecondary, fontSize: 14, height: 1.65),
+      strong: const TextStyle(color: AppColors.textPrimary, fontWeight: FontWeight.w700),
+      em: const TextStyle(color: AppColors.textSecondary, fontStyle: FontStyle.italic),
+      code: TextStyle(color: AppColors.neonGreen, backgroundColor: AppColors.textMuted.withAlpha(30), fontSize: 13, fontFamily: 'monospace'),
+      codeblockDecoration: BoxDecoration(
+        color: const Color(0xFF0D0D1F),
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: AppColors.textMuted.withAlpha(40)),
+      ),
+      codeblockPadding: const EdgeInsets.all(14),
+      blockquoteDecoration: BoxDecoration(
+        border: Border(left: BorderSide(color: colors.primary, width: 3)),
+      ),
+      blockquotePadding: const EdgeInsets.only(left: 12),
+      blockquote: const TextStyle(color: AppColors.textMuted, fontSize: 14, fontStyle: FontStyle.italic),
+      listBullet: const TextStyle(color: AppColors.textMuted, fontSize: 14),
+      tableHead: const TextStyle(color: AppColors.textPrimary, fontWeight: FontWeight.w600, fontSize: 13),
+      tableBody: const TextStyle(color: AppColors.textSecondary, fontSize: 13),
+      tableBorder: TableBorder.all(color: AppColors.textMuted.withAlpha(40)),
+      horizontalRuleDecoration: BoxDecoration(
+        border: Border(top: BorderSide(color: AppColors.textMuted.withAlpha(60))),
+      ),
+      a: TextStyle(color: colors.primary, decoration: TextDecoration.underline),
+    );
+    // Use SingleChildScrollView + shrinkWrap so Markdown does NOT create its
+    // own internal scroll. This keeps the coordinate system flat, which fixes
+    // text selection hitting the wrong position when content is scrolled.
     return Container(
       color: colors.background,
-      child: Markdown(
-        data: content,
-        selectable: true,
-        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
-        styleSheet: MarkdownStyleSheet(
-          h1: const TextStyle(
-            color: AppColors.textPrimary,
-            fontSize: 28,
-            fontWeight: FontWeight.w700,
-            height: 1.4,
-          ),
-          h2: const TextStyle(
-            color: AppColors.textPrimary,
-            fontSize: 22,
-            fontWeight: FontWeight.w700,
-            height: 1.4,
-          ),
-          h3: const TextStyle(
-            color: AppColors.textPrimary,
-            fontSize: 18,
-            fontWeight: FontWeight.w600,
-            height: 1.4,
-          ),
-          h4: const TextStyle(
-            color: AppColors.textPrimary,
-            fontSize: 16,
-            fontWeight: FontWeight.w600,
-          ),
-          p: const TextStyle(
-            color: AppColors.textSecondary,
-            fontSize: 14,
-            height: 1.65,
-          ),
-          strong: const TextStyle(
-            color: AppColors.textPrimary,
-            fontWeight: FontWeight.w700,
-          ),
-          em: const TextStyle(
-            color: AppColors.textSecondary,
-            fontStyle: FontStyle.italic,
-          ),
-          code: TextStyle(
-            color: AppColors.neonGreen,
-            backgroundColor: AppColors.textMuted.withAlpha(30),
-            fontSize: 13,
-            fontFamily: 'monospace',
-          ),
-          codeblockDecoration: BoxDecoration(
-            color: const Color(0xFF0D0D1F),
-            borderRadius: BorderRadius.circular(6),
-            border: Border.all(color: AppColors.textMuted.withAlpha(40)),
-          ),
-          codeblockPadding: const EdgeInsets.all(14),
-          blockquoteDecoration: BoxDecoration(
-            border: Border(left: BorderSide(color: colors.primary, width: 3)),
-          ),
-          blockquotePadding: const EdgeInsets.only(left: 12),
-          blockquote: const TextStyle(
-            color: AppColors.textMuted,
-            fontSize: 14,
-            fontStyle: FontStyle.italic,
-          ),
-          listBullet: const TextStyle(color: AppColors.textMuted, fontSize: 14),
-          tableHead: const TextStyle(
-            color: AppColors.textPrimary,
-            fontWeight: FontWeight.w600,
-            fontSize: 13,
-          ),
-          tableBody: const TextStyle(
-            color: AppColors.textSecondary,
-            fontSize: 13,
-          ),
-          tableBorder: TableBorder.all(
-            color: AppColors.textMuted.withAlpha(40),
-          ),
-          horizontalRuleDecoration: BoxDecoration(
-            border: Border(
-              top: BorderSide(color: AppColors.textMuted.withAlpha(60)),
-            ),
-          ),
-          a: TextStyle(
-            color: colors.primary,
-            decoration: TextDecoration.underline,
+      child: SelectionArea(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
+          child: Markdown(
+            data: content,
+            selectable: false,
+            shrinkWrap: true,
+            padding: EdgeInsets.zero,
+            styleSheet: sheet,
           ),
         ),
       ),
