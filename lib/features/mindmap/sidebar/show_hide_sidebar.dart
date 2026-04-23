@@ -1,5 +1,6 @@
 import 'package:equatable/equatable.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:path/path.dart' as p;
 import 'package:yoloit/features/mindmap/bloc/mindmap_cubit.dart';
@@ -18,6 +19,7 @@ class ShowHideSidebarNode extends Equatable {
     required this.label,
     required this.hidden,
     this.children = const [],
+    this.path,
   });
 
   final String id;
@@ -25,9 +27,11 @@ class ShowHideSidebarNode extends Equatable {
   final String label;
   final bool hidden;
   final List<ShowHideSidebarNode> children;
+  /// Optional filesystem path (populated for workspace nodes).
+  final String? path;
 
   @override
-  List<Object?> get props => [id, type, label, hidden, children];
+  List<Object?> get props => [id, type, label, hidden, children, path];
 }
 
 class ShowHideSidebarData extends Equatable {
@@ -243,6 +247,23 @@ class _MindMapShowHideSidebarState extends State<MindMapShowHideSidebar> {
   final _expandedIds = <String>{};
   final _autoExpandedWorkspaceIds = <String>{};
 
+  final _filterCtrl = TextEditingController();
+  String _filterQuery = '';
+
+  @override
+  void initState() {
+    super.initState();
+    _filterCtrl.addListener(() {
+      setState(() => _filterQuery = _filterCtrl.text.trim().toLowerCase());
+    });
+  }
+
+  @override
+  void dispose() {
+    _filterCtrl.dispose();
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_collapsed) {
@@ -339,6 +360,8 @@ class _MindMapShowHideSidebarState extends State<MindMapShowHideSidebar> {
                   hiddenTypes: widget.data.hiddenTypes,
                   onToggle: widget.onToggleType!,
                 ),
+              // ── Quick search filter ─────────────────────────────────────
+              _QuickFilterBar(controller: _filterCtrl),
               const Divider(height: 1, color: Color(0xFF1E2330)),
               if (widget.onCreateWorkspace != null)
                 Padding(
@@ -398,6 +421,16 @@ class _MindMapShowHideSidebarState extends State<MindMapShowHideSidebar> {
     for (final node in nodes) {
       final isWorkspace = depth == 0 && node.type == 'workspace';
       final hasChildren = node.children.isNotEmpty;
+
+      // When a filter is active, only show nodes whose label (or any descendant) matches.
+      // Auto-expand workspaces that contain matches.
+      final bool filterActive = _filterQuery.isNotEmpty;
+      if (filterActive && !_nodeMatchesFilter(node, _filterQuery)) continue;
+      if (filterActive && isWorkspace) {
+        // Force-expand workspaces so matching children are visible.
+        _expandedIds.add(node.id);
+      }
+
       final expanded = _expandedIds.contains(node.id);
 
       // For workspace rows, toggling hides/shows workspace + all descendant IDs together.
@@ -436,6 +469,15 @@ class _MindMapShowHideSidebarState extends State<MindMapShowHideSidebar> {
     }
     return widgets;
   }
+
+  /// Returns true if the node's label or any descendant label matches [query].
+  bool _nodeMatchesFilter(ShowHideSidebarNode node, String query) {
+    if (node.label.toLowerCase().contains(query)) return true;
+    for (final child in node.children) {
+      if (_nodeMatchesFilter(child, query)) return true;
+    }
+    return false;
+  }
 }
 
 Map<String, List<String>> _buildChildMap(
@@ -473,12 +515,14 @@ ShowHideSidebarNode? _buildDesktopNode(
   }
 
   final meta = _desktopMeta(node);
+  final workspacePath = node is WorkspaceNodeData ? node.workspace.path : null;
   return ShowHideSidebarNode(
     id: node.id,
     type: meta.type,
     label: meta.label,
     hidden: hidden.contains(node.id) || hiddenTypes.contains(meta.type),
     children: children,
+    path: workspacePath,
   );
 }
 
@@ -888,7 +932,42 @@ class _SidebarTreeRow extends StatelessWidget {
         child: row,
       );
     }
+    // For workspace nodes, right-click shows a "Copy path" context menu.
+    if (isWorkspace && node.path != null && node.path!.isNotEmpty) {
+      return GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onSecondaryTapDown: (details) =>
+            _showWorkspaceMenu(context, details.globalPosition),
+        child: row,
+      );
+    }
     return row;
+  }
+
+  Future<void> _showWorkspaceMenu(BuildContext context, Offset position) async {
+    final selected = await showMenu<String>(
+      context: context,
+      position: RelativeRect.fromLTRB(
+        position.dx, position.dy, position.dx + 1, position.dy + 1,
+      ),
+      color: const Color(0xFF1A1E2A),
+      items: [
+        PopupMenuItem<String>(
+          value: 'copy_path',
+          height: 32,
+          child: Row(
+            children: const [
+              Icon(Icons.copy_outlined, size: 14, color: Color(0xFFB0B0D0)),
+              SizedBox(width: 8),
+              Text('Copy path', style: TextStyle(fontSize: 12, color: Color(0xFFB0B0D0))),
+            ],
+          ),
+        ),
+      ],
+    );
+    if (selected == 'copy_path') {
+      await Clipboard.setData(ClipboardData(text: node.path!));
+    }
   }
 
   void _showAgentMenu(BuildContext context, Offset position) {
@@ -1155,6 +1234,51 @@ class _SidebarActionState extends State<_SidebarAction> {
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+// ── Quick filter search bar ────────────────────────────────────────────────
+
+class _QuickFilterBar extends StatelessWidget {
+  const _QuickFilterBar({required this.controller});
+  final TextEditingController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      color: const Color(0xFF0D1018),
+      padding: const EdgeInsets.fromLTRB(8, 4, 8, 4),
+      child: Row(
+        children: [
+          const Icon(Icons.search, size: 12, color: Color(0xFF4A5680)),
+          const SizedBox(width: 6),
+          Expanded(
+            child: TextField(
+              controller: controller,
+              style: const TextStyle(fontSize: 11, color: Color(0xFFD0D8F0)),
+              cursorColor: const Color(0xFF7C6BFF),
+              cursorWidth: 1.5,
+              decoration: const InputDecoration(
+                hintText: 'Quick filter…',
+                hintStyle: TextStyle(fontSize: 11, color: Color(0xFF3A4460)),
+                border: InputBorder.none,
+                isDense: true,
+                contentPadding: EdgeInsets.zero,
+              ),
+            ),
+          ),
+          ValueListenableBuilder<TextEditingValue>(
+            valueListenable: controller,
+            builder: (_, val, __) => val.text.isEmpty
+                ? const SizedBox.shrink()
+                : GestureDetector(
+                    onTap: controller.clear,
+                    child: const Icon(Icons.close, size: 12, color: Color(0xFF4A5680)),
+                  ),
+          ),
+        ],
       ),
     );
   }
