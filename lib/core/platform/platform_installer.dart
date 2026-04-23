@@ -276,7 +276,10 @@ chmod +x "$currentBundleDir/yoloit"
 // ── Windows ───────────────────────────────────────────────────────────────────
 
 class WindowsPlatformInstaller extends PlatformInstaller {
-  const WindowsPlatformInstaller();
+  const WindowsPlatformInstaller({ProcessRunner? processRunner})
+      : _run = processRunner ?? Process.run;
+
+  final ProcessRunner _run;
 
   @override
   bool get supportsInAppInstall => true;
@@ -285,14 +288,13 @@ class WindowsPlatformInstaller extends PlatformInstaller {
   Future<String> getAppVersion({String fallback = '0.0.0'}) async {
     try {
       final exePath = Platform.resolvedExecutable;
-      final result = await Process.run(
+      final result = await _run(
         'powershell',
         [
           '-NoProfile',
           '-Command',
           '(Get-Item "$exePath").VersionInfo.ProductVersion',
         ],
-        runInShell: false,
       );
       if (result.exitCode == 0) {
         final version = (result.stdout as String).trim();
