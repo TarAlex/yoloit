@@ -164,21 +164,32 @@ class MindMapCubit extends Cubit<MindMapState> {
         .where((c) => panelEditors.any((n) => n.id == c.fromId || n.id == c.toId))
         .toList();
 
-    final panelFilePaths = panelEditors
-        .whereType<FilePanelNodeData>()
-        .map((n) => n.filePath)
-        .toSet();
+    // Collect all file paths that already have a FilePanelNodeData —
+    // both from preserved panels and from the incoming graph nodes.
+    final panelFilePaths = {
+      ...panelEditors.whereType<FilePanelNodeData>().map((n) => n.filePath),
+      ...nodes.whereType<FilePanelNodeData>().map((n) => n.filePath),
+    };
 
-    // Suppress 'editor:active' when there's already a FilePanelNodeData for
-    // the same file — prevents double Code/Preview controls from showing.
+    // Suppress ANY EditorNodeData (including old persisted 'panel:...' nodes)
+    // when there's already a FilePanelNodeData for the same file — this
+    // prevents the duplicate Code/Preview toolbar from appearing.
     final filteredNodes = nodes.where((n) {
-      if (n is EditorNodeData && n.id == 'editor:active') {
+      if (n is EditorNodeData) {
         return !panelFilePaths.contains(n.filePath);
       }
       return true;
     }).toList();
 
-    final mergedNodes = [...filteredNodes, ...panelEditors];
+    // Also remove stale EditorNodeData panels from preserved list.
+    final filteredPanelEditors = panelEditors.where((n) {
+      if (n is EditorNodeData) {
+        return !panelFilePaths.contains(n.filePath);
+      }
+      return true;
+    }).toList();
+
+    final mergedNodes = [...filteredNodes, ...filteredPanelEditors];
     final mergedConns = [...connections, ...panelConns];
 
     final newPositions = _engine.compute(

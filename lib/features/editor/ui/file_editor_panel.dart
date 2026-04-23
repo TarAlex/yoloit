@@ -991,7 +991,7 @@ class _TabCloseButtonState extends State<_TabCloseButton> {
           child: Icon(
             Icons.close,
             size: 12,
-            color: _hovering ? AppColors.textPrimary : const Color(0xFF3D4A6A),
+            color: _hovering ? AppColors.textPrimary : const Color(0xFF7080A0),
           ),
         ),
       ),
