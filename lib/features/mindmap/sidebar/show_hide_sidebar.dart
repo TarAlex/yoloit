@@ -2,11 +2,14 @@ import 'package:equatable/equatable.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:path/path.dart' as p;
+import 'package:yoloit/features/mindmap/bloc/mindmap_cubit.dart';
 import 'package:yoloit/features/mindmap/bloc/mindmap_state.dart';
 import 'package:yoloit/features/mindmap/model/mindmap_node_model.dart';
 import 'package:yoloit/features/review/bloc/review_cubit.dart';
 import 'package:yoloit/features/review/bloc/review_state.dart';
 import 'package:yoloit/features/terminal/bloc/terminal_cubit.dart';
+import 'package:yoloit/features/terminal/bloc/terminal_state.dart';
+import 'package:yoloit/features/terminal/models/agent_session.dart';
 
 class ShowHideSidebarNode extends Equatable {
   const ShowHideSidebarNode({
@@ -852,6 +855,7 @@ class _SidebarTreeRow extends StatelessWidget {
     // node.id = 'agent:{sessionId}'
     final sessionId = node.id.startsWith('agent:') ? node.id.substring(6) : node.id;
     final terminalCubit = context.read<TerminalCubit>();
+    final mindMapCubit = context.read<MindMapCubit>();
     showMenu<String>(
       context: context,
       position: RelativeRect.fromLTRB(
@@ -860,23 +864,119 @@ class _SidebarTreeRow extends StatelessWidget {
       color: const Color(0xFF1A1E2A),
       items: [
         PopupMenuItem<String>(
+          value: 'rename',
+          height: 32,
+          child: Row(
+            children: const [
+              Icon(Icons.drive_file_rename_outline, size: 14, color: Color(0xFFB0B0D0)),
+              SizedBox(width: 8),
+              Text('Rename Session', style: TextStyle(fontSize: 12, color: Color(0xFFB0B0D0))),
+            ],
+          ),
+        ),
+        const PopupMenuDivider(height: 8),
+        PopupMenuItem<String>(
           value: 'delete',
           height: 32,
           child: Row(
             children: const [
               Icon(Icons.delete_outline, size: 14, color: Color(0xFFFF6B6B)),
               SizedBox(width: 8),
-              Text('Delete Session',
-                  style: TextStyle(fontSize: 12, color: Color(0xFFFF6B6B))),
+              Text('Delete Session', style: TextStyle(fontSize: 12, color: Color(0xFFFF6B6B))),
             ],
           ),
         ),
       ],
-    ).then((value) {
-      if (value == 'delete') {
-        terminalCubit.closeSession(sessionId);
+    ).then((value) async {
+      if (!context.mounted) return;
+      if (value == 'rename') {
+        await _showRenameDialog(context, sessionId, terminalCubit);
+      } else if (value == 'delete') {
+        await _showCloseDialog(context, sessionId, terminalCubit, mindMapCubit);
       }
     });
+  }
+
+  Future<void> _showRenameDialog(
+    BuildContext context,
+    String sessionId,
+    TerminalCubit terminalCubit,
+  ) async {
+    final state = terminalCubit.state;
+    final sessions = state is TerminalLoaded ? state.allSessions : <AgentSession>[];
+    final session = sessions.where((s) => s.id == sessionId).firstOrNull;
+    final controller = TextEditingController(text: session?.customName ?? session?.displayName ?? '');
+    final result = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1A1E2A),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        title: const Text('Rename Session', style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w600)),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          style: const TextStyle(color: Colors.white, fontSize: 13),
+          decoration: InputDecoration(
+            hintText: 'Session name...',
+            hintStyle: const TextStyle(color: Color(0xFF6B7280)),
+            filled: true,
+            fillColor: const Color(0xFF0D1117),
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(6), borderSide: const BorderSide(color: Color(0xFF2D3748))),
+            focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(6), borderSide: const BorderSide(color: Color(0xFF7C6BFF))),
+            contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          ),
+          onSubmitted: (v) => Navigator.pop(ctx, v),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel', style: TextStyle(color: Color(0xFF6B7280)))),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, controller.text),
+            child: const Text('Rename', style: TextStyle(color: Color(0xFF7C6BFF), fontWeight: FontWeight.w600)),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    if (result != null && result.trim().isNotEmpty) {
+      terminalCubit.renameSession(sessionId, result.trim());
+    }
+  }
+
+  Future<void> _showCloseDialog(
+    BuildContext context,
+    String sessionId,
+    TerminalCubit terminalCubit,
+    MindMapCubit mindMapCubit,
+  ) async {
+    final result = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1A1E2A),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        title: const Text('Close Session', style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w600)),
+        content: const Text(
+          'Would you like to pause the session (keep it running in the background) or kill it permanently?',
+          style: TextStyle(color: Color(0xFF9CA3AF), fontSize: 13, height: 1.5),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel', style: TextStyle(color: Color(0xFF6B7280)))),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, 'pause'),
+            child: const Text('Pause', style: TextStyle(color: Color(0xFF7C6BFF), fontWeight: FontWeight.w600)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, 'kill'),
+            child: const Text('Kill Forever', style: TextStyle(color: Color(0xFFFF6B6B), fontWeight: FontWeight.w600)),
+          ),
+        ],
+      ),
+    );
+    if (!context.mounted) return;
+    if (result == 'pause') {
+      mindMapCubit.hideNode('agent:$sessionId');
+    } else if (result == 'kill') {
+      terminalCubit.closeSession(sessionId);
+    }
   }
 }
 

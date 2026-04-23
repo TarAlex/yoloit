@@ -1037,8 +1037,14 @@ class _WorkspaceTileState extends State<_WorkspaceTile> {
                         ),
                       ),
                     ),
-                    // ⋯ menu — only occupies layout space when hovered to prevent overflow
-                    if (_hovering)
+                    // ⋯ menu and delete — only visible on hover
+                    if (_hovering) ...[
+                      _SmallIconButton(
+                        icon: Icons.delete_outline,
+                        onTap: widget.onRemove,
+                        tooltip: 'Remove workspace',
+                        color: Colors.red.shade300,
+                      ),
                       Builder(
                         builder: (ctx) => _SmallIconButton(
                           icon: Icons.more_horiz,
@@ -1046,6 +1052,7 @@ class _WorkspaceTileState extends State<_WorkspaceTile> {
                           tooltip: 'More actions',
                         ),
                       ),
+                    ],
                   ],
                 ),
                 // Color picker row
@@ -1207,11 +1214,13 @@ class _SmallIconButton extends StatelessWidget {
     required this.icon,
     required this.onTap,
     this.tooltip,
+    this.color,
   });
 
   final IconData icon;
   final VoidCallback onTap;
   final String? tooltip;
+  final Color? color;
 
   @override
   Widget build(BuildContext context) {
@@ -1224,7 +1233,7 @@ class _SmallIconButton extends StatelessWidget {
           onTap: onTap,
           child: Padding(
             padding: const EdgeInsets.all(3),
-            child: Icon(icon, size: 12, color: AppColors.textMuted),
+            child: Icon(icon, size: 12, color: color ?? AppColors.textMuted),
           ),
         ),
       ),
