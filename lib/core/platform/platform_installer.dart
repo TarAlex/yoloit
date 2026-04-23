@@ -282,7 +282,25 @@ class WindowsPlatformInstaller extends PlatformInstaller {
   bool get supportsInAppInstall => true;
 
   @override
-  Future<String> getAppVersion({String fallback = '0.0.0'}) async => fallback;
+  Future<String> getAppVersion({String fallback = '0.0.0'}) async {
+    try {
+      final exePath = Platform.resolvedExecutable;
+      final result = await Process.run(
+        'powershell',
+        [
+          '-NoProfile',
+          '-Command',
+          '(Get-Item "$exePath").VersionInfo.ProductVersion',
+        ],
+        runInShell: false,
+      );
+      if (result.exitCode == 0) {
+        final version = (result.stdout as String).trim();
+        if (version.isNotEmpty && version != '0.0.0.0') return version;
+      }
+    } catch (_) {}
+    return fallback;
+  }
 
   @override
   Future<String> downloadAndPrepare({
