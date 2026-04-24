@@ -83,8 +83,13 @@ class _MindMapNodeState extends State<MindMapNode> {
                         // over the card body — this way two-finger scroll
                         // inside a terminal/editor/file-tree scrolls the
                         // card, not the infinite canvas underneath.
+                        // CanvasFocusScrollBlocker stops showOnScreen() from
+                        // propagating to InteractiveViewer when inner widgets
+                        // request focus (e.g. editor autofocus on tab switch).
                         Expanded(
-                          child: ScrollableCardRegion(child: widget.child),
+                          child: CanvasFocusScrollBlocker(
+                            child: ScrollableCardRegion(child: widget.child),
+                          ),
                         ),
                       ],
                     ),
