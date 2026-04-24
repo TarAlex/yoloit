@@ -34,7 +34,7 @@ class _EditorNodeState extends State<EditorNode> {
         onToggleImmersive: _toggleImmersive,
         body: FileEditorPanel(
           immersive: _immersive,
-          hideTabBar: true,
+          hideTabBar: false,
           onToggleImmersive: _toggleImmersive,
         ),
       ),
