@@ -29,7 +29,7 @@ class FileTreeNode extends StatelessWidget {
         onToggle: (path) => context.read<ReviewCubit>().toggleNode(path),
         onSelect: (path) => _openInPanel(context, path),
         onNewFolder: (parentPath) => _createNewFolder(context, parentPath),
-        onShowInFinder: (path) => PlatformLauncher.instance.revealInFinder(path),
+        onShowInFinder: (path) => PlatformLauncher.instance.revealInFileManager(path),
         onOpenInPanel: (path) => _openInPanel(context, path),
         onRename: (path, currentName) => _renameEntry(context, path, currentName),
         onCreateFile: (dirPath) => _createFile(context, dirPath),

@@ -14,7 +14,7 @@ typedef ProcessRunner = Future<ProcessResult> Function(
 /// Usage:
 /// ```dart
 /// await PlatformLauncher.instance.openUrl('https://example.com');
-/// await PlatformLauncher.instance.revealInFinder('/path/to/file');
+/// await PlatformLauncher.instance.revealInFileManager('/path/to/file');
 /// ```
 abstract class PlatformLauncher {
   const PlatformLauncher();
@@ -41,7 +41,7 @@ abstract class PlatformLauncher {
   Future<void> openUrl(String url);
 
   /// Reveals [path] in the system file manager (Finder, Files, Explorer).
-  Future<void> revealInFinder(String path);
+  Future<void> revealInFileManager(String path);
 
   /// Opens a new terminal window at [workdir].
   Future<void> openTerminal(String workdir);
@@ -61,7 +61,7 @@ class MacosPlatformLauncher extends PlatformLauncher {
   }
 
   @override
-  Future<void> revealInFinder(String path) async {
+  Future<void> revealInFileManager(String path) async {
     await _run('open', ['-R', path]);
   }
 
@@ -92,7 +92,7 @@ class LinuxPlatformLauncher extends PlatformLauncher {
   }
 
   @override
-  Future<void> revealInFinder(String path) async {
+  Future<void> revealInFileManager(String path) async {
     // xdg-open on the parent directory is the closest Linux equivalent.
     final dir = File(path).parent.path;
     await _run('xdg-open', [dir]);
@@ -128,7 +128,7 @@ class WindowsPlatformLauncher extends PlatformLauncher {
   }
 
   @override
-  Future<void> revealInFinder(String path) async {
+  Future<void> revealInFileManager(String path) async {
     await _run('explorer', ['/select,', path]);
   }
 

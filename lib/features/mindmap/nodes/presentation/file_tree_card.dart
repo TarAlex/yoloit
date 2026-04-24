@@ -198,7 +198,7 @@ class _TreeRowState extends State<_TreeRow> {
       case 'copy_name':
         await Clipboard.setData(ClipboardData(text: e.name));
       case 'show_finder':
-        await PlatformLauncher.instance.revealInFinder(e.path);
+        await PlatformLauncher.instance.revealInFileManager(e.path);
       case 'open_panel':
         widget.onOpenInPanel?.call(e.path);
     }

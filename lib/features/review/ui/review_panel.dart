@@ -732,7 +732,7 @@ class _FileTreeNodeWidgetState extends State<_FileTreeNodeWidget> {
         _startRename();
       case 'show_in_finder':
         final target = node.isDirectory ? node.path : node.path;
-        PlatformLauncher.instance.revealInFinder(target);
+        PlatformLauncher.instance.revealInFileManager(target);
     }
   }
 

@@ -1,4 +1,4 @@
-import 'dart:io';
+import 'package:yoloit/core/platform/platform_dirs.dart';
 
 /// Abstract backend for persistent terminal sessions.
 ///
@@ -115,5 +115,5 @@ class ConPtySessionBackend extends TerminalSessionBackend {
 
   @override
   Future<String> logPath(String sessionId) async =>
-      '${Directory.systemTemp.path}\\yoloit_session_$sessionId.log';
+      '${PlatformDirs.instance.logsDir}\\yoloit_session_$sessionId.log';
 }

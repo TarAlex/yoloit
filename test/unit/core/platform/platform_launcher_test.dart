@@ -25,8 +25,8 @@ void main() {
       expect(call.arguments, ['https://example.com']);
     });
 
-    test('revealInFinder calls open -R with the path', () async {
-      await launcher.revealInFinder('/some/file.txt');
+    test('revealInFileManager calls open -R with the path', () async {
+      await launcher.revealInFileManager('/some/file.txt');
       final call = fakeRunner.lastCall!;
       expect(call.executable, 'open');
       expect(call.arguments, ['-R', '/some/file.txt']);
@@ -64,8 +64,8 @@ void main() {
       expect(call.arguments, ['https://example.com']);
     });
 
-    test('revealInFinder calls xdg-open on parent directory', () async {
-      await launcher.revealInFinder('/some/dir/file.txt');
+    test('revealInFileManager calls xdg-open on parent directory', () async {
+      await launcher.revealInFileManager('/some/dir/file.txt');
       final call = fakeRunner.lastCall!;
       expect(call.executable, 'xdg-open');
       expect(call.arguments.first, '/some/dir');
@@ -97,8 +97,8 @@ void main() {
       expect(call.arguments, contains('https://example.com'));
     });
 
-    test('revealInFinder calls explorer /select, with path', () async {
-      await launcher.revealInFinder(r'C:\Users\test\file.txt');
+    test('revealInFileManager calls explorer /select, with path', () async {
+      await launcher.revealInFileManager(r'C:\Users\test\file.txt');
       final call = fakeRunner.lastCall!;
       expect(call.executable, 'explorer');
       expect(call.arguments, contains('/select,'));

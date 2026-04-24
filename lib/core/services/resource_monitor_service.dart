@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as math;
 
@@ -341,39 +342,29 @@ class ResourceMonitorService {
     }
   }
 
-  /// Populates [_byPid], [_childrenOf], and [_processNames] using wmic on Windows.
-  /// CPU% is not available from wmic without sampling; reported as 0.0.
+  /// Populates [_byPid], [_childrenOf], and [_processNames] using PowerShell
+  /// Get-CimInstance on Windows (compatible with Windows 11 22H2+ where wmic is removed).
+  /// CPU% per-process is not sampled; reported as 0.0.
+  /// TODO: implement per-process CPU delta using Get-Process cumulative CPU time.
   Future<void> _collectProcessesWindows() async {
     _processNames.clear();
     try {
-      // wmic process get ProcessId,ParentProcessId,Name,WorkingSetSize /format:csv
-      // Output: Node,Name,ParentProcessId,ProcessId,WorkingSetSize
       final result = await Process.run(
-        'wmic',
-        ['process', 'get', 'ProcessId,ParentProcessId,Name,WorkingSetSize', '/format:csv'],
-        runInShell: true,
+        'powershell',
+        [
+          '-NoProfile', '-NonInteractive', '-Command',
+          'Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,Name,WorkingSetSize | ConvertTo-Json -Compress',
+        ],
+        runInShell: false,
       );
       if (result.exitCode != 0) return;
-      final lines = (result.stdout as String).split('\n');
-      // First non-empty line is the header: Node,Name,ParentProcessId,ProcessId,WorkingSetSize
-      int? pidIdx, ppidIdx, nameIdx, memIdx;
-      for (final raw in lines) {
-        final line = raw.trim();
-        if (line.isEmpty) continue;
-        final cols = line.split(',');
-        if (pidIdx == null) {
-          // Parse header
-          pidIdx = cols.indexOf('ProcessId');
-          ppidIdx = cols.indexOf('ParentProcessId');
-          nameIdx = cols.indexOf('Name');
-          memIdx = cols.indexOf('WorkingSetSize');
-          continue;
-        }
-        if (cols.length <= math.max(pidIdx, math.max(ppidIdx ?? 0, math.max(nameIdx ?? 0, memIdx ?? 0)))) continue;
-        final p = int.tryParse(cols[pidIdx].trim());
-        final pp = int.tryParse(cols[ppidIdx ?? 0].trim());
-        final name = nameIdx != null ? cols[nameIdx].trim() : '';
-        final memBytes = math.max(0, int.tryParse(cols[memIdx ?? 0].trim()) ?? 0);
+      final decoded = jsonDecode((result.stdout as String).trim());
+      final items = decoded is List ? decoded.cast<Map<String, dynamic>>() : [decoded as Map<String, dynamic>];
+      for (final item in items) {
+        final p = (item['ProcessId'] as num?)?.toInt();
+        final pp = (item['ParentProcessId'] as num?)?.toInt();
+        final name = (item['Name'] as String?) ?? '';
+        final memBytes = math.max(0, (item['WorkingSetSize'] as num?)?.toInt() ?? 0);
         if (p == null || pp == null) continue;
         _byPid[p] = ProcessInfo(pid: p, ppid: pp, cpu: 0.0, memoryBytes: memBytes);
         _childrenOf.putIfAbsent(pp, () => []).add(p);
@@ -437,62 +428,35 @@ class ResourceMonitorService {
     }
   }
 
+  /// Collects host metrics using PowerShell Get-CimInstance (Windows 11 22H2+ compatible).
+  /// Memory values are in KB from Win32_OperatingSystem (same unit as legacy wmic).
+  /// loadAverage1m is repurposed to hold overall CPU % (load average is not a Windows concept).
   Future<HostMetrics> _collectHostWindows() async {
     try {
-      // Memory: wmic OS get FreePhysicalMemory,TotalVisibleMemorySize /value  (KB)
-      final memResult = await Process.run(
-        'wmic',
-        ['OS', 'get', 'FreePhysicalMemory,TotalVisibleMemorySize', '/value'],
-        runInShell: true,
+      const script =
+          r'$os = Get-CimInstance Win32_OperatingSystem; '
+          r'$cpu = [int](Get-CimInstance Win32_Processor | Measure-Object -Property LoadPercentage -Average).Average; '
+          r'$cores = [int](Get-CimInstance Win32_Processor | Measure-Object -Property NumberOfLogicalProcessors -Sum).Sum; '
+          r'[PSCustomObject]@{FreePhysicalMemory=$os.FreePhysicalMemory;TotalVisibleMemorySize=$os.TotalVisibleMemorySize;CpuLoad=$cpu;LogicalCores=$cores} | ConvertTo-Json -Compress';
+
+      final result = await Process.run(
+        'powershell',
+        ['-NoProfile', '-NonInteractive', '-Command', script],
+        runInShell: false,
       );
-      int freeKb = 0, totalKb = 0;
-      if (memResult.exitCode == 0) {
-        for (final line in (memResult.stdout as String).split('\n')) {
-          final kv = line.trim().split('=');
-          if (kv.length != 2) continue;
-          final key = kv[0].trim();
-          final val = int.tryParse(kv[1].trim()) ?? 0;
-          if (key == 'FreePhysicalMemory') freeKb = val;
-          if (key == 'TotalVisibleMemorySize') totalKb = val;
-        }
-      }
+      if (result.exitCode != 0) return HostMetrics.empty;
+
+      final data = jsonDecode((result.stdout as String).trim()) as Map<String, dynamic>;
+      final freeKb = (data['FreePhysicalMemory'] as num?)?.toInt() ?? 0;
+      final totalKb = (data['TotalVisibleMemorySize'] as num?)?.toInt() ?? 0;
+      final cpuLoad = math.max(0.0, ((data['CpuLoad'] as num?) ?? 0).toDouble());
+      final coreCount = math.max(0, (data['LogicalCores'] as num?)?.toInt() ?? 0);
+
       final freeBytes = math.max(0, freeKb * 1024);
       final totalBytes = math.max(0, totalKb * 1024);
       final usedBytes = math.max(0, totalBytes - freeBytes);
       final usedPercent =
           totalBytes > 0 ? (usedBytes / totalBytes * 100).clamp(0.0, 100.0) : 0.0;
-
-      // CPU load: wmic cpu get LoadPercentage /value
-      final cpuResult = await Process.run(
-        'wmic',
-        ['cpu', 'get', 'LoadPercentage', '/value'],
-        runInShell: true,
-      );
-      double cpuLoad = 0.0;
-      if (cpuResult.exitCode == 0) {
-        for (final line in (cpuResult.stdout as String).split('\n')) {
-          final kv = line.trim().split('=');
-          if (kv.length == 2 && kv[0].trim() == 'LoadPercentage') {
-            cpuLoad = math.max(0.0, double.tryParse(kv[1].trim()) ?? 0.0);
-          }
-        }
-      }
-
-      // Core count: wmic cpu get NumberOfLogicalProcessors /value
-      final coreResult = await Process.run(
-        'wmic',
-        ['cpu', 'get', 'NumberOfLogicalProcessors', '/value'],
-        runInShell: true,
-      );
-      int coreCount = 0;
-      if (coreResult.exitCode == 0) {
-        for (final line in (coreResult.stdout as String).split('\n')) {
-          final kv = line.trim().split('=');
-          if (kv.length == 2 && kv[0].trim() == 'NumberOfLogicalProcessors') {
-            coreCount = math.max(0, int.tryParse(kv[1].trim()) ?? 0);
-          }
-        }
-      }
 
       return HostMetrics(
         totalBytes: totalBytes,
@@ -500,7 +464,7 @@ class ResourceMonitorService {
         usedBytes: usedBytes,
         usedPercent: usedPercent,
         cpuCoreCount: coreCount,
-        loadAverage1m: cpuLoad, // load average not a concept on Windows; repurpose for overall CPU %
+        loadAverage1m: cpuLoad,
       );
     } catch (_) {
       return HostMetrics.empty;
