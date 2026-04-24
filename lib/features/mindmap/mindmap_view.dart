@@ -59,6 +59,10 @@ class _MindMapViewState extends State<MindMapView>
   /// content-only updates when the same file is still active.
   String? _lastFocusedFilePath;
 
+  /// Tracks the set of file paths known to be open in the editor — used to
+  /// distinguish "new file opened" (animate) from "tab switched" (no animate).
+  Set<String> _knownEditorPaths = {};
+
   /// Set to true after the first successful pan-to-content on open.
   bool _initialPanDone = false;
 
@@ -370,9 +374,9 @@ class _MindMapViewState extends State<MindMapView>
                             _initialPanDone = true;
                             _fitAllNodes(mm.state.positions, mm.state.sizes);
                           }
-                          // Animate to editor card only when the active file changes
-                          // (not on every content update for the same file).
-                          // Skip auto-pan when triggered by a remote client action.
+                          // Animate to editor card only when a *new* file is
+                          // opened (not when the user switches between already-
+                          // open tabs).  Skip auto-pan for remote client actions.
                           if (editorState.isVisible &&
                               editorState.tabs.isNotEmpty) {
                             mm.showNode('editor:active');
@@ -381,7 +385,13 @@ class _MindMapViewState extends State<MindMapView>
                               editorState.tabs.length - 1,
                             );
                             final filePath = editorState.tabs[idx].filePath;
-                            if (filePath != _lastFocusedFilePath) {
+                            final currentPaths = editorState.tabs
+                                .map((t) => t.filePath)
+                                .toSet();
+                            final isNewFile =
+                                !_knownEditorPaths.contains(filePath);
+                            _knownEditorPaths = currentPaths;
+                            if (isNewFile && filePath != _lastFocusedFilePath) {
                               _lastFocusedFilePath = filePath;
                               final collab = context.read<CollaborationCubit>();
                               if (!collab.isHandlingRemoteAction) {

@@ -943,13 +943,18 @@ class _TabCloseButtonState extends State<_TabCloseButton> {
       onExit: (_) => setState(() => _hovering = false),
       child: GestureDetector(
         onTap: widget.onClose,
-        child: SizedBox(
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 120),
           width: 16,
           height: 16,
+          decoration: BoxDecoration(
+            color: _hovering ? Colors.white.withAlpha(30) : Colors.transparent,
+            borderRadius: BorderRadius.circular(3),
+          ),
           child: Icon(
             Icons.close,
-            size: 12,
-            color: _hovering ? AppColors.textPrimary : const Color(0xFF7080A0),
+            size: 11,
+            color: _hovering ? AppColors.textPrimary : const Color(0xFFAAB0CC),
           ),
         ),
       ),

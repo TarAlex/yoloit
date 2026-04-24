@@ -93,3 +93,30 @@ class RenderScrollableCardMarker extends RenderProxyBox {
   RenderScrollableCardMarker();
 }
 
+
+/// Prevents [showOnScreen] calls from inner widgets (e.g. autofocus on a
+/// CodeField / TextField) from propagating to the [InteractiveViewer] canvas
+/// and causing it to pan when an editor card switches tabs or opens.
+///
+/// Wrap each card's content area with this widget so that focus-driven
+/// scroll requests are absorbed here and never reach the canvas transform.
+class CanvasFocusScrollBlocker extends SingleChildRenderObjectWidget {
+  const CanvasFocusScrollBlocker({super.key, required Widget super.child});
+
+  @override
+  RenderCanvasFocusScrollBlocker createRenderObject(BuildContext context) =>
+      RenderCanvasFocusScrollBlocker();
+}
+
+class RenderCanvasFocusScrollBlocker extends RenderProxyBox {
+  @override
+  void showOnScreen({
+    RenderObject? descendant,
+    Rect? rect,
+    Duration duration = Duration.zero,
+    Curve curve = Curves.ease,
+  }) {
+    // Intentionally swallow — do NOT propagate to parent (InteractiveViewer).
+    // This stops autofocus / focus-change events from panning the canvas.
+  }
+}

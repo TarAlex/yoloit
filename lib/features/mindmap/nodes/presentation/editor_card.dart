@@ -209,7 +209,10 @@ class _EditorCardState extends State<EditorCard> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            if (!widget.immersive && props.tabs.length > 1)
+            // Tab chips and file header are only needed when the card renders
+            // its own content (web). When [body] is provided (macOS EditorNode),
+            // FileEditorPanel supplies its own tab bar and toolbar.
+            if (!widget.immersive && widget.body == null && props.tabs.length > 1)
               Container(
                 height: 28,
                 decoration: const BoxDecoration(
@@ -229,7 +232,7 @@ class _EditorCardState extends State<EditorCard> {
                   ],
                 ),
               ),
-            if (!widget.immersive)
+            if (!widget.immersive && widget.body == null)
               Container(
                 padding: const EdgeInsets.symmetric(
                   horizontal: 12,
@@ -262,8 +265,10 @@ class _EditorCardState extends State<EditorCard> {
                         color: Color(0xFF44446A),
                       ),
                     ),
-                    // Markdown preview toggle.
-                    if (_isMarkdown && !props.isImage) ...[
+                    // Markdown preview toggle — only when the card renders its
+                    // own body (web). When a [body] override is provided (macOS),
+                    // the embedded FileEditorPanel already shows its own toggle.
+                    if (_isMarkdown && !props.isImage && widget.body == null) ...[
                       const SizedBox(width: 6),
                       _HeaderButton(
                         label: _isPreview ? 'Code' : 'Preview',
