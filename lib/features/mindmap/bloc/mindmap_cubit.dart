@@ -280,6 +280,27 @@ class MindMapCubit extends Cubit<MindMapState> {
     _saveHidden(newHidden);
   }
 
+  /// Permanently remove a node from the canvas (positions, sizes, connections too).
+  /// Use this for manually-opened panels (file editors, diffs) so they don't
+  /// reappear when "Show all" is triggered.
+  void removeNode(String id) {
+    final newNodes = state.nodes.where((n) => n.id != id).toList();
+    final newPositions = {...state.positions}..remove(id);
+    final newSizes = {...state.sizes}..remove(id);
+    final newConns = state.connections
+        .where((c) => c.fromId != id && c.toId != id)
+        .toList();
+    final newHidden = {...state.hidden}..remove(id);
+    emit(state.copyWith(
+      nodes: newNodes,
+      positions: newPositions,
+      sizes: newSizes,
+      connections: newConns,
+      hidden: newHidden,
+    ));
+    _saveHidden(newHidden);
+  }
+
   /// Hide every node currently on the canvas.
   void hideAll() {
     final allIds = state.nodes.map((n) => n.id).toSet();

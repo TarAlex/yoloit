@@ -575,9 +575,19 @@ class _MindMapCanvasState extends State<_MindMapCanvas> {
                                  defaultSize: node.defaultSize,
                                  minResizeSize: NodeRegistry.minResizeSize(node),
                                  fallbackPosition: _fallbackPos(node),
-                                 onClose: () => context
-                                     .read<MindMapCubit>()
-                                     .hideNode(node.id),
+                                 onClose: () {
+                                   final cubit = context.read<MindMapCubit>();
+                                   // Manually-opened panels are preserved through
+                                   // graph rebuilds — remove them entirely so
+                                   // "Show all" does not resurface them.
+                                   if (node is FilePanelNodeData ||
+                                       node is EditorNodeData ||
+                                       node is FileDiffPanelNodeData) {
+                                     cubit.removeNode(node.id);
+                                   } else {
+                                     cubit.hideNode(node.id);
+                                   }
+                                 },
                                  child: NodeRegistry.build(node),
                                ),
                         ],
