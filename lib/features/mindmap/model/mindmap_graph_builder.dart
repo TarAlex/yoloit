@@ -264,39 +264,6 @@ buildMindMapGraph({
     }
   }
 
-  if (reviewState is ReviewLoaded && reviewState.changedFiles.isNotEmpty) {
-    final groupedByRepo = <String, List<dynamic>>{};
-    for (final file in reviewState.changedFiles) {
-      final repoPath = file.repoPath ?? 'unknown';
-      groupedByRepo.putIfAbsent(repoPath, () => []).add(file);
-    }
-    for (final entry in groupedByRepo.entries) {
-      final filesId = 'files:${entry.key}';
-      nodes.add(
-        FilesNodeData(
-          id: filesId,
-          sessionId: '',
-          repoPath: entry.key,
-          changedFiles: entry.value.cast(),
-        ),
-      );
-      final branchNode = nodes
-          .whereType<BranchNodeData>()
-          .where((branch) => branch.repoName == p.basename(entry.key))
-          .firstOrNull;
-      if (branchNode != null) {
-        conns.add(
-          MindMapConnection(
-            fromId: branchNode.id,
-            toId: filesId,
-            style: ConnectorStyle.dashed,
-            color: const Color(0x406B7898),
-          ),
-        );
-      }
-    }
-  }
-
   final repoNodes = nodes.whereType<RepoNodeData>().toList();
   for (final repo in repoNodes) {
     // Use repoPath + branch in the ID so worktrees on the same repo path but
