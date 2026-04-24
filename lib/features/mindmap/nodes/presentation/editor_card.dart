@@ -262,8 +262,10 @@ class _EditorCardState extends State<EditorCard> {
                         color: Color(0xFF44446A),
                       ),
                     ),
-                    // Markdown preview toggle.
-                    if (_isMarkdown && !props.isImage) ...[
+                    // Markdown preview toggle — only when the card renders its
+                    // own body (web). When a [body] override is provided (macOS),
+                    // the embedded FileEditorPanel already shows its own toggle.
+                    if (_isMarkdown && !props.isImage && widget.body == null) ...[
                       const SizedBox(width: 6),
                       _HeaderButton(
                         label: _isPreview ? 'Code' : 'Preview',
