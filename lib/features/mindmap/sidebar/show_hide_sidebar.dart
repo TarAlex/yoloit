@@ -11,6 +11,7 @@ import 'package:yoloit/features/review/bloc/review_state.dart';
 import 'package:yoloit/features/terminal/bloc/terminal_cubit.dart';
 import 'package:yoloit/features/terminal/bloc/terminal_state.dart';
 import 'package:yoloit/features/terminal/models/agent_session.dart';
+import 'package:yoloit/features/workspaces/bloc/workspace_cubit.dart';
 
 class ShowHideSidebarNode extends Equatable {
   const ShowHideSidebarNode({
@@ -932,8 +933,8 @@ class _SidebarTreeRow extends StatelessWidget {
         child: row,
       );
     }
-    // For workspace nodes, right-click shows a "Copy path" context menu.
-    if (isWorkspace && node.path != null && node.path!.isNotEmpty) {
+    // For workspace nodes, right-click shows context menu (copy path + delete).
+    if (isWorkspace) {
       return GestureDetector(
         behavior: HitTestBehavior.opaque,
         onSecondaryTapDown: (details) =>
@@ -952,14 +953,26 @@ class _SidebarTreeRow extends StatelessWidget {
       ),
       color: const Color(0xFF1A1E2A),
       items: [
+        if (node.path != null && node.path!.isNotEmpty)
+          PopupMenuItem<String>(
+            value: 'copy_path',
+            height: 32,
+            child: Row(
+              children: const [
+                Icon(Icons.copy_outlined, size: 14, color: Color(0xFFB0B0D0)),
+                SizedBox(width: 8),
+                Text('Copy path', style: TextStyle(fontSize: 12, color: Color(0xFFB0B0D0))),
+              ],
+            ),
+          ),
         PopupMenuItem<String>(
-          value: 'copy_path',
+          value: 'delete',
           height: 32,
           child: Row(
             children: const [
-              Icon(Icons.copy_outlined, size: 14, color: Color(0xFFB0B0D0)),
+              Icon(Icons.delete_outline, size: 14, color: Color(0xFFFF6B6B)),
               SizedBox(width: 8),
-              Text('Copy path', style: TextStyle(fontSize: 12, color: Color(0xFFB0B0D0))),
+              Text('Delete workspace', style: TextStyle(fontSize: 12, color: Color(0xFFFF6B6B))),
             ],
           ),
         ),
@@ -967,6 +980,38 @@ class _SidebarTreeRow extends StatelessWidget {
     );
     if (selected == 'copy_path') {
       await Clipboard.setData(ClipboardData(text: node.path!));
+    } else if (selected == 'delete') {
+      // node.id = 'ws:{workspaceId}'
+      final workspaceId = node.id.startsWith('ws:')
+          ? node.id.substring(3)
+          : node.id;
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (_) => AlertDialog(
+          backgroundColor: const Color(0xFF1A1E2A),
+          title: Text(
+            'Delete "${node.label}"?',
+            style: const TextStyle(fontSize: 14, color: Color(0xFFE8E8FF)),
+          ),
+          content: const Text(
+            'This will remove the workspace. Sessions and files will not be affected.',
+            style: TextStyle(fontSize: 12, color: Color(0xFF9AA3BF)),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancel', style: TextStyle(color: Color(0xFF7C6BFF))),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Delete', style: TextStyle(color: Color(0xFFFF6B6B))),
+            ),
+          ],
+        ),
+      );
+      if (confirmed == true && context.mounted) {
+        await context.read<WorkspaceCubit>().removeWorkspace(workspaceId);
+      }
     }
   }
 
